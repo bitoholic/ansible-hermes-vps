@@ -1,0 +1,123 @@
+---
+- name: Ensure wiki directory exists
+  ansible.builtin.file:
+    path: "{{ silverbullet_data_dir }}"
+    state: directory
+    owner: llm_wiki
+    group: llm_wiki
+    mode: '0775'
+    recurse: true
+
+- name: Ensure SilverBullet bin directory exists
+  ansible.builtin.file:
+    path: "{{ silverbullet_compose_dir }}/bin"
+    state: directory
+    owner: llm_wiki
+    group: llm_wiki
+    mode: '0755'
+
+- name: Bootstrap clone of the private wiki repository
+  ansible.builtin.git:
+    repo: "https://x-access-token:{{ hermes_default.github_token }}@github.com/{{ github_repo_slug }}.git"
+    dest: "{{ silverbullet_data_dir }}"
+    version: "main"
+    clone: true
+    update: false
+  failed_when: false
+  ignore_errors: "{{ ansible_check_mode }}"
+
+- name: Set correct ownership on cloned repository files
+  ansible.builtin.file:
+    path: "{{ silverbullet_data_dir }}"
+    owner: llm_wiki
+    group: llm_wiki
+    recurse: true
+
+- name: Deploy .gitattributes
+  ansible.builtin.template:
+    src: .gitattributes.j2
+    dest: "{{ silverbullet_data_dir }}/.gitattributes"
+    mode: '0644'
+    owner: llm_wiki
+    group: llm_wiki
+
+- name: Check whether git-crypt is already initialized for the wiki repo
+  ansible.builtin.stat:
+    path: "{{ silverbullet_data_dir }}/.git/git-crypt/keys/default"
+  register: backup_git_crypt_key
+
+- name: Initialize git-crypt for the wiki repository
+  ansible.builtin.command:
+    cmd: git-crypt init
+    chdir: "{{ silverbullet_data_dir }}"
+    creates: "{{ silverbullet_data_dir }}/.git/git-crypt/keys/default"
+  become: true
+  become_user: llm_wiki
+  when: not backup_git_crypt_key.stat.exists
+
+- name: Export git-crypt symmetric key for offline recovery
+  ansible.builtin.command:
+    cmd: "git-crypt export-key {{ silverbullet_compose_dir }}/git-crypt.key"
+    chdir: "{{ silverbullet_data_dir }}"
+  become: true
+  become_user: llm_wiki
+  when: not backup_git_crypt_key.stat.exists
+
+- name: Restrict permissions on the exported git-crypt key
+  ansible.builtin.file:
+    path: "{{ silverbullet_compose_dir }}/git-crypt.key"
+    owner: llm_wiki
+    group: llm_wiki
+    mode: '0600'
+  when: not backup_git_crypt_key.stat.exists
+
+- name: Fetch git-crypt key back to the control node for safekeeping
+  ansible.builtin.fetch:
+    src: "{{ silverbullet_compose_dir }}/git-crypt.key"
+    dest: "./{{ inventory_hostname }}-git-crypt.key"
+    flat: true
+  when: not backup_git_crypt_key.stat.exists
+
+- name: Deploy real-time sync script
+  ansible.builtin.template:
+    src: sync-to-dev.sh.j2
+    dest: "{{ silverbullet_compose_dir }}/bin/sync-to-dev.sh"
+    mode: '0755'
+    owner: llm_wiki
+    group: llm_wiki
+
+- name: Deploy daily PR creation script
+  ansible.builtin.template:
+    src: create-daily-pr.sh.j2
+    dest: "{{ silverbullet_compose_dir }}/bin/create-daily-pr.sh"
+    mode: '0755'
+    owner: llm_wiki
+    group: llm_wiki
+
+# - name: Deploy systemd path watcher unit
+#   ansible.builtin.template:
+#     src: llm-wiki-watcher.path.j2
+#     dest: /etc/systemd/system/llm-wiki-watcher.path
+#     mode: '0644'
+
+# - name: Deploy systemd watcher service unit
+#   ansible.builtin.template:
+#     src: llm-wiki-watcher.service.j2
+#     dest: /etc/systemd/system/llm-wiki-watcher.service
+#     mode: '0644'
+
+# - name: Enable and start llm-wiki watcher path
+#   ansible.builtin.systemd:
+#     name: llm-wiki-watcher.path
+#     enabled: true
+#     state: restarted
+#     daemon_reload: true
+#   ignore_errors: "{{ ansible_check_mode }}"
+
+- name: Schedule nightly PR creation
+  ansible.builtin.cron:
+    name: create daily backup PR
+    minute: '59'
+    hour: '23'
+    job: "{{ silverbullet_compose_dir }}/bin/create-daily-pr.sh"
+    user: "{{ admin_username }}"

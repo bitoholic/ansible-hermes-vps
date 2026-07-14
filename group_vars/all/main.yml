@@ -1,0 +1,62 @@
+---
+ansible_python_interpreter: /usr/bin/python3
+
+# Core deployment
+authelia_admin_email: "{{ lookup('env', 'AUTHELIA_ADMIN_EMAIL') | default('admin@example.com') }}"
+authelia_admin_username: "{{ lookup('env', 'AUTHELIA_ADMIN_USERNAME') | default('admin') }}"
+authelia_admin_password_hash: "{{ lookup('env', 'AUTHELIA_ADMIN_PASSWORD_HASH') }}"
+authelia_session_secret: "{{ lookup('env', 'AUTHELIA_SESSION_SECRET') }}"
+authelia_storage_key: "{{ lookup('env', 'AUTHELIA_STORAGE_KEY') }}"
+
+# Reverse proxy and web domains
+silverbullet_admin_username: "{{ lookup('env', 'SILVERBULLET_ADMIN_USERNAME') | default('admin') }}"
+silverbullet_admin_password: "{{ lookup('env', 'SILVERBULLET_ADMIN_PASSWORD') | default('P4ssw04d') }}"
+silverbullet_domain: "{{ lookup('env', 'SILVERBULLET_DOMAIN') | default('wiki.example.com') }}"
+silverbullet_bind: 127.0.0.1:3000
+silverbullet_data_dir: "{{ hermes_home }}/wiki"
+silverbullet_compose_dir: /opt/silverbullet
+silverbullet_image: ghcr.io/silverbulletmd/silverbullet:latest
+
+# Authelia paths
+authelia_config_dir: /opt/authelia
+authelia_data_dir: /opt/authelia-data
+
+# Hermes agent
+hermes_user: hermes
+hermes_home: /opt/hermes
+hermes_port: 8642
+hermes_signal_http_url: "http://signal-cli:8080"
+hermes_signal_account: "{{ lookup('env', 'SIGNAL_ACCOUNT') }}"
+hermes_signal_allowed_users: "{{ lookup('env', 'SIGNAL_ALLOWED_USERS') }}"
+
+hermes_default:
+  openrouter_api_key: "{{ lookup('env', 'OPENROUTER_API_KEY_WIKI') }}"
+  nous_portal_api_key: "{{ lookup('env', 'NOUS_PORTAL_API_KEY') }}"
+  github_token: "{{ lookup('env', 'GITHUB_TOKEN') }}"
+
+hermes_profiles:
+  - name: coder
+    openrouter_api_key: "{{ lookup('env', 'OPENROUTER_API_KEY_CODER') }}"
+    nous_portal_api_key: "{{ lookup('env', 'NOUS_PORTAL_API_KEY') }}"
+    context7_api_key: "{{ lookup('env', 'CONTEXT7_API_KEY_CODER') }}"
+  - name: intel
+    openrouter_api_key: "{{ lookup('env', 'OPENROUTER_API_KEY_INTEL') }}"
+    nous_portal_api_key: "{{ lookup('env', 'NOUS_PORTAL_API_KEY') }}"
+
+github_repo_slug: "{{ lookup('env', 'GITHUB_REPO_SLUG') | default('example/llm-wiki') }}"
+# Backup and sync
+backup_working_branch: vps-sync
+backup_github_token: "{{ lookup('env', 'GITHUB_TOKEN') }}"
+backup_commit_message: 'chore: sync wiki'
+
+# Security defaults
+common_ssh_port: 22
+common_ufw_default_incoming_policy: deny
+common_ufw_default_outgoing_policy: allow
+common_unattended_upgrades_enabled: true
+
+# Dedicated host user IDs/GIDs for least privilege container stacks
+admin_username: "{{ lookup('env', 'ADMIN_USERNAME') | default('admin') }}"
+admin_ssh_public_key: "{{ lookup('env', 'ADMIN_SSH_PUBLIC_KEY') }}"
+
+# Dedicated application system user is llm_wiki

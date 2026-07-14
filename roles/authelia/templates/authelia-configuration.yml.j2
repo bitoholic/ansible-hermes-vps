@@ -1,0 +1,53 @@
+server:
+  host: 0.0.0.0
+  port: 9091
+
+log:
+  level: info
+  format: text
+
+theme: dark
+
+authentication_backend:
+  file:
+    path: /etc/authelia/users.yml
+    search:
+      email: true
+      case_insensitive: false
+
+access_control:
+  default_policy: deny
+  rules:
+    - domain: '{{ silverbullet_domain }}'
+      policy: two_factor
+    - domain: 'auth.{{ silverbullet_domain }}'
+      policy: bypass
+
+session:
+  secret: '{{ authelia_session_secret }}'
+  name: authelia_session
+  cookies:
+    - domain: '{{ silverbullet_domain }}'
+      authelia_url: 'https://auth.{{ silverbullet_domain }}'
+      default_redirection_url: 'https://{{ silverbullet_domain }}'
+  expiration: 1h
+  inactivity: 5m
+  remember_me_duration: 1M
+
+regulation:
+  max_retries: 3
+  find_time: 2m
+  ban_time: 5m
+
+storage:
+  encryption_key: '{{ authelia_storage_key }}'
+  local:
+    path: /var/lib/authelia/db.sqlite3
+
+notifier:
+  disable_startup_check: false
+  filesystem:
+    filename: /etc/authelia/notification.txt
+
+totp:
+  issuer: 'auth.{{ silverbullet_domain }}'

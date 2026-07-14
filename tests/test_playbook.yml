@@ -1,0 +1,60 @@
+---
+- name: Local dry-run validation playbook
+  hosts: localhost
+  connection: local
+  gather_facts: true
+  vars:
+    authelia_admin_password_hash: "$argon2id$v=19$m=65536,t=3,p=4$dummyhash"
+    authelia_admin_email: admin@example.com
+    authelia_admin_username: admin
+    authelia_session_secret: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+    authelia_storage_key: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+    authelia_config_dir: /etc/authelia
+    authelia_data_dir: /var/lib/authelia
+    admin_username: admin
+    admin_ssh_public_key: "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQCtestkey"
+    hermes_port: 8642
+    hermes_signal_http_url: "http://signal-cli-api:8080"
+    hermes_signal_account: signal@example.com
+    hermes_signal_allowed_users: "user1,user2"
+    hermes_default:
+      openrouter_api_key: fake-openrouter
+      nous_portal_api_key: fake-nous
+      github_token: fake-github-token
+    hermes_profiles:
+      - name: coder
+        openrouter_api_key: fake-openrouter-coder
+        nous_portal_api_key: fake-nous-coder
+        context7_api_key: fake-context7
+      - name: intel
+        openrouter_api_key: fake-openrouter-intel
+        nous_portal_api_key: fake-nous-intel
+    silverbullet_domain: wiki.example.com
+    silverbullet_data_dir: /opt/llm-wiki
+    silverbullet_compose_dir: /opt/silverbullet
+    backup_working_branch: vps-sync
+    backup_github_token: fake-token
+  tasks:
+    - name: Preview common role tasks
+      ansible.builtin.include_role:
+        name: common
+
+    - name: Preview docker role tasks
+      ansible.builtin.include_role:
+        name: docker
+
+    - name: Preview authelia role tasks
+      ansible.builtin.include_role:
+        name: authelia
+
+    - name: Preview silverbullet role tasks
+      ansible.builtin.include_role:
+        name: silverbullet
+
+    - name: Preview hermes role tasks
+      ansible.builtin.include_role:
+        name: hermes
+
+    - name: Preview backup role tasks
+      ansible.builtin.include_role:
+        name: backup

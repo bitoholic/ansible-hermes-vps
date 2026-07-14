@@ -1,0 +1,69 @@
+terminal:
+  cwd: "~/wiki"
+
+model:
+  provider: "openrouter"
+  default: "deepseek/deepseek-v4-flash"
+
+provider:
+  name: "openrouter"
+  params:
+    zdr: true
+
+openrouter:
+  zdr: true
+
+skills:
+  auto_load:
+    - "research/llm-wiki"
+
+web:
+  backend: "nous"
+  use_gateway: true
+
+browser:
+  backend: "nous"
+  use_gateway: true
+
+provider_routing:
+  sort: "price"
+  data_collection: "deny"
+
+compression:
+  enabled: true
+  threshold: 0.50
+
+timezone: "Europe/London"
+
+security:
+  tirith_enabled: true
+
+delegation:
+  max_concurrent_children: 3
+
+display:
+  runtime_footer:
+    fields: ["model", "context_pct", "cwd"]
+
+quick_commands:
+  status:
+    type: "exec"
+    command: "systemctl status hermes-agent"
+  disk:
+    type: "exec"
+    command: "df -h /"
+  restart:
+    type: "alias"
+    target: "/gateway restart"
+
+stt:
+  enabled: true
+  provider: "local"
+  local:
+    model: "base"
+
+tts:
+  provider: "neutts"
+  neutts:
+    model: "neuphonic/neutts-air-q4-gguf"
+    device: "cpu"

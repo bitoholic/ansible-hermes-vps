@@ -1,0 +1,49 @@
+services:
+  caddy:
+    image: caddy:2.8.4
+    container_name: caddy
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - "{{ silverbullet_compose_dir }}/Caddyfile:/etc/caddy/Caddyfile:ro"
+      - "caddy_data:/data"
+      - "caddy_config:/config"
+    depends_on:
+      - authelia
+    networks:
+      - public
+
+  authelia:
+    image: authelia/authelia:latest
+    container_name: authelia
+    environment:
+      - PUID={{host_uid}}
+      - PGID={{host_gid}}
+    volumes:
+      - "{{ authelia_config_dir }}:/config:ro"
+      - "{{ authelia_data_dir }}:/var/lib/authelia"
+    networks:
+      - public
+
+  silverbullet:
+    image: "{{ silverbullet_image }}"
+    container_name: silverbullet
+    user: "{{host_uid}}:{{host_gid}}"
+    environment:
+      - SB_USER={{ silverbullet_admin_username }}
+      - SB_PASSWORD={{ silverbullet_admin_password }}
+    ports:
+      - "127.0.0.1:3000:3000"
+    volumes:
+      - "{{ silverbullet_data_dir }}:/data"
+    networks:
+      - public
+
+networks:
+  public:
+    driver: bridge
+
+volumes:
+  caddy_data:
+  caddy_config:

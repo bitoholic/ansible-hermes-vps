@@ -1,0 +1,45 @@
+services:
+  signal-cli:
+    image: registry.gitlab.com/packaging/signal-cli/signal-cli-native:latest
+    container_name: signal-cli
+    restart: unless-stopped
+    user: "{{host_uid}}:{{host_gid}}"
+    volumes:
+      - "/opt/hermes/signal-data:/var/lib/signal-cli"
+    tmpfs:
+      - /tmp:exec
+    command:
+      - "--config"
+      - "/var/lib/signal-cli"
+      - "-u"
+      - "{{ hermes_signal_account }}"
+      - "daemon"
+      - "--http"
+      - "0.0.0.0:8080"
+    networks:
+      - hermes_net
+
+  hermes-agent:
+    #image: ghcr.io/nousresearch/hermes-agent:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: "hermes-agent"
+    restart: unless-stopped
+    command: ["hermes", "gateway"]
+    depends_on:
+      - signal-cli
+    ports:
+      - "127.0.0.1:{{ hermes_port }}:8642"
+    environment:
+      HERMES_UID: "{{host_uid}}"
+      HERMES_GID: "{{host_gid}}"
+      GITHUB_TOKEN: "{{hermes_default.github_token}}"
+    volumes:
+      - "{{ hermes_home }}:/opt/data"
+    networks:
+      - hermes_net
+
+networks:
+  hermes_net:
+    driver: bridge

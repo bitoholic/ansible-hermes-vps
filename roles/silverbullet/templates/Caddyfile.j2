@@ -1,0 +1,20 @@
+{
+  auto_https disable_redirects
+}
+
+{{ silverbullet_domain }} {
+  import mfa_auth
+  reverse_proxy silverbullet:3000
+}
+
+auth.{{ silverbullet_domain }} {
+  reverse_proxy authelia:9091
+}
+
+snippet mfa_auth {
+  forward_auth authelia:9091 {
+    uri /api/verify?rd=https://{{ silverbullet_domain }}
+    copy_headers X-Original-URL X-Forwarded-Method X-Forwarded-Proto X-Forwarded-Host X-Forwarded-Uri
+    trust_proxies private_ranges
+  }
+}

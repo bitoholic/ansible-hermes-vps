@@ -1,0 +1,29 @@
+---
+- name: Assert admin username is provided
+  ansible.builtin.assert:
+    that:
+      - admin_username is defined
+      - admin_username | string | length > 0
+    fail_msg: "admin_username must be defined before creating host users."
+
+- name: Create llm_wiki system group
+  ansible.builtin.group:
+    name: llm_wiki
+    state: present
+    system: true
+
+- name: Create llm_wiki system user
+  ansible.builtin.user:
+    name: llm_wiki
+    group: llm_wiki
+    system: true
+    create_home: false
+    shell: /usr/sbin/nologin
+    state: present
+
+- name: Add admin user to llm_wiki group
+  ansible.builtin.user:
+    name: "{{ admin_username }}"
+    groups: llm_wiki
+    append: true
+    state: present

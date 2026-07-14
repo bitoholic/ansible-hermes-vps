@@ -1,0 +1,173 @@
+---
+- name: Validate Hermes role prerequisites
+  ansible.builtin.assert:
+    that:
+      - ansible_os_family == 'Debian'
+      - admin_username is defined
+      - admin_username | string | length > 0
+      - hermes_port is defined
+      - hermes_port | int > 0
+      - hermes_default.openrouter_api_key | default('') | length > 0
+      - hermes_signal_http_url | default('') | length > 0
+      - hermes_signal_account | default('') | length > 0
+      - hermes_signal_allowed_users | default('') | length > 0
+    fail_msg: >-
+      Hermes role requires Debian/Ubuntu hosts, admin_username, hermes_port,
+      hermes_default.openrouter_api_key, hermes_signal_http_url, hermes_signal_account,
+      and hermes_signal_allowed_users.
+
+- name: Lookup llm_wiki passwd entry
+  ansible.builtin.getent:
+    database: passwd
+    key: llm_wiki
+  register: hermes_llm_user
+  failed_when: false
+  changed_when: false
+
+- name: Set host_uid and host_gid facts from llm_wiki
+  ansible.builtin.set_fact:
+    host_uid: "{{ hermes_llm_user.ansible_facts.getent_passwd.llm_wiki[1] }}"
+    host_gid: "{{ hermes_llm_user.ansible_facts.getent_passwd.llm_wiki[2] }}"
+
+- name: Ensure persistent Hermes data root exists for admin user
+  ansible.builtin.file:
+    path: "{{ hermes_home }}"
+    state: directory
+    owner: llm_wiki
+    group: llm_wiki
+    mode: '0775'
+    recurse: true
+
+- name: Ensure Hermes Signal data directory exists
+  ansible.builtin.file:
+    path: "{{ hermes_home }}/signal-data"
+    state: directory
+    owner: llm_wiki
+    group: llm_wiki
+    mode: '0775'
+
+- name: Ensure Hermes subagent profile directories exist
+  ansible.builtin.file:
+    path: "{{ hermes_home }}/profiles/{{ item.name }}"
+    state: directory
+    owner: llm_wiki
+    group: llm_wiki
+    mode: '0770'
+  loop: "{{ hermes_profiles }}"
+
+- name: Deploy default Hermes profile config.yaml files
+  ansible.builtin.template:
+    src: "profiles/{{ item.name }}/config.yaml.j2"
+    dest: "{{ hermes_home }}/profiles/{{ item.name }}/config.yaml"
+    owner: llm_wiki
+    group: llm_wiki
+    mode: '0640'
+    force: true
+  loop: "{{ hermes_profiles }}"
+
+- name: Ensure Hermes profile SOUL.md files exist
+  ansible.builtin.template:
+    src: "profiles/{{ item.name }}/SOUL.md.j2"
+    dest: "{{ hermes_home }}/profiles/{{ item.name }}/SOUL.md"
+    owner: llm_wiki
+    group: llm_wiki
+    mode: '0660'
+    force: false
+  loop: "{{ hermes_profiles }}"
+
+- name: Deploy Hermes profile env files
+  ansible.builtin.copy:
+    dest: "{{ hermes_home }}/profiles/{{ item.name }}/.env"
+    content: |
+      OPENROUTER_API_KEY="{{ item.openrouter_api_key }}"
+      NOUS_API_KEY="{{ item.nous_portal_api_key }}"
+      CONTEXT7_API_KEY="{{ item.context7_api_key | default('', true) }}"
+      GITHUB_TOKEN="{{ hermes_default.github_token | default('', true) }}"
+      GIT_AUTHOR_NAME="{{ lookup('env', 'GIT_USERNAME') | default('', true) }}"
+      GIT_AUTHOR_EMAIL="{{ lookup('env', 'GIT_EMAIL') | default('', true) }}"
+      GIT_COMMITTER_NAME="{{ lookup('env', 'GIT_USERNAME') | default('', true) }}"
+      GIT_COMMITTER_EMAIL="{{ lookup('env', 'GIT_EMAIL') | default('', true) }}"
+      HERMES_WRITE_SAFE_ROOT="~/projects"
+    owner: llm_wiki
+    group: llm_wiki
+    mode: '0640'
+  loop: "{{ hermes_profiles }}"
+
+- name: Deploy Hermes profile skill files
+  ansible.builtin.copy:
+    dest: "{{ hermes_home }}/profiles/{{ item.name }}/skills/"
+    src: "profiles/{{ item.name }}/skills/"
+    owner: llm_wiki
+    group: llm_wiki
+  loop: "{{ hermes_profiles }}"
+
+- name: Deploy Hermes config.yaml file
+  ansible.builtin.template:
+    src: "config.yaml.j2"
+    dest: "{{ hermes_home }}/config.yaml"
+    owner: llm_wiki
+    group: llm_wiki
+    mode: '0640'
+    force: true
+
+- name: Ensure Hermes SOUL.md file exists
+  ansible.builtin.template:
+    src: "SOUL.md.j2"
+    dest: "{{ hermes_home }}/SOUL.md"
+    owner: llm_wiki
+    group: llm_wiki
+    mode: '0660'
+    force: false
+
+- name: Deploy Hermes env file
+  ansible.builtin.copy:
+    dest: "{{ hermes_home }}/.env"
+    content: |
+      OPENROUTER_API_KEY="{{ hermes_default.openrouter_api_key }}"
+      NOUS_API_KEY="{{ hermes_default.nous_portal_api_key }}"
+      GITHUB_TOKEN="{{ hermes_default.github_token }}"
+      SIGNAL_HTTP_URL="{{ hermes_signal_http_url }}"
+      SIGNAL_ACCOUNT="{{ hermes_signal_account }}"
+      SIGNAL_ALLOWED_USERS="{{ hermes_signal_allowed_users }}"
+      SIGNAL_HOME_CHANNEL="{{ hermes_signal_allowed_users }}"
+      GIT_AUTHOR_NAME="{{ lookup('env', 'GIT_USERNAME') | default('', true) }}"
+      GIT_AUTHOR_EMAIL="{{ lookup('env', 'GIT_EMAIL') | default('', true) }}"
+      GIT_COMMITTER_NAME="{{ lookup('env', 'GIT_USERNAME') | default('', true) }}"
+      GIT_COMMITTER_EMAIL="{{ lookup('env', 'GIT_EMAIL') | default('', true) }}"
+    owner: llm_wiki
+    group: llm_wiki
+    mode: '0640'
+
+- name: Ensure hermes project home ownership for llm_wiki
+  ansible.builtin.file:
+    path: "{{ silverbullet_data_dir }}"
+    state: directory
+    owner: llm_wiki
+    group: llm_wiki
+    mode: '0770'
+
+- name: Deploy Hermes Dockerfile
+  ansible.builtin.copy:
+    src: Dockerfile
+    dest: "{{ hermes_home }}/Dockerfile"
+    owner: "{{ admin_username }}"
+    group: llm_wiki
+    mode: '0640'
+
+- name: Deploy Hermes docker-compose file
+  ansible.builtin.template:
+    src: docker-compose.yml.j2
+    dest: "{{ hermes_home }}/docker-compose.yml"
+    owner: "{{ admin_username }}"
+    group: llm_wiki
+    mode: '0640'
+
+- name: Start Hermes container stack
+  community.docker.docker_compose_v2:
+    project_src: "{{ hermes_home }}"
+    project_name: "hermes-agent"
+    files:
+      - docker-compose.yml
+    state: present
+    pull: missing
+  ignore_errors: "{{ ansible_check_mode }}"

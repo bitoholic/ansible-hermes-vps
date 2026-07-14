@@ -1,0 +1,41 @@
+---
+- name: Assert admin SSH hardening variables are present
+  ansible.builtin.assert:
+    that:
+      - admin_username is defined
+      - admin_username | string | length > 0
+      - admin_ssh_public_key is defined
+      - admin_ssh_public_key | string | length > 0
+    fail_msg: "admin_username and admin_ssh_public_key must be set before running ssh_hardening."
+
+- name: Ensure openssh client is installed for local SSH authentication testing
+  ansible.builtin.apt:
+    name: openssh-client
+    state: present
+    update_cache: false
+  when: ansible_os_family == 'Debian'
+
+
+- name: Ensure SSH config include directory exists
+  ansible.builtin.file:
+    path: /etc/ssh/sshd_config.d
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Deploy hardened SSH daemon configuration
+  ansible.builtin.template:
+    src: 99-hardened.conf.j2
+    dest: /etc/ssh/sshd_config.d/99-hardened.conf
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Restart ssh
+
+- name: Validate SSH daemon configuration syntax
+  ansible.builtin.command:
+    cmd: sshd -t -f /etc/ssh/sshd_config
+  register: ssh_hardening_sshd_syntax_check
+  changed_when: false
+  failed_when: ssh_hardening_sshd_syntax_check.rc != 0
