@@ -1,0 +1,68 @@
+---
+- name: Assert mandatory secrets are present
+  ansible.builtin.assert:
+    that:
+      - authelia_admin_password_hash | default('') | string | length > 0
+    fail_msg: Provide the required secrets via --extra-vars or inventory group_vars before running the playbook
+
+- name: Install common hardening packages
+  ansible.builtin.apt:
+    name:
+      - ca-certificates
+      - curl
+      - gnupg
+      - lsb-release
+      - ufw
+      - unattended-upgrades
+      - apt-transport-https
+    state: present
+    update_cache: true
+
+- name: Configure unattended-upgrades
+  ansible.builtin.copy:
+    dest: /etc/apt/apt.conf.d/50unattended-upgrades
+    mode: '0644'
+    content: |
+      Unattended-Upgrade::Allowed-Origins {
+          "${distro_id}:${distro_codename}-security";
+      };
+      Unattended-Upgrade::Remove-Unused-Dependencies "true";
+      Unattended-Upgrade::Automatic-Reboot "false";
+
+- name: Mount /run/shm with noexec,nosuid
+  ansible.posix.mount:
+    path: /run/shm
+    src: tmpfs
+    fstype: tmpfs
+    opts: defaults,noexec,nosuid
+    state: mounted
+    boot: true
+
+- name: Determine active SSH port
+  ansible.builtin.set_fact:
+    common_ssh_port: "{{ ansible_port | default(common_ssh_port | default(22)) }}"
+
+- name: Rate-limit SSH, HTTP, and HTTPS traffic
+  community.general.ufw:
+    rule: limit
+    port: "{{ item }}"
+    proto: tcp
+    comment: "{{ 'Limit SSH attempts' if item == common_ssh_port else 'Rate-limit web traffic' }}"
+  loop:
+    - "{{ common_ssh_port }}"
+    - 80
+    - 443
+
+- name: Set UFW default incoming policy
+  community.general.ufw:
+    direction: incoming
+    policy: "{{ common_ufw_default_incoming_policy | lower }}"  # noqa: args[module]
+
+- name: Set UFW default outgoing policy
+  community.general.ufw:
+    direction: outgoing
+    policy: "{{ common_ufw_default_outgoing_policy | lower }}"  # noqa: args[module]
+
+- name: Enable UFW
+  community.general.ufw:
+    state: enabled

@@ -1,0 +1,66 @@
+---
+- name: Create SilverBullet deployment directory
+  ansible.builtin.file:
+    path: "{{ silverbullet_compose_dir }}"
+    state: directory
+    owner: llm_wiki
+    group: llm_wiki
+    mode: '0775'
+
+- name: Create SilverBullet data directory
+  ansible.builtin.file:
+    path: "{{ silverbullet_data_dir }}"
+    state: directory
+    owner: llm_wiki
+    group: llm_wiki
+    mode: '0775'
+
+- name: Lookup llm_wiki passwd entry
+  ansible.builtin.getent:
+    database: passwd
+    key: llm_wiki
+  register: silverbullet_llm_user
+  failed_when: false
+  changed_when: false
+
+- name: Set host_uid and host_gid facts from llm_wiki
+  ansible.builtin.set_fact:
+    host_uid: "{{ silverbullet_llm_user.entries[0].pw_uid | default(1000) }}"  # noqa: var-naming[no-role-prefix]
+    host_gid: "{{ silverbullet_llm_user.entries[0].pw_gid | default(1000) }}"  # noqa: var-naming[no-role-prefix]
+
+- name: Ensure SilverBullet raw data directory exists
+  ansible.builtin.file:
+    path: "{{ silverbullet_data_dir }}/.raw"
+    state: directory
+    owner: llm_wiki
+    group: llm_wiki
+    mode: '0775'
+
+- name: Write SilverBullet .env with APP UID/GID
+  ansible.builtin.copy:
+    dest: "{{ silverbullet_compose_dir }}/.env"
+    content: |
+      APP_UID={{ host_uid }}
+      APP_GID={{ host_gid }}
+    owner: llm_wiki
+    group: llm_wiki
+    mode: '0644'
+
+- name: Deploy Caddyfile
+  ansible.builtin.template:
+    src: Caddyfile.j2
+    dest: "{{ silverbullet_compose_dir }}/Caddyfile"
+    mode: '0644'
+
+- name: Deploy docker-compose configuration
+  ansible.builtin.template:
+    src: docker-compose.yml.j2
+    dest: "{{ silverbullet_compose_dir }}/docker-compose.yml"
+    mode: '0644'
+
+- name: Start SilverBullet stack
+  community.docker.docker_compose_v2:
+    project_src: "{{ silverbullet_compose_dir }}"
+    state: present
+    pull: missing
+  ignore_errors: "{{ ansible_check_mode }}"

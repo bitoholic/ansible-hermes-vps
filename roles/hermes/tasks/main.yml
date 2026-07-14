@@ -1,0 +1,76 @@
+---
+- name: Validate Hermes role prerequisites
+  ansible.builtin.assert:
+    that:
+      - ansible_os_family == 'Debian'
+      - admin_username is defined
+      - admin_username | string | length > 0
+      - hermes_port is defined
+      - hermes_port | int > 0
+      - hermes_provider_api_key | default('') | length > 0
+      - hermes_telegram_bot_token | default('') | length > 0
+    fail_msg: >-
+      Hermes role requires Debian/Ubuntu hosts, admin_username, hermes_port,
+      hermes_provider_api_key, and hermes_telegram_bot_token.
+
+- name: Lookup llm_wiki passwd entry
+  ansible.builtin.getent:
+    database: passwd
+    key: llm_wiki
+  register: hermes_llm_user
+  failed_when: false
+  changed_when: false
+
+- name: Set host_uid and host_gid facts from llm_wiki
+  ansible.builtin.set_fact:
+    host_uid: "{{ hermes_llm_user.entries[0].pw_uid | default(1000) }}"  # noqa: var-naming[no-role-prefix]
+    host_gid: "{{ hermes_llm_user.entries[0].pw_gid | default(1000) }}"  # noqa: var-naming[no-role-prefix]
+
+- name: Ensure persistent Hermes data root exists for admin user
+  ansible.builtin.file:
+    path: "{{ hermes_home }}"
+    state: directory
+    owner: llm_wiki
+    group: llm_wiki
+    mode: '0775'
+    recurse: true
+
+- name: Deploy Hermes env file
+  ansible.builtin.copy:
+    dest: "{{ hermes_home }}/.env"
+    content: |
+      APP_UID={{ host_uid }}
+      APP_GID={{ host_gid }}
+      OPENROUTER_API_KEY="{{ hermes_provider_api_key }}"
+      TELEGRAM_BOT_TOKEN="{{ hermes_telegram_bot_token }}"
+      TELEGRAM_ALLOWED_USERS=8915299822
+      TELEGRAM_HOME_CHANNEL=8915299822
+    owner: "{{ admin_username }}"
+    group: "{{ admin_username }}"
+    mode: '0600'
+
+- name: Ensure hermes project home ownership for llm_wiki
+  ansible.builtin.file:
+    path: "{{ silverbullet_data_dir }}"
+    state: directory
+    owner: llm_wiki
+    group: llm_wiki
+    mode: '0775'
+
+- name: Deploy Hermes docker-compose file
+  ansible.builtin.template:
+    src: docker-compose.yml.j2
+    dest: "{{ hermes_home }}/docker-compose.yml"
+    owner: "{{ admin_username }}"
+    group: "{{ admin_username }}"
+    mode: '0644'
+
+- name: Start Hermes container stack
+  community.docker.docker_compose_v2:
+    project_src: "{{ hermes_home }}"
+    project_name: "hermes-agent"
+    files:
+      - docker-compose.yml
+    state: present
+    pull: missing
+  ignore_errors: "{{ ansible_check_mode }}"

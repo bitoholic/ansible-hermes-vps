@@ -1,0 +1,78 @@
+---
+- name: Install backup tooling
+  ansible.builtin.apt:
+    name:
+      - git
+      - gnupg
+      - curl
+    state: present
+    update_cache: true
+
+- name: Ensure wiki directory exists
+  ansible.builtin.file:
+    path: "{{ silverbullet_data_dir }}"
+    state: directory
+    owner: llm_wiki
+    group: llm_wiki
+    mode: '0775'
+    recurse: true
+
+- name: Deploy .gitattributes
+  ansible.builtin.template:
+    src: .gitattributes.j2
+    dest: "{{ silverbullet_data_dir }}/.gitattributes"
+    mode: '0644'
+    owner: llm_wiki
+    group: llm_wiki
+
+- name: Ensure SilverBullet bin directory exists
+  ansible.builtin.file:
+    path: "{{ silverbullet_compose_dir }}/bin"
+    state: directory
+    owner: llm_wiki
+    group: llm_wiki
+    mode: '0755'
+
+- name: Deploy real-time sync script
+  ansible.builtin.template:
+    src: sync-to-dev.sh.j2
+    dest: "{{ silverbullet_compose_dir }}/bin/sync-to-dev.sh"
+    mode: '0755'
+    owner: llm_wiki
+    group: llm_wiki
+
+- name: Deploy daily PR creation script
+  ansible.builtin.template:
+    src: create-daily-pr.sh.j2
+    dest: "{{ silverbullet_compose_dir }}/bin/create-daily-pr.sh"
+    mode: '0755'
+    owner: llm_wiki
+    group: llm_wiki
+
+- name: Deploy systemd path watcher unit
+  ansible.builtin.template:
+    src: llm-wiki-watcher.path.j2
+    dest: /etc/systemd/system/llm-wiki-watcher.path
+    mode: '0644'
+
+- name: Deploy systemd watcher service unit
+  ansible.builtin.template:
+    src: llm-wiki-watcher.service.j2
+    dest: /etc/systemd/system/llm-wiki-watcher.service
+    mode: '0644'
+
+- name: Enable and start llm-wiki watcher path
+  ansible.builtin.systemd:
+    name: llm-wiki-watcher.path
+    enabled: true
+    state: restarted
+    daemon_reload: true
+  ignore_errors: "{{ ansible_check_mode }}"
+
+- name: Schedule nightly PR creation
+  ansible.builtin.cron:
+    name: create daily backup PR
+    minute: '59'
+    hour: '23'
+    job: "{{ silverbullet_compose_dir }}/bin/create-daily-pr.sh"
+    user: "{{ admin_username }}"

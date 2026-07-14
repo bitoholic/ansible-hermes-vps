@@ -1,0 +1,29 @@
+---
+- name: Ensure Authelia configuration and data directories exist
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: llm_wiki
+    group: llm_wiki
+    mode: '0750'
+  loop:
+    - "{{ authelia_config_dir }}"
+    - "{{ authelia_data_dir }}"
+
+- name: Set default secrets if omitted
+  ansible.builtin.set_fact:
+    authelia_jwt_secret: "{{ authelia_jwt_secret | default(lookup('ansible.builtin.password', '/dev/null', length=64, chars='0123456789abcdef')) }}"
+    authelia_session_secret: "{{ authelia_session_secret | default(lookup('ansible.builtin.password', '/dev/null', length=64, chars='0123456789abcdef')) }}"
+    authelia_storage_key: "{{ authelia_storage_key | default(lookup('ansible.builtin.password', '/dev/null', length=64, chars='0123456789abcdef')) }}"
+
+- name: Render Authelia configuration
+  ansible.builtin.template:
+    src: authelia-configuration.yml.j2
+    dest: "{{ authelia_config_dir }}/configuration.yml"
+    mode: '0600'
+
+- name: Render Authelia users database
+  ansible.builtin.template:
+    src: authelia-users.yml.j2
+    dest: "{{ authelia_config_dir }}/users.yml"
+    mode: '0600'

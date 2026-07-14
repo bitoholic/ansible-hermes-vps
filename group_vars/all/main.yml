@@ -1,0 +1,47 @@
+---
+ansible_python_interpreter: /usr/bin/python3
+
+# Core deployment
+authelia_admin_email: "{{ lookup('env', 'AUTHELIA_ADMIN_EMAIL') | default('<secret-acme-email>') }}"
+authelia_admin_username: "{{ lookup('env', 'AUTHELIA_ADMIN_USERNAME') | default('admin') }}"
+authelia_admin_password_hash: "{{ lookup('env', 'AUTHELIA_ADMIN_PASSWORD_HASH') | default('') }}"
+authelia_jwt_secret: "{{ lookup('env', 'AUTHELIA_JWT_SECRET') | default('') }}"
+authelia_issuer_private_key: "{{ lookup('env', 'AUTHELIA_ISSUER_PRIVATE_KEY') | default('') }}"
+authelia_session_secret: "{{ lookup('env', 'AUTHELIA_SESSION_SECRET') | default('') }}"
+authelia_storage_key: "{{ lookup('env', 'AUTHELIA_STORAGE_KEY') | default('') }}"
+
+# Reverse proxy and web domains
+silverbullet_domain: "{{ lookup('env', 'SILVERBULLET_DOMAIN') | default('wiki.<secret-silverbullet-domain>') }}"
+silverbullet_bind: 127.0.0.1:3000
+silverbullet_data_dir: /opt/llm-wiki
+silverbullet_compose_dir: /opt/silverbullet
+silverbullet_image: ghcr.io/silverbulletmd/silverbullet:latest
+
+# Authelia paths
+authelia_config_dir: /etc/authelia
+authelia_data_dir: /var/lib/authelia
+
+# Hermes agent
+hermes_user: hermes
+hermes_home: /opt/hermes
+hermes_port: 8642
+hermes_provider_api_key: "{{ lookup('env', 'HERMES_PROVIDER_API_KEY') | default('') }}"
+hermes_telegram_bot_token: "{{ lookup('env', 'TELEGRAM_BOT_TOKEN') | default('') }}"
+
+# Backup and sync
+backup_repo_url: git@github.com:<secret-github-repo-slug>.git
+backup_working_branch: vps-sync
+backup_github_token: "{{ lookup('env', 'GITHUB_TOKEN') | default('') }}"
+backup_commit_message: 'chore: sync wiki'
+
+# Security defaults
+common_ssh_port: 22
+common_ufw_default_incoming_policy: deny
+common_ufw_default_outgoing_policy: allow
+common_unattended_upgrades_enabled: true
+
+# Dedicated host user IDs/GIDs for least privilege container stacks
+admin_username: "{{ lookup('env', 'ADMIN_USERNAME') | default('admin') }}"
+admin_ssh_public_key: "{{ lookup('env', 'ADMIN_SSH_PUBLIC_KEY') | default('') }}"
+
+# Dedicated application system user is llm_wiki

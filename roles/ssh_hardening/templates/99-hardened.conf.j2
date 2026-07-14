@@ -1,0 +1,8 @@
+# Hardened SSH daemon configuration
+PasswordAuthentication {{ ssh_password_authentication | default('no') }}
+PubkeyAuthentication {{ ssh_pubkey_authentication | default('yes') }}
+PermitRootLogin {{ ssh_permit_root_login | default('no') }}
+ChallengeResponseAuthentication {{ ssh_challenge_response_authentication | default('no') }}
+KbdInteractiveAuthentication {{ ssh_kbd_interactive_authentication | default('no') }}
+Port {{ ssh_port | default(22) }}
+AllowUsers {{ ssh_allow_users | default(admin_username) }}

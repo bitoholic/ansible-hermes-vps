@@ -1,0 +1,16 @@
+services:
+  hermes-agent:
+    image: ghcr.io/nousresearch/hermes-agent:latest
+    container_name: "hermes-agent"
+    restart: unless-stopped
+    user: "${APP_UID}:${APP_GID}"
+    ports:
+      - "{{ hermes_port }}:8642"
+    environment:
+      HERMES_UID: "${APP_UID}"
+      HERMES_GID: "${APP_GID}"
+    volumes:
+      - "{{ hermes_home }}:/opt/data"
+      - "{{ silverbullet_data_dir }}:/workspace"
+    env_file:
+      - "{{ hermes_home }}/.env"
