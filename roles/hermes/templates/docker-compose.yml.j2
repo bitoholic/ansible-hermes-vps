@@ -41,7 +41,10 @@ services:
       - "{{ hermes_home }}:/opt/data"
     networks:
       - hermes_net
+      - proxy_net
 
 networks:
   hermes_net:
     driver: bridge
+  proxy_net:
+    external: true

@@ -13,6 +13,7 @@ services:
       - authelia
     networks:
       - public
+      - proxy_net
 
   authelia:
     image: authelia/authelia:latest
@@ -43,6 +44,8 @@ services:
 networks:
   public:
     driver: bridge
+  proxy_net:
+    external: true
 
 volumes:
   caddy_data:

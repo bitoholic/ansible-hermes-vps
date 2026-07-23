@@ -20,6 +20,8 @@ authentication_backend:
 access_control:
   default_policy: deny
   rules:
+    - domain: dash.'{{ silverbullet_domain }}'
+      policy: two_factor
     - domain: wiki.'{{ silverbullet_domain }}'
       policy: two_factor
     - domain: 'auth.{{ silverbullet_domain }}'

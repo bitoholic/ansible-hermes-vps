@@ -33,6 +33,8 @@ hermes_default:
   nous_portal_api_key: "{{ lookup('env', 'NOUS_PORTAL_API_KEY') }}"
   github_token: "{{ lookup('env', 'GITHUB_TOKEN') }}"
   resend_api_key: "{{ lookup('env', 'RESEND_API_KEY') }}"
+  context7_api_key: "{{ lookup('env', 'CONTEXT7_API_KEY_CODER') }}"
+  dashboard_admin_password_hash: "{{ lookup('env', 'DASHBOARD_ADMIN_PASSWORD_HASH') }}"
 
 hermes_profiles:
   - name: coder

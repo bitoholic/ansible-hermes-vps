@@ -18,6 +18,13 @@ wiki.{{ silverbullet_domain }} {
   reverse_proxy silverbullet:3000
 }
 
+dash.{{ silverbullet_domain }} {
+  log
+  tls internal
+  import mfa_auth
+  reverse_proxy hermes-agent:9119
+}
+
 auth.{{ silverbullet_domain }} {
   log
   tls internal
