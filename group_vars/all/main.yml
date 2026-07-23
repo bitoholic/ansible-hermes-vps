@@ -33,6 +33,7 @@ hermes_default:
   openrouter_api_key: "{{ lookup('env', 'OPENROUTER_API_KEY_WIKI') }}"
   nous_portal_api_key: "{{ lookup('env', 'NOUS_PORTAL_API_KEY') }}"
   github_token: "{{ lookup('env', 'GITHUB_TOKEN') }}"
+  resend_api_key: "{{ lookup('env', 'RESEND_API_KEY') }}"
 
 hermes_profiles:
   - name: coder

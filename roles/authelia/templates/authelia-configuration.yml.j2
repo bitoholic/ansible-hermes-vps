@@ -9,8 +9,10 @@ log:
 theme: dark
 
 authentication_backend:
+  password_reset:
+    disable: true
   file:
-    path: /etc/authelia/users.yml
+    path: /config/users.yml
     search:
       email: true
       case_insensitive: false
@@ -47,7 +49,7 @@ storage:
 notifier:
   disable_startup_check: false
   filesystem:
-    filename: /etc/authelia/notification.txt
+    filename: /var/lib/authelia/notification.txt
 
 totp:
   issuer: 'auth.{{ silverbullet_domain }}'

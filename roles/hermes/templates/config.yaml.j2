@@ -1,69 +1,68 @@
-terminal:
-  cwd: "~/wiki"
-
 model:
-  provider: "openrouter"
-  default: "deepseek/deepseek-v4-flash"
-
-provider:
-  name: "openrouter"
-  params:
-    zdr: true
-
-openrouter:
-  zdr: true
-
-skills:
-  auto_load:
-    - "research/llm-wiki"
-
+  provider: nous
+  default: deepseek/deepseek-v4-flash
+terminal:
+  cwd: /opt/data/wiki
 web:
-  backend: "nous"
+  backend: nous
   use_gateway: true
-
 browser:
-  backend: "nous"
+  backend: nous
   use_gateway: true
-
-provider_routing:
-  sort: "price"
-  data_collection: "deny"
-
 compression:
   enabled: true
-  threshold: 0.50
-
-timezone: "Europe/London"
-
-security:
-  tirith_enabled: true
-
-delegation:
-  max_concurrent_children: 3
-
+  threshold: 0.5
 display:
   runtime_footer:
-    fields: ["model", "context_pct", "cwd"]
-
-quick_commands:
-  status:
-    type: "exec"
-    command: "systemctl status hermes-agent"
-  disk:
-    type: "exec"
-    command: "df -h /"
-  restart:
-    type: "alias"
-    target: "/gateway restart"
-
+    fields:
+      - model
+      - context_pct
+      - cwd
+tts:
+  provider: neutts
+  neutts:
+    model: neuphonic/neutts-air-q4-gguf
+    device: cpu
 stt:
   enabled: true
-  provider: "local"
+  provider: local
   local:
-    model: "base"
-
-tts:
-  provider: "neutts"
-  neutts:
-    model: "neuphonic/neutts-air-q4-gguf"
-    device: "cpu"
+    model: base
+delegation:
+  max_concurrent_children: 3
+  provider: nous
+  model: qwen/qwen3-coder-flash
+mcp_servers:
+  context7:
+    command: npx
+    args:
+      - -y
+      - "@upstash/context7-mcp"
+    env:
+      CONTEXT7_API_KEY: ctx7sk-ed3645d4-e247-4110-a11a-fdb85c3a5db1
+  github:
+    command: npx
+    args:
+      - -y
+      - "@modelcontextprotocol/server-github"
+    env:
+      GITHUB_PERSONAL_ACCESS_TOKEN: "«redacted:github_pat_…»"
+  playwright:
+    command: npx
+    args:
+      - -y
+      - "@modelcontextprotocol/server-playwright"
+skills:
+  auto_load:
+    - research/llm-wiki
+timezone: Europe/London
+security:
+  tirith_enabled: true
+onboarding:
+  seen:
+    busy_input_prompt: true
+image_gen:
+  use_gateway: true
+video_gen:
+  provider: fal
+  use_gateway: true

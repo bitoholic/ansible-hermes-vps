@@ -9,9 +9,10 @@ RUN apt-get update && apt-get install -y \
     libsndfile1 \
     espeak-ng \
     python3-pip \
-    gh \
     default-jdk \
     'android-sdk*' \
+    gh \
+    git-crypt \
     && rm -rf /var/lib/apt/lists/* \
     && pip install --no-cache-dir --ignore-installed "hermes-agent[voice]"
 

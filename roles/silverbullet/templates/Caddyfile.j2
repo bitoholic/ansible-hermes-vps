@@ -1,5 +1,15 @@
 {
   auto_https disable_redirects
+  servers {
+    trusted_proxies static private_ranges
+  }
+}
+
+(mfa_auth) {
+  forward_auth authelia:9091 {
+    uri /api/verify?rd=https://auth.{{ silverbullet_domain }}
+    copy_headers X-Original-URL X-Forwarded-Method X-Forwarded-Proto X-Forwarded-Host X-Forwarded-Uri
+  }
 }
 
 {{ silverbullet_domain }} {
@@ -9,12 +19,4 @@
 
 auth.{{ silverbullet_domain }} {
   reverse_proxy authelia:9091
-}
-
-snippet mfa_auth {
-  forward_auth authelia:9091 {
-    uri /api/verify?rd=https://{{ silverbullet_domain }}
-    copy_headers X-Original-URL X-Forwarded-Method X-Forwarded-Proto X-Forwarded-Host X-Forwarded-Uri
-    trust_proxies private_ranges
-  }
 }
