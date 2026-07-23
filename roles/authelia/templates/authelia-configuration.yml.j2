@@ -20,7 +20,7 @@ authentication_backend:
 access_control:
   default_policy: deny
   rules:
-    - domain: '{{ silverbullet_domain }}'
+    - domain: wiki.'{{ silverbullet_domain }}'
       policy: two_factor
     - domain: 'auth.{{ silverbullet_domain }}'
       policy: bypass
@@ -31,7 +31,7 @@ session:
   cookies:
     - domain: '{{ silverbullet_domain }}'
       authelia_url: 'https://auth.{{ silverbullet_domain }}'
-      default_redirection_url: 'https://{{ silverbullet_domain }}'
+      default_redirection_url: 'https://wiki.{{ silverbullet_domain }}'
   expiration: 1h
   inactivity: 5m
   remember_me_duration: 1M

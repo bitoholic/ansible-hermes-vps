@@ -30,8 +30,10 @@ services:
     depends_on:
       - signal-cli
     ports:
-      - "127.0.0.1:{{ hermes_port }}:8642"
+      - "127.0.0.1:8642:8642"
+      - "127.0.0.1:9119:9119"
     environment:
+      HERMES_DASHBOARD: "1"
       HERMES_UID: "{{host_uid}}"
       HERMES_GID: "{{host_gid}}"
       GITHUB_TOKEN: "{{hermes_default.github_token}}"

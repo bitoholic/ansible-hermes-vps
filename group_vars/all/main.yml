@@ -24,7 +24,6 @@ authelia_data_dir: /opt/authelia-data
 # Hermes agent
 hermes_user: hermes
 hermes_home: /opt/hermes
-hermes_port: 8642
 hermes_signal_http_url: "http://signal-cli:8080"
 hermes_signal_account: "{{ lookup('env', 'SIGNAL_ACCOUNT') }}"
 hermes_signal_allowed_users: "{{ lookup('env', 'SIGNAL_ALLOWED_USERS') }}"

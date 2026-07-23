@@ -5,8 +5,6 @@
       - ansible_os_family == 'Debian'
       - admin_username is defined
       - admin_username | string | length > 0
-      - hermes_port is defined
-      - hermes_port | int > 0
       - hermes_default.openrouter_api_key | default('') | length > 0
       - hermes_signal_http_url | default('') | length > 0
       - hermes_signal_account | default('') | length > 0
