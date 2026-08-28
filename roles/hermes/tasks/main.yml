@@ -14,28 +14,6 @@
       secrets.hermes_default_openrouter_api_key, hermes_signal_http_url, secrets.hermes_signal_account,
       and secrets.hermes_signal_allowed_users.
 
-- name: Lookup llm_wiki passwd entry
-  ansible.builtin.getent:
-    database: passwd
-    key: llm_wiki
-  register: hermes_llm_user
-  failed_when: false
-  changed_when: false
-
-- name: Assert llm_wiki user was resolved (created by the users role)
-  ansible.builtin.assert:
-    that:
-      - hermes_llm_user.ansible_facts is defined
-      - hermes_llm_user.ansible_facts.getent_passwd.llm_wiki is defined
-    fail_msg: >-
-      The llm_wiki user was not found; it must be created by the users role before
-      the hermes role runs.
-
-- name: Set host_uid and host_gid facts from llm_wiki
-  ansible.builtin.set_fact:
-    hermes_host_uid: "{{ hermes_llm_user.ansible_facts.getent_passwd.llm_wiki[1] }}"
-    hermes_host_gid: "{{ hermes_llm_user.ansible_facts.getent_passwd.llm_wiki[2] }}"
-
 - name: Ensure persistent Hermes data root exists for admin user
   ansible.builtin.file:
     path: "{{ hermes_home }}"
