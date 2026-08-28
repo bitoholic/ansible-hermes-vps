@@ -7,36 +7,6 @@
     group: llm_wiki
     mode: '0775'
 
-- name: Create SilverBullet data directory
-  ansible.builtin.file:
-    path: "{{ silverbullet_data_dir }}"
-    state: directory
-    owner: llm_wiki
-    group: llm_wiki
-    mode: '0775'
-
-- name: Lookup llm_wiki passwd entry
-  ansible.builtin.getent:
-    database: passwd
-    key: llm_wiki
-  register: silverbullet_llm_user
-  failed_when: false
-  changed_when: false
-
-- name: Assert llm_wiki user was resolved (created by the users role)
-  ansible.builtin.assert:
-    that:
-      - silverbullet_llm_user.ansible_facts is defined
-      - silverbullet_llm_user.ansible_facts.getent_passwd.llm_wiki is defined
-    fail_msg: >-
-      The llm_wiki user was not found; it must be created by the users role before
-      the silverbullet role runs.
-
-- name: Set host_uid and host_gid facts from llm_wiki
-  ansible.builtin.set_fact:
-    silverbullet_host_uid: "{{ silverbullet_llm_user.ansible_facts.getent_passwd.llm_wiki[1] }}"
-    silverbullet_host_gid: "{{ silverbullet_llm_user.ansible_facts.getent_passwd.llm_wiki[2] }}"
-
 - name: Deploy docker-compose configuration
   ansible.builtin.template:
     src: docker-compose.yml.j2
