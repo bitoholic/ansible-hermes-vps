@@ -1,4 +1,8 @@
 ---
+# Backup role — thin adapter over the backup_sync module.
+# All sync/PR/git-crypt behavior lives in backup_sync/backup_sync (CLI); this role only wires
+# Ansible facts (paths, branch, resolved secrets) to that module and manages the systemd units.
+
 - name: Ensure wiki directory exists
   ansible.builtin.file:
     path: "{{ silverbullet_data_dir }}"
@@ -17,6 +21,8 @@
     mode: '0755'
 
 - name: Bootstrap clone of the private wiki repository
+  # NOTE: token-in-URL leak is closed in epic 04 #06 (clone switches to a token-less URL with
+  # credential injection via env). Kept as-is here so #05 stays scoped to the adapter wiring.
   ansible.builtin.git:
     repo: "https://x-access-token:{{ secrets.hermes_default_github_token }}@github.com/{{ secrets.github_repo_slug }}.git"
     dest: "{{ silverbullet_data_dir }}"
@@ -41,28 +47,21 @@
     owner: llm_wiki
     group: llm_wiki
 
-- name: Check whether git-crypt is already initialized for the wiki repo
-  ansible.builtin.stat:
-    path: "{{ silverbullet_data_dir }}/.git/git-crypt/keys/default"
-  register: backup_git_crypt_key
+- name: Deploy backup_sync module
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/backup_sync/backup_sync"
+    dest: "{{ silverbullet_compose_dir }}/bin/backup_sync"
+    mode: '0755'
+    owner: llm_wiki
+    group: llm_wiki
 
-- name: Initialize git-crypt for the wiki repository
+- name: Initialize git-crypt and export the offline-recovery key (idempotent)
   ansible.builtin.command:
-    cmd: git-crypt init
-    chdir: "{{ silverbullet_data_dir }}"
+    cmd: "{{ backup_sync_bin }} git-crypt-init --repo {{ silverbullet_data_dir }} --key-out {{ silverbullet_compose_dir }}/git-crypt.key"
     creates: "{{ silverbullet_data_dir }}/.git/git-crypt/keys/default"
   become: true
   become_user: llm_wiki
-  when: not backup_git_crypt_key.stat.exists
-
-- name: Export git-crypt symmetric key for offline recovery
-  ansible.builtin.command:
-    cmd: "git-crypt export-key {{ silverbullet_compose_dir }}/git-crypt.key"
-    chdir: "{{ silverbullet_data_dir }}"
-  become: true
-  become_user: llm_wiki
-  when: not backup_git_crypt_key.stat.exists
-  changed_when: true
+  register: backup_git_crypt
 
 - name: Restrict permissions on the exported git-crypt key
   ansible.builtin.file:
@@ -70,55 +69,43 @@
     owner: llm_wiki
     group: llm_wiki
     mode: '0600'
-  when: not backup_git_crypt_key.stat.exists
 
 - name: Fetch git-crypt key back to the control node for safekeeping
   ansible.builtin.fetch:
     src: "{{ silverbullet_compose_dir }}/git-crypt.key"
     dest: "./{{ inventory_hostname }}-git-crypt.key"
     flat: true
-  when: not backup_git_crypt_key.stat.exists
+  when: backup_git_crypt is changed  # noqa: no-handler
 
-- name: Deploy real-time sync script
+- name: Deploy llm-wiki watcher path unit
   ansible.builtin.template:
-    src: sync-to-dev.sh.j2
-    dest: "{{ silverbullet_compose_dir }}/bin/sync-to-dev.sh"
-    mode: '0755'
-    owner: llm_wiki
-    group: llm_wiki
+    src: llm-wiki-watcher.path.j2
+    dest: /etc/systemd/system/llm-wiki-watcher.path
+    mode: '0644'
 
-- name: Deploy daily PR creation script
+- name: Deploy llm-wiki watcher service unit
   ansible.builtin.template:
-    src: create-daily-pr.sh.j2
-    dest: "{{ silverbullet_compose_dir }}/bin/create-daily-pr.sh"
-    mode: '0755'
-    owner: llm_wiki
-    group: llm_wiki
+    src: llm-wiki-watcher.service.j2
+    dest: /etc/systemd/system/llm-wiki-watcher.service
+    mode: '0644'
 
-# - name: Deploy systemd path watcher unit
-#   ansible.builtin.template:
-#     src: llm-wiki-watcher.path.j2
-#     dest: /etc/systemd/system/llm-wiki-watcher.path
-#     mode: '0644'
+- name: Enable and start llm-wiki watcher path
+  ansible.builtin.systemd:
+    name: llm-wiki-watcher.path
+    enabled: true
+    state: started
+    daemon_reload: true
+  ignore_errors: "{{ ansible_check_mode }}"
 
-# - name: Deploy systemd watcher service unit
-#   ansible.builtin.template:
-#     src: llm-wiki-watcher.service.j2
-#     dest: /etc/systemd/system/llm-wiki-watcher.service
-#     mode: '0644'
-
-# - name: Enable and start llm-wiki watcher path
-#   ansible.builtin.systemd:
-#     name: llm-wiki-watcher.path
-#     enabled: true
-#     state: restarted
-#     daemon_reload: true
-#   ignore_errors: "{{ ansible_check_mode }}"
-
-- name: Schedule nightly PR creation
+- name: Schedule nightly PR creation via backup_sync
   ansible.builtin.cron:
     name: create daily backup PR
     minute: '59'
     hour: '23'
-    job: "{{ silverbullet_compose_dir }}/bin/create-daily-pr.sh"
+    job: >-
+      GITHUB_TOKEN={{ secrets.backup_github_token }}
+      {{ backup_sync_bin }} create-pr
+      --repo {{ silverbullet_data_dir }}
+      --branch {{ backup_working_branch }}
+      --message '{{ backup_commit_message }}'
     user: "{{ secrets.admin_username }}"

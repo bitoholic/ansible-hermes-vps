@@ -5,6 +5,6 @@ After=network.target
 [Service]
 Type=oneshot
 WorkingDirectory={{ silverbullet_data_dir }}
-ExecStart={{ silverbullet_compose_dir }}/bin/sync-to-dev.sh
+ExecStart={{ silverbullet_compose_dir }}/bin/backup_sync sync --repo {{ silverbullet_data_dir }} --branch {{ backup_working_branch }} --message '{{ backup_commit_message }}'
 User=llm_wiki
 Group=llm_wiki

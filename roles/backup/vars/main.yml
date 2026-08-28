@@ -1,0 +1,3 @@
+---
+# Path to the deployed backup_sync module binary (set by the backup role).
+backup_sync_bin: "{{ silverbullet_compose_dir }}/bin/backup_sync"
