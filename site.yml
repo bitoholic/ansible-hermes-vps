@@ -3,20 +3,22 @@
   hosts: all
   become: true
   gather_facts: true
+  roles:
+    - role: secrets
   tasks:
     - name: Assert top-level deployment prerequisites
       ansible.builtin.assert:
         that:
           - ansible_os_family == 'Debian'
-          - admin_username is defined
-          - admin_username | string | length > 0
-          - admin_ssh_public_key is defined
-          - admin_ssh_public_key | string | length > 0
+          - secrets.admin_username is defined
+          - secrets.admin_username | string | length > 0
+          - secrets.admin_ssh_public_key is defined
+          - secrets.admin_ssh_public_key | string | length > 0
         fail_msg: "This deployment only supports Debian/Ubuntu hosts and requires admin_username and admin_ssh_public_key."
 
     - name: Create bootstrap admin user
       ansible.builtin.user:
-        name: "{{ admin_username }}"
+        name: "{{ secrets.admin_username }}"
         shell: /bin/bash
         groups:
           - sudo
@@ -27,29 +29,29 @@
 
     - name: Ensure admin SSH directory exists
       ansible.builtin.file:
-        path: "/home/{{ admin_username }}/.ssh"
+        path: "/home/{{ secrets.admin_username }}/.ssh"
         state: directory
-        owner: "{{ admin_username }}"
-        group: "{{ admin_username }}"
+        owner: "{{ secrets.admin_username }}"
+        group: "{{ secrets.admin_username }}"
         mode: '0700'
 
     - name: Authorize provided admin SSH public key
       ansible.posix.authorized_key:
-        user: "{{ admin_username }}"
+        user: "{{ secrets.admin_username }}"
         state: present
-        key: "{{ admin_ssh_public_key }}"
+        key: "{{ secrets.admin_ssh_public_key }}"
 
     - name: Ensure passwordless sudo is enabled for admin user
       ansible.builtin.copy:
-        dest: "/etc/sudoers.d/{{ admin_username }}"
-        content: "{{ admin_username }} ALL=(ALL) NOPASSWD:ALL\n"
+        dest: "/etc/sudoers.d/{{ secrets.admin_username }}"
+        content: "{{ secrets.admin_username }} ALL=(ALL) NOPASSWD:ALL\n"
         owner: root
         group: root
         mode: '0440'
 
     - name: Validate admin sudoers file syntax
       ansible.builtin.command:
-        cmd: "visudo -cf /etc/sudoers.d/{{ admin_username }}"
+        cmd: "visudo -cf /etc/sudoers.d/{{ secrets.admin_username }}"
       register: sudoers_validation
       changed_when: false
       failed_when: sudoers_validation.rc != 0
@@ -58,17 +60,17 @@
   hosts: all
   gather_facts: true
   vars:
-    ansible_user: "{{ admin_username }}"
+    ansible_user: "{{ secrets.admin_username }}"
   become: true
   tasks:
     - name: Assert provisioning user and platform expectations
       ansible.builtin.assert:
         that:
           - ansible_os_family == 'Debian'
-          - admin_username is defined
-          - admin_username | string | length > 0
-          - ansible_user == admin_username
-        fail_msg: "Play 2 must run as {{ admin_username }} on Debian/Ubuntu hosts."
+          - secrets.admin_username is defined
+          - secrets.admin_username | string | length > 0
+          - ansible_user == secrets.admin_username
+        fail_msg: "Play 2 must run as {{ secrets.admin_username }} on Debian/Ubuntu hosts."
 
   roles:
     - role: secrets

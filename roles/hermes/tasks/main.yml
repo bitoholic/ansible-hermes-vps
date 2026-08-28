@@ -3,8 +3,8 @@
   ansible.builtin.assert:
     that:
       - ansible_os_family == 'Debian'
-      - admin_username is defined
-      - admin_username | string | length > 0
+      - secrets.admin_username is defined
+      - secrets.admin_username | string | length > 0
       - secrets.hermes_default_openrouter_api_key | default('') | length > 0
       - hermes_signal_http_url | default('') | length > 0
       - secrets.hermes_signal_account | default('') | length > 0
@@ -151,7 +151,7 @@
   ansible.builtin.copy:
     src: Dockerfile
     dest: "{{ hermes_home }}/Dockerfile"
-    owner: "{{ admin_username }}"
+    owner: "{{ secrets.admin_username }}"
     group: llm_wiki
     mode: '0640'
 
@@ -159,7 +159,7 @@
   ansible.builtin.template:
     src: docker-compose.yml.j2
     dest: "{{ hermes_home }}/docker-compose.yml"
-    owner: "{{ admin_username }}"
+    owner: "{{ secrets.admin_username }}"
     group: llm_wiki
     mode: '0640'
 

@@ -18,7 +18,7 @@
 
 - name: Bootstrap clone of the private wiki repository
   ansible.builtin.git:
-    repo: "https://x-access-token:{{ secrets.hermes_default_github_token }}@github.com/{{ github_repo_slug }}.git"
+    repo: "https://x-access-token:{{ secrets.hermes_default_github_token }}@github.com/{{ secrets.github_repo_slug }}.git"
     dest: "{{ silverbullet_data_dir }}"
     version: "main"
     clone: true
@@ -121,4 +121,4 @@
     minute: '59'
     hour: '23'
     job: "{{ silverbullet_compose_dir }}/bin/create-daily-pr.sh"
-    user: "{{ admin_username }}"
+    user: "{{ secrets.admin_username }}"
