@@ -32,4 +32,31 @@ if "$MODULE" frobnicate >/dev/null 2>&1; then
   echo "FAIL: unknown command should have errored"; exit 1
 fi
 
-echo "backup_sync interface OK"
+# sync unit test: drive `sync` against a temp local bare remote (no live wiki / token).
+echo "== backup_sync sync unit test =="
+tmp="$(mktemp -d)"
+git init -q --bare "$tmp/remote.git"
+git clone -q "$tmp/remote.git" "$tmp/work" >/dev/null 2>&1
+git -C "$tmp/work" checkout -q -b vps-sync
+printf 'hello\n' > "$tmp/work/file.txt"
+git -C "$tmp/work" -c user.email=test@test -c user.name=test add -A
+git -C "$tmp/work" -c user.email=test@test -c user.name=test commit -qm init
+git -C "$tmp/work" push -q origin vps-sync
+# A git identity so the module's own commit succeeds (the role/VPS provides this in prod).
+git -C "$tmp/work" config user.email test@test
+git -C "$tmp/work" config user.name test
+
+printf 'world\n' >> "$tmp/work/file.txt"
+"$MODULE" sync --repo "$tmp/work" --branch vps-sync --message "chore: sync wiki"
+git -C "$tmp/work" log --oneline | grep -q "chore: sync wiki" || { echo "FAIL: sync did not commit"; rm -rf "$tmp"; exit 1; }
+git -C "$tmp/remote.git" log --oneline vps-sync | grep -q "chore: sync wiki" || { echo "FAIL: sync did not push to remote"; rm -rf "$tmp"; exit 1; }
+
+# Idempotent on a clean tree: no new commit, no empty commit.
+before="$(git -C "$tmp/work" rev-parse HEAD)"
+"$MODULE" sync --repo "$tmp/work" --branch vps-sync --message "chore: sync wiki"
+after="$(git -C "$tmp/work" rev-parse HEAD)"
+[[ "$before" == "$after" ]] || { echo "FAIL: sync created a commit on a clean tree"; rm -rf "$tmp"; exit 1; }
+rm -rf "$tmp"
+echo "sync unit test OK"
+
+echo "backup_sync OK"

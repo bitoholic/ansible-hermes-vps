@@ -63,8 +63,27 @@ cmd_sync() {
     [[ $rc -eq 2 ]] && { usage; exit 0; }
     exit "$rc"
   }
-  echo "$PROG sync: not yet implemented (repo='$_repo' branch='$_branch')" >&2
-  exit 0
+  repo="$_repo"; branch="$_branch"; message="$_message"
+
+  current_branch="$(git -C "$repo" rev-parse --abbrev-ref HEAD)"
+  if [[ "$current_branch" != "$branch" ]]; then
+    echo "Switching to $branch"
+    git -C "$repo" checkout "$branch"
+  fi
+
+  # --autostash lets the rebase pull proceed on a dirty tree (the real-time watcher always
+  # fires with unstaged changes). The original template pulled before staging, which git
+  # refuses with "cannot pull with rebase: unstaged changes".
+  git -C "$repo" pull --rebase --autostash "origin" "$branch"
+
+  git -C "$repo" add -A
+  if git -C "$repo" diff --cached --quiet; then
+    echo "No changes to commit."
+    exit 0
+  fi
+
+  git -C "$repo" commit -m "$message"
+  git -C "$repo" push "origin" "$branch"
 }
 
 cmd_create_pr() {
