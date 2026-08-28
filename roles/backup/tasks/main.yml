@@ -18,7 +18,7 @@
 
 - name: Bootstrap clone of the private wiki repository
   ansible.builtin.git:
-    repo: "https://x-access-token:{{ hermes_default.github_token }}@github.com/{{ github_repo_slug }}.git"
+    repo: "https://x-access-token:{{ secrets.hermes_default_github_token }}@github.com/{{ github_repo_slug }}.git"
     dest: "{{ silverbullet_data_dir }}"
     version: "main"
     clone: true
