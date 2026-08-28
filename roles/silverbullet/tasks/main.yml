@@ -23,6 +23,15 @@
   failed_when: false
   changed_when: false
 
+- name: Assert llm_wiki user was resolved (created by the users role)
+  ansible.builtin.assert:
+    that:
+      - silverbullet_llm_user.ansible_facts is defined
+      - silverbullet_llm_user.ansible_facts.getent_passwd.llm_wiki is defined
+    fail_msg: >-
+      The llm_wiki user was not found; it must be created by the users role before
+      the silverbullet role runs.
+
 - name: Set host_uid and host_gid facts from llm_wiki
   ansible.builtin.set_fact:
     silverbullet_host_uid: "{{ silverbullet_llm_user.ansible_facts.getent_passwd.llm_wiki[1] }}"

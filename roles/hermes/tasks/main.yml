@@ -22,6 +22,15 @@
   failed_when: false
   changed_when: false
 
+- name: Assert llm_wiki user was resolved (created by the users role)
+  ansible.builtin.assert:
+    that:
+      - hermes_llm_user.ansible_facts is defined
+      - hermes_llm_user.ansible_facts.getent_passwd.llm_wiki is defined
+    fail_msg: >-
+      The llm_wiki user was not found; it must be created by the users role before
+      the hermes role runs.
+
 - name: Set host_uid and host_gid facts from llm_wiki
   ansible.builtin.set_fact:
     hermes_host_uid: "{{ hermes_llm_user.ansible_facts.getent_passwd.llm_wiki[1] }}"
