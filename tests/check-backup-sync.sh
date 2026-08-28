@@ -100,4 +100,27 @@ grep -q "Pull request already exists" <<< "$out" || { echo "FAIL: 422 already-ex
 rm -rf "$tmp"
 echo "create-pr unit test OK"
 
+# git-crypt-init unit test: guarded — git-crypt may be absent in CI; skip rather than fail.
+echo "== backup_sync git-crypt-init unit test =="
+if ! command -v git-crypt >/dev/null 2>&1; then
+  echo "SKIP git-crypt-init test (git-crypt not installed in this environment)"
+else
+  tmp="$(mktemp -d)"
+  git init -q "$tmp/repo"
+  key="$tmp/repo/git-crypt.key"
+  "$MODULE" git-crypt-init --repo "$tmp/repo" --key-out "$key"
+  [[ -e "$tmp/repo/.git/git-crypt/keys/default" ]] || { echo "FAIL: git-crypt not initialized"; rm -rf "$tmp"; exit 1; }
+  [[ -s "$key" ]] || { echo "FAIL: key not exported"; rm -rf "$tmp"; exit 1; }
+  perms="$(stat -c '%a' "$key")"
+  [[ "$perms" == "600" ]] || { echo "FAIL: key perms $perms (want 600)"; rm -rf "$tmp"; exit 1; }
+  # Idempotent: second run must succeed without re-initializing or re-exporting errors.
+  "$MODULE" git-crypt-init --repo "$tmp/repo" --key-out "$key"
+  mtime1="$(stat -c '%Y' "$key")"
+  "$MODULE" git-crypt-init --repo "$tmp/repo" --key-out "$key"
+  mtime2="$(stat -c '%Y' "$key")"
+  [[ "$mtime1" == "$mtime2" ]] || { echo "FAIL: key re-exported on second init"; rm -rf "$tmp"; exit 1; }
+  rm -rf "$tmp"
+  echo "git-crypt-init unit test OK"
+fi
+
 echo "backup_sync OK"

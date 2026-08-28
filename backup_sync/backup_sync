@@ -37,7 +37,7 @@ EOF
 # _message / _token_env / _api_url. Returns 0 on success, 1 on a usage error, 2 when --help
 # was requested.
 parse_common() {
-  _repo=""; _branch=""; _message=""; _token_env="GITHUB_TOKEN"; _api_url="https://api.github.com"
+  _repo=""; _branch=""; _message=""; _token_env="GITHUB_TOKEN"; _api_url="https://api.github.com"; _key_out=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --repo)       _repo="${2:-}"; shift 2;;
@@ -45,6 +45,7 @@ parse_common() {
       --message)    _message="${2:-}"; shift 2;;
       --token-env)  _token_env="${2:-}"; shift 2;;
       --api-url)    _api_url="${2:-}"; shift 2;;
+      --key-out)    _key_out="${2:-}"; shift 2;;
       -h|--help)    return 2;;
       *)            echo "error: unknown option: $1" >&2; return 1;;
     esac
@@ -146,8 +147,18 @@ cmd_git_crypt_init() {
     [[ $rc -eq 2 ]] && { usage; exit 0; }
     exit "$rc"
   }
-  echo "$PROG git-crypt-init: not yet implemented (repo='$_repo')" >&2
-  exit 0
+  repo="$_repo"
+  key_out="${_key_out:-$repo/git-crypt.key}"
+  init_marker="$repo/.git/git-crypt/keys/default"
+
+  if [[ -e "$init_marker" ]]; then
+    echo "git-crypt already initialized; skipping"
+    exit 0
+  fi
+
+  git -C "$repo" crypt init
+  git -C "$repo" crypt export-key "$key_out"
+  chmod 0600 "$key_out"
 }
 
 main() {
