@@ -25,11 +25,12 @@ hermes_signal_http_url: "http://signal-cli:8080"
 # deployed to hermes_home directly; sub-profiles are deployed under hermes_home/profiles/<name>.
 # `target_dir` overrides the deploy location; `config_template`/`soul_template`/`env_template`/
 # `skills_src` default to per-profile files under roles/hermes/{templates,files}/profiles/<name>/.
-# The shared `config.yaml.j2` template is parameterized by the per-profile fields below
-# (model_*, enable_base_features, enable_web/browser, mcp_servers, tools_disabled,
-# skills_auto_load, dashboard, onboarding_seen) — see epic 02 ticket #02.
-# Note: the per-profile secret lookups here are the deferred single-seam exception (see epic
-# 02 ticket #04) — they will move to secrets.profiles.* from the resolver.
+# The shared `config.yaml.j2`/`env_profile.j2` templates are parameterized by the per-profile
+# fields below (model_*, enable_base_features, enable_web/browser, mcp_servers, tools_disabled,
+# skills_auto_load, dashboard, onboarding_seen) — see epic 02 tickets #02/#03. Per-profile
+# secrets are NOT stored here; the templates read them from the resolver's
+# `secrets.profiles.<name>.*` (default profile secrets use `secrets.hermes_default_*`), so the
+# single-seam contract holds: only the `secrets` resolver reads credentials from the environment.
 hermes_profiles:
   - name: default
     target_dir: "{{ hermes_home }}"
@@ -50,19 +51,12 @@ hermes_profiles:
     mcp_servers:
       - name: context7
         pkg: "@upstash/context7-mcp"
-        env:
-          CONTEXT7_API_KEY: "{{ secrets.hermes_default_context7_api_key }}"
       - name: github
         pkg: "@modelcontextprotocol/server-github"
-        env:
-          GITHUB_PERSONAL_ACCESS_TOKEN: "{{ secrets.hermes_default_github_token }}"
       - name: playwright
         pkg: "@modelcontextprotocol/server-playwright"
   - name: coder
     config_template: config.yaml.j2
-    openrouter_api_key: "{{ lookup('env', 'OPENROUTER_API_KEY_CODER') }}"
-    nous_portal_api_key: "{{ lookup('env', 'NOUS_PORTAL_API_KEY') }}"
-    context7_api_key: "{{ lookup('env', 'CONTEXT7_API_KEY_CODER') }}"
     skills_src: profiles/coder/skills/
     model_provider: nous
     model_default: qwen/qwen3-coder-flash
@@ -73,18 +67,12 @@ hermes_profiles:
     mcp_servers:
       - name: context7
         pkg: "@upstash/context7-mcp"
-        env:
-          CONTEXT7_API_KEY: "{{ lookup('env', 'CONTEXT7_API_KEY_CODER') }}"
       - name: github
         pkg: "@modelcontextprotocol/server-github"
-        env:
-          GITHUB_PERSONAL_ACCESS_TOKEN: "{{ secrets.hermes_default_github_token }}"
       - name: playwright
         pkg: "@modelcontextprotocol/server-playwright"
   - name: intel
     config_template: config.yaml.j2
-    openrouter_api_key: "{{ lookup('env', 'OPENROUTER_API_KEY_INTEL') }}"
-    nous_portal_api_key: "{{ lookup('env', 'NOUS_PORTAL_API_KEY') }}"
     model_provider: openrouter
     model_default: openrouter/free
     enable_web: true

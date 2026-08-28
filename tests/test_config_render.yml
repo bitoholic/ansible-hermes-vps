@@ -8,6 +8,14 @@
       hermes_default_context7_api_key: stub-c7
       hermes_default_github_token: stub-gh
       hermes_default_dashboard_admin_password_hash: stub-ph
+      profiles:
+        coder:
+          openrouter_api_key: stub-coder-or
+          nous_portal_api_key: stub-nous
+          context7_api_key: stub-c7-coder
+        intel:
+          openrouter_api_key: stub-intel-or
+          nous_portal_api_key: stub-nous
   pre_tasks:
     - ansible.builtin.include_vars:
         file: "{{ playbook_dir }}/../group_vars/all/main.yml"
