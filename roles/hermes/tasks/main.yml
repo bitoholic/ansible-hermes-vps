@@ -84,14 +84,6 @@
   loop: "{{ hermes_profiles }}"
   when: item.skills_src is defined
 
-- name: Ensure hermes project home ownership for llm_wiki
-  ansible.builtin.file:
-    path: "{{ silverbullet_data_dir }}"
-    state: directory
-    owner: llm_wiki
-    group: llm_wiki
-    mode: '0775'
-
 - name: Deploy Hermes Dockerfile
   ansible.builtin.copy:
     src: Dockerfile

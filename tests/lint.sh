@@ -51,3 +51,8 @@ python3 scripts/generate-env.py --check
 # the watcher units, and the cron — no stray script templates.
 ./tests/check-backup-sync.sh
 ./tests/check-backup-role.sh
+
+# wiki_volume ownership seam (epic 05 ticket #05): the wiki data dir is created/owned by exactly
+# the wiki_volume role, and no other role re-resolves llm_wiki via getent. A live idempotency/owner
+# run of the role is operator-validated on the VPS (guarded/skipped when llm_wiki is absent).
+./tests/check-wiki-volume.sh
