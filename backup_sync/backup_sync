@@ -1,0 +1,102 @@
+#!/usr/bin/env bash
+# backup_sync — wiki→GitHub sync module (CLI)
+#
+# Single owner of sync / PR / git-crypt behavior. The backup role is a thin adapter
+# that deploys this module and calls it; all sync logic lives here, not in Jinja shell.
+#
+# SECRETS: the GitHub token is supplied via the environment (GITHUB_TOKEN, or the
+# var named by --token-env). It is NEVER embedded into a remote URL or an API URL.
+set -euo pipefail
+
+PROG="$(basename "$0")"
+
+usage() {
+  cat <<EOF
+$PROG — wiki→GitHub sync module
+
+USAGE:
+  $PROG <command> [options]
+
+COMMANDS:
+  sync            Stage, commit, and push wiki changes to the working branch.
+  create-pr       Open a pull request from the working branch to main.
+  git-crypt-init  Initialize git-crypt and export the offline-recovery key.
+
+COMMON OPTIONS:
+  --repo <dir>      Path to the wiki git repository (required).
+  --branch <b>      Working branch name (required for sync/create-pr).
+  --message <m>     Commit / PR message (required for sync/create-pr).
+  --token-env <v>   Env var holding the GitHub token (default: GITHUB_TOKEN).
+  -h, --help        Show help.
+
+Run '$PROG <command> --help' for command-specific help.
+EOF
+}
+
+# Parse the common options shared by every subcommand. Sets the globals _repo / _branch /
+# _message / _token_env. Returns 0 on success, 1 on a usage error, 2 when --help was requested.
+parse_common() {
+  _repo=""; _branch=""; _message=""; _token_env="GITHUB_TOKEN"
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --repo)       _repo="${2:-}"; shift 2;;
+      --branch)     _branch="${2:-}"; shift 2;;
+      --message)    _message="${2:-}"; shift 2;;
+      --token-env)  _token_env="${2:-}"; shift 2;;
+      -h|--help)    return 2;;
+      *)            echo "error: unknown option: $1" >&2; return 1;;
+    esac
+  done
+  [[ -n "${_repo:-}" ]] || { echo "error: --repo is required" >&2; return 1; }
+}
+
+# Fail clearly unless the GitHub token is present in the environment. The token is consumed
+# from the environment only — callers must never construct a token-bearing URL.
+require_token() {
+  local tok="${!_token_env:-}"
+  [[ -n "$tok" ]] || { echo "error: GitHub token not found in env var '$_token_env'" >&2; return 1; }
+}
+
+cmd_sync() {
+  parse_common "$@" || {
+    rc=$?
+    [[ $rc -eq 2 ]] && { usage; exit 0; }
+    exit "$rc"
+  }
+  echo "$PROG sync: not yet implemented (repo='$_repo' branch='$_branch')" >&2
+  exit 0
+}
+
+cmd_create_pr() {
+  parse_common "$@" || {
+    rc=$?
+    [[ $rc -eq 2 ]] && { usage; exit 0; }
+    exit "$rc"
+  }
+  require_token || exit "$?"
+  echo "$PROG create-pr: not yet implemented (repo='$_repo' branch='$_branch')" >&2
+  exit 0
+}
+
+cmd_git_crypt_init() {
+  parse_common "$@" || {
+    rc=$?
+    [[ $rc -eq 2 ]] && { usage; exit 0; }
+    exit "$rc"
+  }
+  echo "$PROG git-crypt-init: not yet implemented (repo='$_repo')" >&2
+  exit 0
+}
+
+main() {
+  [[ $# -gt 0 ]] || { usage; exit 1; }
+  case "$1" in
+    sync)           shift; cmd_sync "$@";;
+    create-pr)      shift; cmd_create_pr "$@";;
+    git-crypt-init) shift; cmd_git_crypt_init "$@";;
+    -h|--help)      usage; exit 0;;
+    *)              echo "error: unknown command: $1" >&2; usage; exit 1;;
+  esac
+}
+
+main "$@"
