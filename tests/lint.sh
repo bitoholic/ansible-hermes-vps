@@ -39,3 +39,8 @@ python3 scripts/generate-env.py --check
 # Hermes profile render behavioral test (epic 02 ticket #05): N profiles -> N file sets,
 # default present, .env regression + per-profile secret scoping.
 ./tests/check-hermes-profile.sh
+
+# Gateway Caddyfile render test (epic 03 ticket #04): byte-equivalence regression vs the legacy
+# Caddyfile, one site block per route with mfa_auth applied unless mfa: false, fail-fast on
+# malformed routes.
+./tests/check-gateway-render.sh

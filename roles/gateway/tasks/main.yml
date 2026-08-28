@@ -3,7 +3,8 @@
 # The gateway is the single writer of the ingress Caddyfile. It owns the route-data interface
 # (`gateway_routes`) and the shared `mfa_auth` forward-auth snippet, and renders one Caddy site
 # block per route. Caddy still runs inside the SilverBullet compose stack, so the file lands in
-# `silverbullet_compose_dir`; SilverBullet no longer authors any routing.
+# `gateway_caddyfile_dir` (default `silverbullet_compose_dir`); SilverBullet no longer authors
+# any routing.
 - name: Load per-role gateway_publish contributions
   ansible.builtin.include_vars:
     file: "{{ playbook_dir }}/roles/{{ item }}/defaults/main.yml"
@@ -12,31 +13,19 @@
     - authelia
     - hermes
 
-- name: Validate gateway_routes shape (fail fast on malformed ingress)
-  ansible.builtin.assert:
-    that:
-      - gateway_routes is defined
-      - gateway_routes | length > 0
-      - gateway_routes | selectattr('host', 'undefined') | list | length == 0
-      - gateway_routes | selectattr('upstream', 'undefined') | list | length == 0
-      - gateway_routes | selectattr('upstream', 'equalto', '') | list | length == 0
-      - gateway_routes | selectattr('mfa', 'undefined') | list | length == 0
-      - gateway_routes | rejectattr('mfa', 'boolean') | list | length == 0
-    fail_msg: >-
-      Each entry in gateway_routes must declare `host`, a non-empty `upstream`, and a
-      boolean `mfa`. A malformed entry means a broken Caddyfile (silent 502). Fix the
-      offending role's `gateway_publish` contribution.
+- name: Validate gateway_routes shape
+  ansible.builtin.include_tasks: validate.yml
 
 - name: Ensure ingress (Caddyfile) deploy directory exists
   ansible.builtin.file:
-    path: "{{ silverbullet_compose_dir }}"
+    path: "{{ gateway_caddyfile_dir }}"
     state: directory
-    owner: llm_wiki
-    group: llm_wiki
+    owner: "{{ gateway_caddyfile_owner }}"
+    group: "{{ gateway_caddyfile_group }}"
     mode: '0775'
 
 - name: Deploy Caddyfile (gateway adapter)
   ansible.builtin.template:
     src: Caddyfile.j2
-    dest: "{{ silverbullet_compose_dir }}/Caddyfile"
+    dest: "{{ gateway_caddyfile_dir }}/Caddyfile"
     mode: '0644'

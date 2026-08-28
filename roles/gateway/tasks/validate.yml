@@ -1,0 +1,19 @@
+---
+# Gateway / reverse-proxy seam (epic 03, #03).
+# Fail-fast validation of `gateway_routes` — runs before the Caddyfile is rendered so a malformed
+# ingress entry can't produce a silent-502 Caddyfile. Extracted so the render test can invoke just
+# the validation (without the deploy-dir/file step).
+- name: Validate gateway_routes shape (fail fast on malformed ingress)
+  ansible.builtin.assert:
+    that:
+      - gateway_routes is defined
+      - gateway_routes | length > 0
+      - gateway_routes | selectattr('host', 'undefined') | list | length == 0
+      - gateway_routes | selectattr('upstream', 'undefined') | list | length == 0
+      - gateway_routes | selectattr('upstream', 'equalto', '') | list | length == 0
+      - gateway_routes | selectattr('mfa', 'undefined') | list | length == 0
+      - gateway_routes | rejectattr('mfa', 'boolean') | list | length == 0
+    fail_msg: >-
+      Each entry in gateway_routes must declare `host`, a non-empty `upstream`, and a
+      boolean `mfa`. A malformed entry means a broken Caddyfile (silent 502). Fix the
+      offending role's `gateway_publish` contribution.
