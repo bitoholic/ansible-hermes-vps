@@ -34,7 +34,12 @@
     silverbullet_compose_dir: /opt/silverbullet
     backup_working_branch: vps-sync
     backup_github_token: fake-token
+    secrets_enforce_required: false
   tasks:
+    - name: Preview secrets resolver (expand)
+      ansible.builtin.include_role:
+        name: secrets
+
     - name: Preview common role tasks
       ansible.builtin.include_role:
         name: common

@@ -71,6 +71,7 @@
         fail_msg: "Play 2 must run as {{ admin_username }} on Debian/Ubuntu hosts."
 
   roles:
+    - role: secrets
     - role: users
     - role: ssh_hardening
     - role: common
