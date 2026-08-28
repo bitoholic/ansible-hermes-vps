@@ -53,6 +53,10 @@
     group: llm_wiki
     mode: '0775'
 
+# Single profile-driven render loop. Every entry in `hermes_profiles` (including the
+# `default` Jack-O-Rama profile) is deployed the same way; `target_dir` selects where
+# (default -> hermes_home, sub-profiles -> hermes_home/profiles/<name>), and the template
+# paths default to per-profile files under roles/hermes/{templates,files}/profiles/<name>/.
 - name: Ensure Hermes subagent profile directories exist
   ansible.builtin.file:
     path: "{{ hermes_home }}/profiles/{{ item.name }}"
@@ -61,11 +65,12 @@
     group: llm_wiki
     mode: '0700'
   loop: "{{ hermes_profiles }}"
+  when: item.target_dir is not defined
 
-- name: Deploy default Hermes profile config.yaml files
+- name: Deploy Hermes profile config.yaml
   ansible.builtin.template:
-    src: "profiles/{{ item.name }}/config.yaml.j2"
-    dest: "{{ hermes_home }}/profiles/{{ item.name }}/config.yaml"
+    src: "{{ item.config_template | default('profiles/' ~ item.name ~ '/config.yaml.j2') }}"
+    dest: "{{ item.target_dir | default(hermes_home ~ '/profiles/' ~ item.name) }}/config.yaml"
     owner: llm_wiki
     group: llm_wiki
     mode: '0640'
@@ -74,8 +79,8 @@
 
 - name: Ensure Hermes profile SOUL.md files exist
   ansible.builtin.template:
-    src: "profiles/{{ item.name }}/SOUL.md.j2"
-    dest: "{{ hermes_home }}/profiles/{{ item.name }}/SOUL.md"
+    src: "{{ item.soul_template | default('profiles/' ~ item.name ~ '/SOUL.md.j2') }}"
+    dest: "{{ item.target_dir | default(hermes_home ~ '/profiles/' ~ item.name) }}/SOUL.md"
     owner: llm_wiki
     group: llm_wiki
     mode: '0660'
@@ -83,18 +88,9 @@
   loop: "{{ hermes_profiles }}"
 
 - name: Deploy Hermes profile env files
-  ansible.builtin.copy:
-    dest: "{{ hermes_home }}/profiles/{{ item.name }}/.env"
-    content: |
-      OPENROUTER_API_KEY="{{ item.openrouter_api_key }}"
-      NOUS_API_KEY="{{ item.nous_portal_api_key }}"
-      CONTEXT7_API_KEY="{{ item.context7_api_key | default('', true) }}"
-      GITHUB_TOKEN="{{ secrets.hermes_default_github_token | default('', true) }}"
-      GIT_AUTHOR_NAME="{{ secrets.git_username | default('', true) }}"
-      GIT_AUTHOR_EMAIL="{{ secrets.git_email | default('', true) }}"
-      GIT_COMMITTER_NAME="{{ secrets.git_username | default('', true) }}"
-      GIT_COMMITTER_EMAIL="{{ secrets.git_email | default('', true) }}"
-      HERMES_WRITE_SAFE_ROOT="/opt/data:/tmp"
+  ansible.builtin.template:
+    src: "{{ item.env_template | default('env_profile.j2') }}"
+    dest: "{{ item.target_dir | default(hermes_home ~ '/profiles/' ~ item.name) }}/.env"
     owner: llm_wiki
     group: llm_wiki
     mode: '0640'
@@ -102,51 +98,13 @@
 
 - name: Deploy Hermes profile skill files
   ansible.builtin.copy:
-    dest: "{{ hermes_home }}/profiles/{{ item.name }}/skills/"
-    src: "profiles/{{ item.name }}/skills/"
+    dest: "{{ item.target_dir | default(hermes_home ~ '/profiles/' ~ item.name) }}/skills/"
+    src: "{{ item.skills_src }}"
     owner: llm_wiki
     group: llm_wiki
     mode: '0644'
   loop: "{{ hermes_profiles }}"
-
-- name: Deploy Hermes config.yaml file
-  ansible.builtin.template:
-    src: "config.yaml.j2"
-    dest: "{{ hermes_home }}/config.yaml"
-    owner: llm_wiki
-    group: llm_wiki
-    mode: '0640'
-    force: true
-
-- name: Ensure Hermes SOUL.md file exists
-  ansible.builtin.template:
-    src: "SOUL.md.j2"
-    dest: "{{ hermes_home }}/SOUL.md"
-    owner: llm_wiki
-    group: llm_wiki
-    mode: '0660'
-    force: false
-
-- name: Deploy Hermes env file
-  ansible.builtin.copy:
-    dest: "{{ hermes_home }}/.env"
-    content: |
-      OPENROUTER_API_KEY="{{ secrets.hermes_default_openrouter_api_key }}"
-      NOUS_API_KEY="{{ secrets.hermes_default_nous_portal_api_key }}"
-      GITHUB_TOKEN="{{ secrets.hermes_default_github_token }}"
-      SIGNAL_HTTP_URL="{{ hermes_signal_http_url }}"
-      SIGNAL_ACCOUNT="{{ secrets.hermes_signal_account }}"
-      SIGNAL_ALLOWED_USERS="{{ secrets.hermes_signal_allowed_users }}"
-      SIGNAL_HOME_CHANNEL="{{ secrets.hermes_signal_allowed_users }}"
-      GIT_AUTHOR_NAME="{{ secrets.git_username | default('', true) }}"
-      GIT_AUTHOR_EMAIL="{{ secrets.git_email | default('', true) }}"
-      GIT_COMMITTER_NAME="{{ secrets.git_username | default('', true) }}"
-      GIT_COMMITTER_EMAIL="{{ secrets.git_email | default('', true) }}"
-      HERMES_WRITE_SAFE_ROOT="/opt/data:/tmp"
-      RESEND_API_KEY="{{ secrets.hermes_default_resend_api_key | default('', true) }}"
-    owner: llm_wiki
-    group: llm_wiki
-    mode: '0640'
+  when: item.skills_src is defined
 
 - name: Ensure hermes project home ownership for llm_wiki
   ansible.builtin.file:

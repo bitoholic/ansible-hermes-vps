@@ -20,15 +20,25 @@ hermes_user: hermes
 hermes_home: /opt/hermes
 hermes_signal_http_url: "http://signal-cli:8080"
 
-# Per-profile Hermes credentials. Consumed directly by the hermes role's profile loop.
-# This is the one intentional exception to the single-seam contract: profile consumption
-# (reading secrets.profiles.* from the resolver) is deferred to a later change. Until then
-# it still reads the environment directly.
+# Per-profile Hermes agents, expressed as data and consumed by a single render loop in
+# the hermes role. The `default` entry is Jack-O-Rama (the chief-of-staff profile) and is
+# deployed to hermes_home directly; sub-profiles are deployed under hermes_home/profiles/<name>.
+# `target_dir` overrides the deploy location; `config_template`/`soul_template`/`env_template`/
+# `skills_src` default to per-profile files under roles/hermes/{templates,files}/profiles/<name>/.
+# Note: the per-profile secret lookups here are the deferred single-seam exception (see epic
+# 02 ticket #04) — they will move to secrets.profiles.* from the resolver.
 hermes_profiles:
+  - name: default
+    target_dir: "{{ hermes_home }}"
+    config_template: config.yaml.j2
+    soul_template: SOUL.md.j2
+    env_template: env_default.j2
+    is_default: true
   - name: coder
     openrouter_api_key: "{{ lookup('env', 'OPENROUTER_API_KEY_CODER') }}"
     nous_portal_api_key: "{{ lookup('env', 'NOUS_PORTAL_API_KEY') }}"
     context7_api_key: "{{ lookup('env', 'CONTEXT7_API_KEY_CODER') }}"
+    skills_src: profiles/coder/skills/
   - name: intel
     openrouter_api_key: "{{ lookup('env', 'OPENROUTER_API_KEY_INTEL') }}"
     nous_portal_api_key: "{{ lookup('env', 'NOUS_PORTAL_API_KEY') }}"
