@@ -1,0 +1,6 @@
+---
+# Hermes's ingress contribution (epic 03, #02): the dash profile it publishes.
+hermes_gateway_publish:
+  - host: dash
+    upstream: hermes-agent:9119
+    mfa: true

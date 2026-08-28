@@ -1,0 +1,6 @@
+---
+# SilverBullet's ingress contribution (epic 03, #02): the wiki it publishes.
+silverbullet_gateway_publish:
+  - host: wiki
+    upstream: silverbullet:3000
+    mfa: true

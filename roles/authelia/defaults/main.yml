@@ -1,0 +1,7 @@
+---
+# Authelia's ingress contribution (epic 03, #02): its own forward-auth upstream,
+# explicitly MFA-exempt (it IS the authenticator).
+authelia_gateway_publish:
+  - host: auth
+    upstream: authelia:9091
+    mfa: false
