@@ -19,21 +19,21 @@
   community.general.git_config:
     name: user.name
     scope: global
-    value: "{{ lookup('env', 'GIT_USERNAME') | default('') }}"
+    value: "{{ secrets.git_username | default('') }}"
     state: present
   become: true
-  become_user: "{{ admin_username }}"
-  when: lookup('env', 'GIT_USERNAME') | default('') | length > 0
+  become_user: "{{ secrets.admin_username }}"
+  when: secrets.git_username | default('') | length > 0
 
 - name: Configure global git user.email for admin user
   community.general.git_config:
     name: user.email
     scope: global
-    value: "{{ lookup('env', 'GIT_EMAIL') | default('') }}"
+    value: "{{ secrets.git_email | default('') }}"
     state: present
   become: true
-  become_user: "{{ admin_username }}"
-  when: lookup('env', 'GIT_EMAIL') | default('') | length > 0
+  become_user: "{{ secrets.admin_username }}"
+  when: secrets.git_email | default('') | length > 0
 
 - name: Configure unattended-upgrades
   ansible.builtin.copy:

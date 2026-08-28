@@ -11,21 +11,21 @@
   }
 }
 
-wiki.{{ silverbullet_domain }} {
+wiki.{{ secrets.silverbullet_domain }} {
   log
   tls internal
   import mfa_auth
   reverse_proxy silverbullet:3000
 }
 
-dash.{{ silverbullet_domain }} {
+dash.{{ secrets.silverbullet_domain }} {
   log
   tls internal
   import mfa_auth
   reverse_proxy hermes-agent:9119
 }
 
-auth.{{ silverbullet_domain }} {
+auth.{{ secrets.silverbullet_domain }} {
   log
   tls internal
   reverse_proxy authelia:9091

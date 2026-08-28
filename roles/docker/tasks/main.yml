@@ -3,8 +3,8 @@
   ansible.builtin.assert:
     that:
       - ansible_os_family == 'Debian'
-      - admin_username is defined
-      - admin_username | string | length > 0
+      - secrets.admin_username is defined
+      - secrets.admin_username | string | length > 0
     fail_msg: "Docker role requires a Debian/Ubuntu target and admin_username defined."
 
 - name: Install Docker prerequisites
@@ -49,7 +49,7 @@
 
 - name: Ensure admin user is in the docker group
   ansible.builtin.user:
-    name: "{{ admin_username }}"
+    name: "{{ secrets.admin_username }}"
     groups: docker
     append: true
     state: present

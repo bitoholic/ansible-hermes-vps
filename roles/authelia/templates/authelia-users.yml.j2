@@ -1,7 +1,7 @@
 users:
-  {{ authelia_admin_username }}:
+  {{ secrets.authelia_admin_username }}:
     displayname: Administrator
-    email: {{ authelia_admin_email }}
-    password: '{{ authelia_admin_password_hash }}'
+    email: {{ secrets.authelia_admin_email }}
+    password: '{{ secrets.authelia_admin_password_hash }}'
     groups:
       - admins

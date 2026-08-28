@@ -4,23 +4,12 @@
   connection: local
   gather_facts: true
   vars:
-    authelia_admin_password_hash: "$argon2id$v=19$m=65536,t=3,p=4$dummyhash"
-    authelia_admin_email: admin@example.com
-    authelia_admin_username: admin
-    authelia_session_secret: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
-    authelia_storage_key: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
     authelia_config_dir: /etc/authelia
     authelia_data_dir: /var/lib/authelia
     admin_username: admin
     admin_ssh_public_key: "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQCtestkey"
     hermes_port: 8642
     hermes_signal_http_url: "http://signal-cli-api:8080"
-    hermes_signal_account: signal@example.com
-    hermes_signal_allowed_users: "user1,user2"
-    hermes_default:
-      openrouter_api_key: fake-openrouter
-      nous_portal_api_key: fake-nous
-      github_token: fake-github-token
     hermes_profiles:
       - name: coder
         openrouter_api_key: fake-openrouter-coder
@@ -33,24 +22,35 @@
     silverbullet_data_dir: /opt/llm-wiki
     silverbullet_compose_dir: /opt/silverbullet
     backup_working_branch: vps-sync
-    backup_github_token: fake-token
-    secrets_enforce_required: false
-  environment:
-    OPENROUTER_API_KEY_WIKI: fake-openrouter
-    NOUS_PORTAL_API_KEY: fake-nous
-    GITHUB_TOKEN: fake-github-token
-    RESEND_API_KEY: fake-resend
-    CONTEXT7_API_KEY_CODER: fake-context7
-    DASHBOARD_ADMIN_PASSWORD_HASH: fake-hash
-    SIGNAL_ACCOUNT: signal@example.com
-    SIGNAL_ALLOWED_USERS: "user1,user2"
-    GIT_USERNAME: Test User
-    GIT_EMAIL: test@example.com
-    BACKUP_GITHUB_TOKEN: fake-token
   tasks:
-    - name: Preview secrets resolver (expand)
-      ansible.builtin.include_role:
-        name: secrets
+    # Stub the resolved secrets dict so the roles can be dry-run locally.
+    # In real runs the `secrets` role resolves these from environment variables
+    # (sourced from .env) and enforces required values.
+    - name: Stub resolved secrets for local dry-run
+      ansible.builtin.set_fact:
+        secrets:
+          authelia_admin_email: admin@example.com
+          authelia_admin_username: admin
+          authelia_admin_password_hash: "$argon2id$v=19$m=65536,t=3,p=4$dummyhash"
+          authelia_session_secret: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+          authelia_storage_key: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+          silverbullet_admin_username: admin
+          silverbullet_admin_password: P4ssw04d
+          silverbullet_domain: wiki.example.com
+          hermes_signal_account: signal@example.com
+          hermes_signal_allowed_users: "user1,user2"
+          hermes_default_openrouter_api_key: fake-openrouter
+          hermes_default_nous_portal_api_key: fake-nous
+          hermes_default_github_token: fake-github-token
+          hermes_default_resend_api_key: fake-resend
+          hermes_default_context7_api_key: fake-context7
+          hermes_default_dashboard_admin_password_hash: fake-hash
+          github_repo_slug: example/llm-wiki
+          backup_github_token: fake-token
+          admin_username: admin
+          admin_ssh_public_key: "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQCtestkey"
+          git_username: Test User
+          git_email: test@example.com
 
     - name: Preview common role tasks
       ansible.builtin.include_role:

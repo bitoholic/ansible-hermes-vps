@@ -2,9 +2,9 @@
 - name: Assert mandatory secrets are present
   ansible.builtin.assert:
     that:
-      - authelia_admin_password_hash | default('') | string | length > 0
-      - authelia_session_secret | default('') | string | length > 0
-      - authelia_storage_key | default('') | string | length > 0
+      - secrets.authelia_admin_password_hash | default('') | string | length > 0
+      - secrets.authelia_session_secret | default('') | string | length > 0
+      - secrets.authelia_storage_key | default('') | string | length > 0
     fail_msg: Provide the required secrets via --extra-vars or inventory group_vars before running the playbook
 
 - name: Ensure Authelia configuration and data directories exist

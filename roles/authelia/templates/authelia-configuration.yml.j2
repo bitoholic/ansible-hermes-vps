@@ -20,20 +20,20 @@ authentication_backend:
 access_control:
   default_policy: deny
   rules:
-    - domain: dash.'{{ silverbullet_domain }}'
+    - domain: dash.'{{ secrets.silverbullet_domain }}'
       policy: two_factor
-    - domain: wiki.'{{ silverbullet_domain }}'
+    - domain: wiki.'{{ secrets.silverbullet_domain }}'
       policy: two_factor
-    - domain: 'auth.{{ silverbullet_domain }}'
+    - domain: 'auth.{{ secrets.silverbullet_domain }}'
       policy: bypass
 
 session:
-  secret: '{{ authelia_session_secret }}'
+  secret: '{{ secrets.authelia_session_secret }}'
   name: authelia_session
   cookies:
-    - domain: '{{ silverbullet_domain }}'
-      authelia_url: 'https://auth.{{ silverbullet_domain }}'
-      default_redirection_url: 'https://wiki.{{ silverbullet_domain }}'
+    - domain: '{{ secrets.silverbullet_domain }}'
+      authelia_url: 'https://auth.{{ secrets.silverbullet_domain }}'
+      default_redirection_url: 'https://wiki.{{ secrets.silverbullet_domain }}'
   expiration: 1h
   inactivity: 5m
   remember_me_duration: 1M
@@ -44,7 +44,7 @@ regulation:
   ban_time: 5m
 
 storage:
-  encryption_key: '{{ authelia_storage_key }}'
+  encryption_key: '{{ secrets.authelia_storage_key }}'
   local:
     path: /var/lib/authelia/db.sqlite3
 
@@ -54,4 +54,4 @@ notifier:
     filename: /var/lib/authelia/notification.txt
 
 totp:
-  issuer: 'auth.{{ silverbullet_domain }}'
+  issuer: 'auth.{{ secrets.silverbullet_domain }}'

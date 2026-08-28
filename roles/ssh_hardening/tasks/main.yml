@@ -2,10 +2,10 @@
 - name: Assert admin SSH hardening variables are present
   ansible.builtin.assert:
     that:
-      - admin_username is defined
-      - admin_username | string | length > 0
-      - admin_ssh_public_key is defined
-      - admin_ssh_public_key | string | length > 0
+      - secrets.admin_username is defined
+      - secrets.admin_username | string | length > 0
+      - secrets.admin_ssh_public_key is defined
+      - secrets.admin_ssh_public_key | string | length > 0
     fail_msg: "admin_username and admin_ssh_public_key must be set before running ssh_hardening."
 
 - name: Ensure openssh client is installed for local SSH authentication testing
