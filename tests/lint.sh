@@ -44,3 +44,10 @@ python3 scripts/generate-env.py --check
 # Caddyfile, one site block per route with mfa_auth applied unless mfa: false, fail-fast on
 # malformed routes.
 ./tests/check-gateway-render.sh
+
+# backup_sync module tests (epic 04 tickets #01-#04): CLI interface + sync/create-pr/git-crypt-init
+# unit tests (git-crypt-init guarded/skipped when the git-crypt binary is absent). Also asserts the
+# backup role is a thin adapter (epic 04 ticket #07): deploys only the module, the credential helper,
+# the watcher units, and the cron — no stray script templates.
+./tests/check-backup-sync.sh
+./tests/check-backup-role.sh
