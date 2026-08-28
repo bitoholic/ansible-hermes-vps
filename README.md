@@ -86,7 +86,7 @@ ansible-playbook -i localhost, tests/test_playbook.yml --check --diff
 Tracked from the last infrastructure audit. Don't consider this deploy-ready until these are resolved:
 
 - [ ] **No real sandbox isolation for Compile-O-Rama.** All profiles share one container and one bind mount (`hermes_home:/opt/data`); there is no `/workspace`-only mount and no `ALLOWED_DIRECTORIES` enforcement. The coder subagent can currently read the wiki and every profile's `.env`.
-- [ ] The GitHub token is embedded directly in the wiki's git remote URL (persists in `.git/config` in plaintext) rather than via a scoped deploy key or credential helper.
+- [x] ~~The GitHub token was embedded directly in the wiki's git remote URL (persists in `.git/config` in plaintext).~~ Closed: the clone now uses a token-less URL and git authenticates via a credential helper / askpass that reads `GITHUB_TOKEN` from the environment (see `roles/backup/files/git-credential-env`). The token value is never written to `.git/config` or any remote URL.
 
 ## 📝 Notes
 

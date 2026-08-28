@@ -2,6 +2,8 @@
 # Backup role — thin adapter over the backup_sync module.
 # All sync/PR/git-crypt behavior lives in backup_sync/backup_sync (CLI); this role only wires
 # Ansible facts (paths, branch, resolved secrets) to that module and manages the systemd units.
+# The GitHub token reaches git via the environment (credential helper / askpass), never in a
+# remote URL — so it is not persisted in .git/config (closes the README Known Limitation).
 
 - name: Ensure wiki directory exists
   ansible.builtin.file:
@@ -20,15 +22,27 @@
     group: llm_wiki
     mode: '0755'
 
-- name: Bootstrap clone of the private wiki repository
-  # NOTE: token-in-URL leak is closed in epic 04 #06 (clone switches to a token-less URL with
-  # credential injection via env). Kept as-is here so #05 stays scoped to the adapter wiring.
+- name: Deploy git credential helper (reads GITHUB_TOKEN from env, no token stored)
+  ansible.builtin.copy:
+    src: git-credential-env
+    dest: "{{ silverbullet_compose_dir }}/bin/git-credential-env"
+    mode: '0755'
+    owner: llm_wiki
+    group: llm_wiki
+
+- name: Bootstrap clone of the private wiki repository (token-less URL)
+  # No token in the URL: git authenticates via GIT_ASKPASS -> git-credential-env, which reads
+  # GITHUB_TOKEN from the environment. The token value is never written to .git/config.
   ansible.builtin.git:
-    repo: "https://x-access-token:{{ secrets.hermes_default_github_token }}@github.com/{{ secrets.github_repo_slug }}.git"
+    repo: "https://github.com/{{ secrets.github_repo_slug }}.git"
     dest: "{{ silverbullet_data_dir }}"
     version: "main"
     clone: true
     update: false
+  environment:
+    GITHUB_TOKEN: "{{ secrets.hermes_default_github_token }}"
+    GIT_ASKPASS: "{{ silverbullet_compose_dir }}/bin/git-credential-env"
+    GIT_TERMINAL_PROMPT: "0"
   failed_when: false
   ignore_errors: "{{ ansible_check_mode }}"
 
@@ -50,10 +64,17 @@
 - name: Deploy backup_sync module
   ansible.builtin.copy:
     src: "{{ playbook_dir }}/backup_sync/backup_sync"
-    dest: "{{ silverbullet_compose_dir }}/bin/backup_sync"
+    dest: "{{ backup_sync_bin }}"
     mode: '0755'
     owner: llm_wiki
     group: llm_wiki
+
+- name: Configure repo-local git credential helper (env token, not stored in .git/config)
+  community.general.git_config:
+    repo: "{{ silverbullet_data_dir }}"
+    scope: local
+    name: credential.helper
+    value: "{{ silverbullet_compose_dir }}/bin/git-credential-env"
 
 - name: Initialize git-crypt and export the offline-recovery key (idempotent)
   ansible.builtin.command:

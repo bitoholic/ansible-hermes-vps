@@ -5,6 +5,9 @@ After=network.target
 [Service]
 Type=oneshot
 WorkingDirectory={{ silverbullet_data_dir }}
+# Provide the GitHub token to git via the environment (read by git-credential-env); the token
+# is never embedded in a remote URL. The repo-local credential.helper does the rest.
+Environment=GITHUB_TOKEN={{ secrets.hermes_default_github_token }}
 ExecStart={{ silverbullet_compose_dir }}/bin/backup_sync sync --repo {{ silverbullet_data_dir }} --branch {{ backup_working_branch }} --message '{{ backup_commit_message }}'
 User=llm_wiki
 Group=llm_wiki
