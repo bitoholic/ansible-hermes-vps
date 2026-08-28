@@ -59,4 +59,45 @@ after="$(git -C "$tmp/work" rev-parse HEAD)"
 rm -rf "$tmp"
 echo "sync unit test OK"
 
+# create-pr unit test: mock the GitHub API with a fake `curl` on PATH (no live token).
+echo "== backup_sync create-pr unit test =="
+tmp="$(mktemp -d)"
+fake="$tmp/fake"
+mkdir -p "$fake/bin"
+# Real git repo so the module can read remote.origin.url; slug parsed from an SSH URL.
+git init -q "$tmp/repo"
+git -C "$tmp/repo" remote add origin "git@github.com:acme/wiki.git"
+
+# 201 success stub: records args, replies with a created-PR JSON + status line.
+cat > "$fake/bin/curl" <<'FAKE'
+#!/usr/bin/env bash
+echo "$@" > "$(dirname "$0")/../curl_args"
+printf '{"number": 1, "html_url": "http://fake/1"}\n201\n'
+FAKE
+chmod +x "$fake/bin/curl"
+
+out="$(GITHUB_TOKEN=secret-token PATH="$fake/bin:$PATH" "$MODULE" create-pr --repo "$tmp/repo" --branch vps-sync --message "Daily sync" --api-url http://fake.example)"
+grep -q "Created PR successfully" <<< "$out" || { echo "FAIL: create-pr did not report success"; rm -rf "$tmp"; exit 1; }
+
+args="$(cat "$fake/curl_args")"
+echo "$args" | grep -q "POST" || { echo "FAIL: create-pr did not POST"; rm -rf "$tmp"; exit 1; }
+echo "$args" | grep -q "/repos/acme/wiki/pulls" || { echo "FAIL: wrong PR endpoint (owner/repo)"; rm -rf "$tmp"; exit 1; }
+echo "$args" | grep -q 'Authorization: token secret-token' || { echo "FAIL: token not sent via Authorization header"; rm -rf "$tmp"; exit 1; }
+echo "$args" | grep -q "fake.example/repos" | grep -q "secret-token" && { echo "FAIL: token leaked into the URL"; rm -rf "$tmp"; exit 1; }
+echo "$args" | grep -q '"title": "Daily sync"' || { echo "FAIL: PR title missing"; rm -rf "$tmp"; exit 1; }
+echo "$args" | grep -q '"head": "vps-sync"' || { echo "FAIL: PR head missing"; rm -rf "$tmp"; exit 1; }
+echo "$args" | grep -q '"base": "main"' || { echo "FAIL: PR base missing"; rm -rf "$tmp"; exit 1; }
+
+# 422 "already exists" is treated as success (idempotent nightly run).
+cat > "$fake/bin/curl" <<'FAKE'
+#!/usr/bin/env bash
+printf '{"message": "A pull request already exists for vps-sync."}\n422\n'
+FAKE
+chmod +x "$fake/bin/curl"
+out="$(GITHUB_TOKEN=secret-token PATH="$fake/bin:$PATH" "$MODULE" create-pr --repo "$tmp/repo" --branch vps-sync --message "Daily sync" --api-url http://fake.example)"
+grep -q "Pull request already exists" <<< "$out" || { echo "FAIL: 422 already-exists not handled idempotently"; rm -rf "$tmp"; exit 1; }
+
+rm -rf "$tmp"
+echo "create-pr unit test OK"
+
 echo "backup_sync OK"

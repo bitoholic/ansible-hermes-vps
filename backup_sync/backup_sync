@@ -34,15 +34,17 @@ EOF
 }
 
 # Parse the common options shared by every subcommand. Sets the globals _repo / _branch /
-# _message / _token_env. Returns 0 on success, 1 on a usage error, 2 when --help was requested.
+# _message / _token_env / _api_url. Returns 0 on success, 1 on a usage error, 2 when --help
+# was requested.
 parse_common() {
-  _repo=""; _branch=""; _message=""; _token_env="GITHUB_TOKEN"
+  _repo=""; _branch=""; _message=""; _token_env="GITHUB_TOKEN"; _api_url="https://api.github.com"
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --repo)       _repo="${2:-}"; shift 2;;
       --branch)     _branch="${2:-}"; shift 2;;
       --message)    _message="${2:-}"; shift 2;;
       --token-env)  _token_env="${2:-}"; shift 2;;
+      --api-url)    _api_url="${2:-}"; shift 2;;
       -h|--help)    return 2;;
       *)            echo "error: unknown option: $1" >&2; return 1;;
     esac
@@ -92,9 +94,50 @@ cmd_create_pr() {
     [[ $rc -eq 2 ]] && { usage; exit 0; }
     exit "$rc"
   }
+  repo="$_repo"; branch="$_branch"; message="$_message"; api_url="$_api_url"
   require_token || exit "$?"
-  echo "$PROG create-pr: not yet implemented (repo='$_repo' branch='$_branch')" >&2
-  exit 0
+  token="${!_token_env}"
+
+  remote_url="$(git -C "$repo" config --get remote.origin.url)"
+  # Extract owner/repo robustly from either SSH (git@host:owner/repo) or HTTPS
+  # (scheme://host/owner/repo, with or without an inline token) URLs. The original
+  # template's `${remote_url##*:}` only worked for SSH and mis-parsed HTTPS clones.
+  slug="${remote_url%.git}"
+  case "$slug" in
+    *@*:*)  slug="${slug##*:}";;
+    *://*)  slug="${slug#*://}"; slug="${slug#*/}";;
+  esac
+  if [[ -z "$slug" || "$slug" != */* ]]; then
+    echo "Could not parse repository path from remote URL: $remote_url" >&2
+    exit 1
+  fi
+  IFS='/' read -r owner repo <<< "$slug"
+
+  pr_body="{\"title\": \"$message\", \"head\": \"$branch\", \"base\": \"main\", \"body\": \"Automated PR from VPS sync branch.\"}"
+
+  response="$(curl -sS -w "\n%{http_code}" -X POST \
+    -H "Authorization: token $token" \
+    -H "Accept: application/vnd.github+json" \
+    "$api_url/repos/$owner/$repo/pulls" \
+    -d "$pr_body")"
+  http_code="$(tail -n1 <<< "$response")"
+  body="$(sed '$d' <<< "$response")"
+
+  if [[ "$http_code" == "201" ]]; then
+    echo "Created PR successfully."
+    exit 0
+  fi
+  if [[ "$http_code" == "422" ]] && grep -q "A pull request already exists" <<< "$body"; then
+    echo "Pull request already exists."
+    exit 0
+  fi
+  if [[ "$http_code" == "422" ]] && grep -q "No commits between" <<< "$body"; then
+    echo "No new commits to create a PR."
+    exit 0
+  fi
+  echo "Failed to create PR: HTTP $http_code" >&2
+  echo "$body" >&2
+  exit 1
 }
 
 cmd_git_crypt_init() {
