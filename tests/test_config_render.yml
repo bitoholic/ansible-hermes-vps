@@ -1,0 +1,36 @@
+---
+- hosts: localhost
+  connection: local
+  gather_facts: false
+  # Stub secrets so the shared template resolves; in a real run these come from the resolver.
+  vars:
+    secrets:
+      hermes_default_context7_api_key: stub-c7
+      hermes_default_github_token: stub-gh
+      hermes_default_dashboard_admin_password_hash: stub-ph
+  pre_tasks:
+    - ansible.builtin.include_vars:
+        file: "{{ playbook_dir }}/../group_vars/all/main.yml"
+  tasks:
+    - name: Render shared config.yaml.j2 per profile
+      ansible.builtin.template:
+        src: "{{ playbook_dir }}/../roles/hermes/templates/config.yaml.j2"
+        dest: "/tmp/hermes_cfg_{{ item.name }}.yaml"
+      loop: "{{ hermes_profiles }}"
+
+    - name: Assert per-profile structural invariants
+      ansible.builtin.assert:
+        that:
+          - cfg is defined
+          - (item.name == 'default') == ('dashboard' in cfg)
+          - (item.name == 'default') == (cfg.get('skills', {}).get('auto_load') == ['research/llm-wiki'])
+          - (item.name == 'intel') == ('tools' in cfg and not cfg.tools.terminal.enabled and not cfg.tools.filesystem.enabled and not cfg.tools.git.enabled)
+          - "('mcp_servers' in cfg) == (item.name != 'intel')"
+          - "not ('mcp_servers' in cfg) or (cfg.mcp_servers | length == 3)"
+          - "not ('mcp_servers' in cfg) or ('context7' in cfg.mcp_servers and 'github' in cfg.mcp_servers and 'playwright' in cfg.mcp_servers)"
+        fail_msg: "config.yaml mismatch for profile {{ item.name }}: {{ cfg }}"
+      loop: "{{ hermes_profiles }}"
+      vars:
+        cfg: "{{ lookup('file', '/tmp/hermes_cfg_' ~ item.name ~ '.yaml') | from_yaml }}"
+      loop_control:
+        label: "{{ item.name }}"

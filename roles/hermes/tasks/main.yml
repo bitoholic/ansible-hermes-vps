@@ -69,7 +69,7 @@
 
 - name: Deploy Hermes profile config.yaml
   ansible.builtin.template:
-    src: "{{ item.config_template | default('profiles/' ~ item.name ~ '/config.yaml.j2') }}"
+    src: "{{ item.config_template | default('config.yaml.j2') }}"
     dest: "{{ item.target_dir | default(hermes_home ~ '/profiles/' ~ item.name) }}/config.yaml"
     owner: llm_wiki
     group: llm_wiki

@@ -25,6 +25,9 @@ hermes_signal_http_url: "http://signal-cli:8080"
 # deployed to hermes_home directly; sub-profiles are deployed under hermes_home/profiles/<name>.
 # `target_dir` overrides the deploy location; `config_template`/`soul_template`/`env_template`/
 # `skills_src` default to per-profile files under roles/hermes/{templates,files}/profiles/<name>/.
+# The shared `config.yaml.j2` template is parameterized by the per-profile fields below
+# (model_*, enable_base_features, enable_web/browser, mcp_servers, tools_disabled,
+# skills_auto_load, dashboard, onboarding_seen) — see epic 02 ticket #02.
 # Note: the per-profile secret lookups here are the deferred single-seam exception (see epic
 # 02 ticket #04) — they will move to secrets.profiles.* from the resolver.
 hermes_profiles:
@@ -34,14 +37,49 @@ hermes_profiles:
     soul_template: SOUL.md.j2
     env_template: env_default.j2
     is_default: true
+    model_provider: nous
+    model_default: deepseek/deepseek-v4-flash
+    terminal_cwd: /opt/data/wiki
+    enable_base_features: true
+    enable_web: true
+    enable_browser: true
+    dashboard: true
+    skills_auto_load:
+      - research/llm-wiki
+    onboarding_seen: busy_input_prompt
+    context7_api_key: "{{ secrets.hermes_default_context7_api_key }}"
+    mcp_servers:
+      - context7
+      - github
+      - playwright
   - name: coder
+    config_template: config.yaml.j2
     openrouter_api_key: "{{ lookup('env', 'OPENROUTER_API_KEY_CODER') }}"
     nous_portal_api_key: "{{ lookup('env', 'NOUS_PORTAL_API_KEY') }}"
     context7_api_key: "{{ lookup('env', 'CONTEXT7_API_KEY_CODER') }}"
     skills_src: profiles/coder/skills/
+    model_provider: nous
+    model_default: qwen/qwen3-coder-flash
+    terminal_cwd: /opt/data/projects
+    enable_web: false
+    enable_browser: false
+    onboarding_seen: tool_progress_prompt
+    mcp_servers:
+      - context7
+      - github
+      - playwright
   - name: intel
+    config_template: config.yaml.j2
     openrouter_api_key: "{{ lookup('env', 'OPENROUTER_API_KEY_INTEL') }}"
     nous_portal_api_key: "{{ lookup('env', 'NOUS_PORTAL_API_KEY') }}"
+    model_provider: openrouter
+    model_default: openrouter/free
+    enable_web: true
+    enable_browser: false
+    tools_disabled:
+      - terminal
+      - filesystem
+      - git
 
 # Backup and sync (non-secret)
 backup_working_branch: vps-sync

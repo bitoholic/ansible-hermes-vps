@@ -1,14 +1,39 @@
+{# Shared Hermes config template, parameterized by the active profile entry (`item`). #}
+{# Every `hermes_profiles` entry renders through this one file; per-profile divergence #}
+{# lives as data on the entry (model_*, enable_base_features, enable_web/browser, #}
+{# mcp_servers, tools_disabled, skills_auto_load, dashboard, onboarding_seen) rather #}
+{# than in a separate template file. Output is semantically identical to the previous #}
+{# three per-profile templates. #}
 model:
-  provider: nous
-  default: deepseek/deepseek-v4-flash
+  provider: {{ item.model_provider | default('nous') }}
+  default: {{ item.model_default | default('deepseek/deepseek-v4-flash') }}
+
+{% if item.terminal_cwd is defined %}
 terminal:
-  cwd: /opt/data/wiki
+  cwd: {{ item.terminal_cwd }}
+{% endif %}
+
+{% if item.tools_disabled is defined %}
+tools:
+{% for tool in item.tools_disabled %}
+  {{ tool }}:
+    enabled: false
+{% endfor %}
+{% endif %}
+
+{% if item.enable_web | default(false) %}
 web:
   backend: nous
   use_gateway: true
+{% endif %}
+
+{% if item.enable_browser | default(false) %}
 browser:
   backend: nous
   use_gateway: true
+{% endif %}
+
+{% if item.enable_base_features | default(false) %}
 compression:
   enabled: true
   threshold: 0.5
@@ -32,43 +57,61 @@ delegation:
   max_concurrent_children: 3
   provider: nous
   model: qwen/qwen3-coder-flash
+{% endif %}
+
+{% set mcp_pkgs = {
+  'context7': '@upstash/context7-mcp',
+  'github': '@modelcontextprotocol/server-github',
+  'playwright': '@modelcontextprotocol/server-playwright'
+} %}
+{% if item.mcp_servers | default([]) | length > 0 %}
 mcp_servers:
-  context7:
+{% for name in item.mcp_servers %}
+  {{ name }}:
     command: npx
     args:
       - -y
-      - "@upstash/context7-mcp"
+      - "{{ mcp_pkgs[name] }}"
+{% if name == 'context7' %}
     env:
-      CONTEXT7_API_KEY: "{{ secrets.hermes_default_context7_api_key }}"
-  github:
-    command: npx
-    args:
-      - -y
-      - "@modelcontextprotocol/server-github"
+      CONTEXT7_API_KEY: "{{ item.context7_api_key }}"
+{% elif name == 'github' %}
     env:
       GITHUB_PERSONAL_ACCESS_TOKEN: "{{ secrets.hermes_default_github_token }}"
-  playwright:
-    command: npx
-    args:
-      - -y
-      - "@modelcontextprotocol/server-playwright"
+{% endif %}
+{% endfor %}
+{% endif %}
+
+{% if item.skills_auto_load is defined %}
 skills:
   auto_load:
-    - research/llm-wiki
+{% for skill in item.skills_auto_load %}
+    - {{ skill }}
+{% endfor %}
+{% endif %}
+
+{% if item.enable_base_features | default(false) %}
 timezone: Europe/London
 security:
   tirith_enabled: true
-onboarding:
-  seen:
-    busy_input_prompt: true
 image_gen:
   use_gateway: true
 video_gen:
   provider: fal
   use_gateway: true
+{% endif %}
+
+{% if item.onboarding_seen is defined %}
+onboarding:
+  seen:
+    {{ item.onboarding_seen }}: true
+{% endif %}
+
+{% if item.dashboard | default(false) %}
 dashboard:
   host: "0.0.0.0"
   port: 9119
   basic_auth:
     username: "admin"
     password_hash: "{{ secrets.hermes_default_dashboard_admin_password_hash }}"
+{% endif %}

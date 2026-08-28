@@ -33,3 +33,7 @@ python3 scripts/generate-env.py --check
 
 # Resolver unit test: crafted-env resolution + fail-fast naming (runs under --check).
 ./tests/check-resolver.sh
+
+# Hermes profile config render invariants (epic 02 ticket #02/#03 guard): every profile
+# renders through the single shared config.yaml.j2 without losing its shape.
+./tests/check-config-render.sh
