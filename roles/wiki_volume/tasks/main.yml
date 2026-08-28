@@ -1,0 +1,30 @@
+---
+- name: Lookup llm_wiki passwd entry
+  ansible.builtin.getent:
+    database: passwd
+    key: llm_wiki
+  register: wiki_volume_llm_user
+  failed_when: false
+  changed_when: false
+
+- name: Assert llm_wiki user was resolved (created by the users role)
+  ansible.builtin.assert:
+    that:
+      - wiki_volume_llm_user.ansible_facts is defined
+      - wiki_volume_llm_user.ansible_facts.getent_passwd.llm_wiki is defined
+    fail_msg: >-
+      The llm_wiki user was not found; it must be created by the users role before
+      the wiki_volume role runs.
+
+- name: Set wiki_volume_uid and wiki_volume_gid facts from llm_wiki
+  ansible.builtin.set_fact:
+    wiki_volume_uid: "{{ wiki_volume_llm_user.ansible_facts.getent_passwd.llm_wiki[1] }}"
+    wiki_volume_gid: "{{ wiki_volume_llm_user.ansible_facts.getent_passwd.llm_wiki[2] }}"
+
+- name: Ensure wiki data directory exists and is owned by llm_wiki
+  ansible.builtin.file:
+    path: "{{ silverbullet_data_dir }}"
+    state: directory
+    owner: llm_wiki
+    group: llm_wiki
+    mode: '0775'

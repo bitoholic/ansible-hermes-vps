@@ -1,6 +1,6 @@
 # Spec: Wiki-Volume Ownership Seam
 
-> Status: ready-for-agent (draft)
+> Status: ready-for-agent
 > Source: Architecture review candidate #5 — "Wiki-volume ownership seam"
 > Related: `04-backup-sync-module` (consumes the wiki store), `02-hermes-profile-module` (also touches it)
 > Vocabulary: "wiki store", "Hermes agent".
@@ -34,7 +34,7 @@ This gives **locality** (one module owns the wiki store) and removes the duplica
 
 ## Implementation Decisions
 
-- **Module introduced:** a `wiki_volume` role that is the sole owner of the wiki data directory — creation, `llm_wiki` ownership/mode, (optionally) git-crypt init, and a `set_fact` exposing `wiki_uid` / `wiki_gid`.
+- **Module introduced:** a `wiki_volume` role that is the sole owner of the wiki data directory — creation, `llm_wiki` ownership/mode, (optionally) git-crypt init, and a `set_fact` exposing `wiki_volume_uid`/`wiki_volume_gid`.
 - **Interface exposed:** other roles depend on `wiki_volume` and consume its facts; they no longer call `file` on `silverbullet_data_dir` nor `getent` for `llm_wiki`.
 - **Seam:** `wiki_volume` is the single adapter between "the data dir exists and is owned" and the rest of the stack. Highest seam preserved — only one module touches the directory.
 - **Consumers:** `backup` and `hermes` both gain a dependency on `wiki_volume` and drop their duplicated `file`/`getent` tasks. The migration removes `roles/backup/tasks/main.yml:2-9` and `roles/hermes/tasks/main.yml:141-147` (and the Hermes `getent` at `:17-28` if not otherwise needed).
@@ -61,3 +61,19 @@ This gives **locality** (one module owns the wiki store) and removes the duplica
 - This is the **speculative** candidate: the duplication is currently only two small `file` tasks, so the leverage is low unless the wiki store gains consumers or richer ownership rules.
 - Recommended as the **fifth / last** change — or skipped until a third consumer of the wiki store appears. The spec is recorded so a future review doesn't re-suggest it without cause.
 - If rejected as not worth it now, consider recording that decision as an ADR (e.g. "wiki store ownership stays duplicated until a 3rd consumer exists") so future architecture reviews don't re-raise it.
+
+## Tickets
+
+Consolidation approved (not skipped). Five vertical slices under `.scratch/05-wiki-volume-ownership/issues/`:
+
+- **#01** `01-create-wiki-volume-role.md` — introduce `wiki_volume` role (sole owner of `silverbullet_data_dir`; create + `llm_wiki` ownership/mode `0775`; resolve uid/gid once via `getent`; `set_fact` `wiki_volume_uid`/`wiki_volume_gid`). Depends on `users`.
+- **#02** `02-silverbullet-consume-wiki-volume.md` — `silverbullet` drops its duplicate `file` + `getent`; consumes `wiki_volume_uid`/`wiki_volume_gid`. *Blocked by #01.*
+- **#03** `03-backup-consume-wiki-volume.md` — `backup` drops its duplicate `file` task; rest unchanged. *Blocked by #01.*
+- **#04** `04-hermes-consume-wiki-volume.md` — `hermes` drops its `getent` + `set_fact`; consumes `wiki_volume_uid`/`wiki_volume_gid`. *Blocked by #01.*
+- **#05** `05-tests-lint-wiring.md` — `tests/check-wiki-volume.sh` (consumer-contract grep + idempotency/owner assertion) wired into `tests/lint.sh`. *Blocked by #01–#04.*
+
+> Note: spec line refs (`backup:2-9`, `hermes:141-147`) were stale at ticket time — the actual
+> duplication is `silverbullet_data_dir` created by `roles/silverbullet` **and** `roles/backup`,
+> and `getent` for `llm_wiki` duplicated in `roles/silverbullet` **and** `roles/hermes`. git-crypt
+> init stays in `backup` (moved there by epic 04), so `wiki_volume` owns only directory
+> creation/ownership + uid/gid facts, per the spec's "optional follow-on" note.
