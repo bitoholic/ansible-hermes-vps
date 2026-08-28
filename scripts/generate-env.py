@@ -20,13 +20,11 @@ MANIFEST = os.path.join(REPO, "group_vars", "all", "secrets.yml")
 TEMPLATE = os.path.join(REPO, ".env.template")
 SETUP = os.path.join(REPO, "setup-env.sh")
 
-# Operator-facing vars that are needed but not yet (or not ever) in the manifest.
-# Per-profile Hermes keys are still consumed via group_vars hermes_profiles (ticket #06
-# will fold them into the manifest); TARGET_HOST drives the ad-hoc ansible target.
+# Operator-facing vars that are needed but not in the manifest.
+# Per-profile Hermes keys now live in the manifest (profile-scoped); TARGET_HOST drives
+# the ad-hoc ansible target.
 EXTRA = [
     ("TARGET_HOST", "Operator / host", False),
-    ("OPENROUTER_API_KEY_CODER", "Hermes profiles", True),
-    ("OPENROUTER_API_KEY_INTEL", "Hermes profiles", True),
 ]
 
 SECTION_ORDER = [
@@ -89,7 +87,8 @@ def load_entries():
 
     for key, val in manifest.items():
         env = val["env"]
-        add(env, bool(val.get("required", False)), is_secret(key), section_for_key(key), key)
+        section = "Hermes profiles" if val.get("profile") else section_for_key(key)
+        add(env, bool(val.get("required", False)), is_secret(key), section, key)
 
     return entries
 
