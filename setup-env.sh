@@ -3,29 +3,51 @@ set -euo pipefail
 
 ENV_FILE=".env"
 REQUIRED_VARS=(
+  # >>> GENERATED_REQUIRED_VARS >>>
   "TARGET_HOST"
+  "OPENROUTER_API_KEY_CODER"
+  "OPENROUTER_API_KEY_INTEL"
   "AUTHELIA_ADMIN_EMAIL"
   "AUTHELIA_ADMIN_USERNAME"
   "AUTHELIA_ADMIN_PASSWORD_HASH"
   "AUTHELIA_SESSION_SECRET"
   "AUTHELIA_STORAGE_KEY"
-  "SILVERBULLET_DOMAIN"
   "SILVERBULLET_ADMIN_USERNAME"
   "SILVERBULLET_ADMIN_PASSWORD"
+  "SILVERBULLET_DOMAIN"
   "SIGNAL_ACCOUNT"
   "SIGNAL_ALLOWED_USERS"
   "OPENROUTER_API_KEY_WIKI"
   "NOUS_PORTAL_API_KEY"
-  "OPENROUTER_API_KEY_CODER"
-  "CONTEXT7_API_KEY_CODER"
-  "OPENROUTER_API_KEY_INTEL"
   "GITHUB_TOKEN"
+  "RESEND_API_KEY"
+  "CONTEXT7_API_KEY_CODER"
+  "DASHBOARD_ADMIN_PASSWORD_HASH"
   "GITHUB_REPO_SLUG"
   "ADMIN_USERNAME"
   "ADMIN_SSH_PUBLIC_KEY"
   "GIT_USERNAME"
   "GIT_EMAIL"
+  # <<< GENERATED_REQUIRED_VARS <<<
+)
+
+# Variable names whose values are sensitive and should be read without echo.
+SECRET_VARS=(
+  # >>> GENERATED_SECRET_VARS >>>
+  "OPENROUTER_API_KEY_CODER"
+  "OPENROUTER_API_KEY_INTEL"
+  "AUTHELIA_ADMIN_PASSWORD_HASH"
+  "AUTHELIA_SESSION_SECRET"
+  "AUTHELIA_STORAGE_KEY"
+  "SILVERBULLET_ADMIN_PASSWORD"
+  "OPENROUTER_API_KEY_WIKI"
+  "NOUS_PORTAL_API_KEY"
+  "GITHUB_TOKEN"
   "RESEND_API_KEY"
+  "CONTEXT7_API_KEY_CODER"
+  "DASHBOARD_ADMIN_PASSWORD_HASH"
+  "ADMIN_SSH_PUBLIC_KEY"
+  # <<< GENERATED_SECRET_VARS <<<
 )
 
 prompt_value() {
@@ -73,17 +95,11 @@ if [[ -f "$ENV_FILE" ]]; then
 fi
 
 for var_name in "${REQUIRED_VARS[@]}"; do
-  case "$var_name" in
-    "RESEND_API_KEY"|"AUTHELIA_ADMIN_PASSWORD_HASH"|"AUTHELIA_SESSION_SECRET"|"AUTHELIA_STORAGE_KEY"|"OPENROUTER_API_KEY_WIKI"|"NOUS_PORTAL_API_KEY"|"OPENROUTER_API_KEY_CODER"|"CONTEXT7_API_KEY_CODER"|"OPENROUTER_API_KEY_INTEL"|"GITHUB_TOKEN"|"SILVERBULLET_ADMIN_PASSWORD")
-      prompt_value "$var_name" "Enter ${var_name}: " "true"
-      ;;
-    "SIGNAL_ACCOUNT"|"SIGNAL_ALLOWED_USERS")
-      prompt_value "$var_name" "Enter ${var_name}: " "false"
-      ;;
-    *)
-      prompt_value "$var_name" "Enter ${var_name}: " "false"
-      ;;
-  esac
+  if [[ " ${SECRET_VARS[*]} " == *" ${var_name} "* ]]; then
+    prompt_value "$var_name" "Enter ${var_name}: " "true"
+  else
+    prompt_value "$var_name" "Enter ${var_name}: " "false"
+  fi
   echo
  done
 
