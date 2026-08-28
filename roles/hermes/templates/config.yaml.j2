@@ -39,14 +39,14 @@ mcp_servers:
       - -y
       - "@upstash/context7-mcp"
     env:
-      CONTEXT7_API_KEY: "{{ hermes_default.context7_api_key }}"
+      CONTEXT7_API_KEY: "{{ secrets.hermes_default_context7_api_key }}"
   github:
     command: npx
     args:
       - -y
       - "@modelcontextprotocol/server-github"
     env:
-      GITHUB_PERSONAL_ACCESS_TOKEN: "{{ hermes_default.github_token }}"
+      GITHUB_PERSONAL_ACCESS_TOKEN: "{{ secrets.hermes_default_github_token }}"
   playwright:
     command: npx
     args:
@@ -71,4 +71,4 @@ dashboard:
   port: 9119
   basic_auth:
     username: "admin"
-    password_hash: "{{ hermes_default.dashboard_admin_password_hash }}"
+    password_hash: "{{ secrets.hermes_default_dashboard_admin_password_hash }}"

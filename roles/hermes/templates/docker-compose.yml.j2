@@ -12,7 +12,7 @@ services:
       - "--config"
       - "/var/lib/signal-cli"
       - "-u"
-      - "{{ hermes_signal_account }}"
+      - "{{ secrets.hermes_signal_account }}"
       - "daemon"
       - "--http"
       - "0.0.0.0:8080"
@@ -36,7 +36,7 @@ services:
       HERMES_DASHBOARD: "1"
       HERMES_UID: "{{hermes_host_uid}}"
       HERMES_GID: "{{hermes_host_gid}}"
-      GITHUB_TOKEN: "{{hermes_default.github_token}}"
+      GITHUB_TOKEN: "{{secrets.hermes_default_github_token}}"
     volumes:
       - "{{ hermes_home }}:/opt/data"
     networks:

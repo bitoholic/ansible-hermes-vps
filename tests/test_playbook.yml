@@ -35,6 +35,17 @@
     backup_working_branch: vps-sync
     backup_github_token: fake-token
     secrets_enforce_required: false
+  environment:
+    OPENROUTER_API_KEY_WIKI: fake-openrouter
+    NOUS_PORTAL_API_KEY: fake-nous
+    GITHUB_TOKEN: fake-github-token
+    RESEND_API_KEY: fake-resend
+    CONTEXT7_API_KEY_CODER: fake-context7
+    DASHBOARD_ADMIN_PASSWORD_HASH: fake-hash
+    SIGNAL_ACCOUNT: signal@example.com
+    SIGNAL_ALLOWED_USERS: "user1,user2"
+    GIT_USERNAME: Test User
+    GIT_EMAIL: test@example.com
   tasks:
     - name: Preview secrets resolver (expand)
       ansible.builtin.include_role:

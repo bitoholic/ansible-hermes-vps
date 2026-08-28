@@ -20,7 +20,7 @@ mcp_servers:
       - -y
       - '@modelcontextprotocol/server-github'
     env:
-      GITHUB_PERSONAL_ACCESS_TOKEN: "{{ hermes_default.github_token }}"
+      GITHUB_PERSONAL_ACCESS_TOKEN: "{{ secrets.hermes_default_github_token }}"
 
   playwright:
     command: npx
