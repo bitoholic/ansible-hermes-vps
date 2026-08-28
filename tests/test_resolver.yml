@@ -1,0 +1,25 @@
+---
+- name: Resolver unit test (crafted environment)
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  become: false
+  tasks:
+    - name: Include the secrets resolver role
+      ansible.builtin.include_role:
+        name: secrets
+
+    - name: Assert resolved secrets match the crafted environment
+      ansible.builtin.assert:
+        that:
+          - secrets.hermes_default_openrouter_api_key == 'WIKI_KEY'
+          - secrets.hermes_default_nous_portal_api_key == 'NOUS_KEY'
+          - secrets.hermes_default_github_token == 'GH_TOKEN'
+          - secrets.silverbullet_domain == 'wiki.example.com'
+          - secrets.hermes_default_resend_api_key == ''
+          - '"coder_openrouter_api_key" not in secrets'
+          - secrets.profiles.coder.openrouter_api_key == 'CODER_KEY'
+          - secrets.profiles.intel.openrouter_api_key == 'INTEL_KEY'
+        fail_msg: >-
+          resolver did not resolve secrets as expected:
+          {{ secrets | to_nice_json }}

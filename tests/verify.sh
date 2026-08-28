@@ -6,5 +6,6 @@ cd "$ROOT_DIR"
 
 ansible-playbook --syntax-check site.yml
 ansible-playbook --syntax-check tests/test_playbook.yml
+ansible-playbook --syntax-check tests/test_resolver.yml
 
 echo "Verification complete: syntax checks passed for site.yml and tests/test_playbook.yml."

@@ -11,8 +11,11 @@ fi
 
 ansible-playbook --syntax-check site.yml >/tmp/hermes-syntax.log
 ansible-playbook --syntax-check tests/test_playbook.yml >/tmp/hermes-test-syntax.log
-ansible-lint site.yml tests/test_playbook.yml
+ansible-lint site.yml tests/test_playbook.yml tests/test_resolver.yml
 
 # Ensure operator-facing env catalogs (.env.template, setup-env.sh) stay in sync
 # with the secret manifest. Regenerate with: python3 scripts/generate-env.py
 python3 scripts/generate-env.py --check
+
+# Resolver unit test: crafted-env resolution + fail-fast naming (runs under --check).
+./tests/check-resolver.sh
