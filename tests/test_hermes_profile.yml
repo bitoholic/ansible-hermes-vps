@@ -1,0 +1,114 @@
+---
+- hosts: localhost
+  connection: local
+  gather_facts: false
+  # Stub secrets so the shared templates resolve; in a real run these come from the resolver.
+  # `profiles.*` exercises the per-profile secret scoping asserted below.
+  vars:
+    secrets:
+      hermes_default_openrouter_api_key: d-or
+      hermes_default_nous_portal_api_key: d-nous
+      hermes_default_github_token: d-gh
+      hermes_default_resend_api_key: d-resend
+      hermes_default_context7_api_key: d-c7
+      hermes_default_dashboard_admin_password_hash: d-ph
+      hermes_signal_account: sig@example.com
+      hermes_signal_allowed_users: "u1,u2"
+      git_username: "Test User"
+      git_email: "test@example.com"
+      profiles:
+        coder:
+          openrouter_api_key: c-or
+          nous_portal_api_key: c-nous
+          context7_api_key: c-c7
+        intel:
+          openrouter_api_key: i-or
+          nous_portal_api_key: i-nous
+  pre_tasks:
+    - ansible.builtin.include_vars:
+        file: "{{ playbook_dir }}/../group_vars/all/main.yml"
+    # Redirect the deploy root to a temp dir so the test never touches /opt.
+    - ansible.builtin.set_fact:
+        hermes_home: "/tmp/hermes_test_profile"
+        templates_dir: "{{ playbook_dir }}/../roles/hermes/templates"
+        files_dir: "{{ playbook_dir }}/../roles/hermes/files"
+  tasks:
+    - ansible.builtin.file:
+        path: "{{ hermes_home }}"
+        state: absent
+    - ansible.builtin.file:
+        path: "{{ item.target_dir | default(hermes_home ~ '/profiles/' ~ item.name) }}"
+        state: directory
+        mode: '0700'
+      loop: "{{ hermes_profiles }}"
+      when: item.target_dir is not defined
+
+    # Mirror the hermes role render loop (epic 02 ticket #01) so this test exercises the
+    # same contract the role does, just into a temp dir.
+    - ansible.builtin.template:
+        src: "{{ templates_dir }}/{{ item.config_template | default('config.yaml.j2') }}"
+        dest: "{{ item.target_dir | default(hermes_home ~ '/profiles/' ~ item.name) }}/config.yaml"
+      loop: "{{ hermes_profiles }}"
+    - ansible.builtin.template:
+        src: "{{ templates_dir }}/{{ item.soul_template | default('profiles/' ~ item.name ~ '/SOUL.md.j2') }}"
+        dest: "{{ item.target_dir | default(hermes_home ~ '/profiles/' ~ item.name) }}/SOUL.md"
+      loop: "{{ hermes_profiles }}"
+    - ansible.builtin.template:
+        src: "{{ templates_dir }}/{{ item.env_template | default('env_profile.j2') }}"
+        dest: "{{ item.target_dir | default(hermes_home ~ '/profiles/' ~ item.name) }}/.env"
+      loop: "{{ hermes_profiles }}"
+    - ansible.builtin.copy:
+        dest: "{{ item.target_dir | default(hermes_home ~ '/profiles/' ~ item.name) }}/skills/"
+        src: "{{ files_dir }}/{{ item.skills_src }}"
+      loop: "{{ hermes_profiles }}"
+      when: item.skills_src is defined
+
+    - name: Stat rendered config/SOUL/.env for every profile
+      ansible.builtin.stat:
+        path: "{{ item.0.target_dir | default(hermes_home ~ '/profiles/' ~ item.0.name) }}/{{ item.1 }}"
+      loop: "{{ hermes_profiles | product(['config.yaml', 'SOUL.md', '.env']) | list }}"
+      loop_control:
+        label: "{{ item.0.name }}/{{ item.1 }}"
+      register: rendered_files
+
+    - name: Stat rendered skills dir for every profile
+      ansible.builtin.stat:
+        path: "{{ item.target_dir | default(hermes_home ~ '/profiles/' ~ item.name) }}/skills"
+      loop: "{{ hermes_profiles }}"
+      register: rendered_skills
+
+    - name: Assert N profiles -> N file sets; default present
+      ansible.builtin.assert:
+        that:
+          - rendered_files.results | selectattr('stat.exists') | list | length == (hermes_profiles | length * 3)
+          - rendered_skills.results | selectattr('stat.exists') | list | length == (hermes_profiles | selectattr('skills_src', 'defined') | list | length)
+          - rendered_skills.results | rejectattr('stat.exists') | list | length == (hermes_profiles | rejectattr('skills_src', 'defined') | list | length)
+          - "'default' in (hermes_profiles | map(attribute='name') | list)"
+        fail_msg: "render file-set mismatch"
+
+    - name: Read rendered .env files
+      ansible.builtin.slurp:
+        path: "{{ item }}"
+      loop:
+        - "{{ hermes_home }}/.env"
+        - "{{ hermes_home }}/profiles/coder/.env"
+        - "{{ hermes_home }}/profiles/intel/.env"
+      loop_control:
+        label: "{{ item }}"
+      register: env_files
+
+    - name: Assert .env regression + per-profile secret scoping
+      ansible.builtin.assert:
+        that:
+          - "'SIGNAL_HTTP_URL' in default_env"
+          - "'RESEND_API_KEY' in default_env"
+          - "'OPENROUTER_API_KEY=\"d-or\"' in default_env"
+          - "'CONTEXT7_API_KEY=\"c-c7\"' in coder_env"
+          - "'SIGNAL_HTTP_URL' not in coder_env"
+          - "'OPENROUTER_API_KEY=\"i-or\"' in intel_env"
+          - "'CONTEXT7_API_KEY=\"\"' in intel_env"
+        fail_msg: "env scoping mismatch"
+      vars:
+        default_env: "{{ (env_files.results | selectattr('item', 'equalto', hermes_home ~ '/.env') | list | first).content | b64decode }}"
+        coder_env: "{{ (env_files.results | selectattr('item', 'equalto', hermes_home ~ '/profiles/coder/.env') | list | first).content | b64decode }}"
+        intel_env: "{{ (env_files.results | selectattr('item', 'equalto', hermes_home ~ '/profiles/intel/.env') | list | first).content | b64decode }}"

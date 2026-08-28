@@ -35,3 +35,7 @@ python3 scripts/generate-env.py --check
 # Hermes profile config render invariants (epic 02 ticket #02/#03 guard): every profile
 # renders through the single shared config.yaml.j2 without losing its shape.
 ./tests/check-config-render.sh
+
+# Hermes profile render behavioral test (epic 02 ticket #05): N profiles -> N file sets,
+# default present, .env regression + per-profile secret scoping.
+./tests/check-hermes-profile.sh
