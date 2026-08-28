@@ -24,6 +24,8 @@ There is **one** `hermes-agent` container, built from the local `Dockerfile` and
 - **Compile-O-Rama** (`profiles/coder`) — coding sandbox with Git + GitHub MCP + Context7 MCP + Playwright MCP tools enabled.
 - **Intel Scraper** (`profiles/intel`) — background news-scraping agent with `terminal`, `filesystem`, and `git` tools explicitly **disabled**.
 
+The set of agents that exist is defined entirely as **data** in `group_vars/all/main.yml` → `hermes_profiles`. That list is the single source of truth for "which agents exist"; adding or removing an agent is a data change there (model, `tools`, `mcp_servers`, capability scoping), and the `hermes` role renders every profile — including the default — through one identical template loop. Capability scoping (e.g. Intel's disabled `terminal`/`filesystem`/`git`) is declared in the profile's own entry and rendered into its `config.yaml`, so agent behavior is enforced at the profile layer. (True filesystem sandbox isolation between profiles remains a separate, out-of-scope hardening — see the gap noted below.)
+
 Messaging is handled by a standalone `signal-cli-api` REST container on an internal Docker network only (no published port), restricted to your personal number via `SIGNAL_ALLOWED_USERS`. Voice mode (Whisper STT, NeuTTS/Piper TTS) runs fully offline inside the same container via the `ffmpeg`/`hermes-agent[voice]` Dockerfile layer.
 
 ## 🔐 Local Secrets Workflow

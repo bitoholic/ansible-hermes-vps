@@ -17,6 +17,8 @@
       git_username: "Test User"
       git_email: "test@example.com"
       profiles:
+        default:
+          context7_api_key: d-c7
         coder:
           openrouter_api_key: c-or
           nous_portal_api_key: c-nous

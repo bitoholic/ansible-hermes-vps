@@ -69,7 +69,7 @@ mcp_servers:
       - "{{ server.pkg }}"
 {% if server.name == 'context7' %}
     env:
-      CONTEXT7_API_KEY: "{{ secrets.hermes_default_context7_api_key if item.is_default | default(false) else secrets.profiles[item.name].context7_api_key }}"
+      CONTEXT7_API_KEY: "{{ secrets.profiles[item.name].context7_api_key }}"
 {% elif server.name == 'github' %}
     env:
       GITHUB_PERSONAL_ACCESS_TOKEN: "{{ secrets.hermes_default_github_token }}"

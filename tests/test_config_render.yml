@@ -9,6 +9,8 @@
       hermes_default_github_token: stub-gh
       hermes_default_dashboard_admin_password_hash: stub-ph
       profiles:
+        default:
+          context7_api_key: stub-c7-default
         coder:
           openrouter_api_key: stub-coder-or
           nous_portal_api_key: stub-nous
