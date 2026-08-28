@@ -18,10 +18,10 @@ services:
   authelia:
     image: authelia/authelia:latest
     container_name: authelia
-    user: "{{host_uid}}:{{host_gid}}"
+    user: "{{silverbullet_host_uid}}:{{silverbullet_host_gid}}"
     environment:
-      - PUID={{host_uid}}
-      - PGID={{host_gid}}
+      - PUID={{silverbullet_host_uid}}
+      - PGID={{silverbullet_host_gid}}
     volumes:
       - "{{ authelia_config_dir }}:/config:ro"
       - "{{ authelia_data_dir }}:/var/lib/authelia"
@@ -31,7 +31,7 @@ services:
   silverbullet:
     image: "{{ silverbullet_image }}"
     container_name: silverbullet
-    user: "{{host_uid}}:{{host_gid}}"
+    user: "{{silverbullet_host_uid}}:{{silverbullet_host_gid}}"
     environment:
       - SB_USER={{ silverbullet_admin_username }}:{{ silverbullet_admin_password }}
     ports:

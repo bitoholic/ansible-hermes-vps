@@ -24,8 +24,8 @@
 
 - name: Set host_uid and host_gid facts from llm_wiki
   ansible.builtin.set_fact:
-    host_uid: "{{ hermes_llm_user.ansible_facts.getent_passwd.llm_wiki[1] }}"
-    host_gid: "{{ hermes_llm_user.ansible_facts.getent_passwd.llm_wiki[2] }}"
+    hermes_host_uid: "{{ hermes_llm_user.ansible_facts.getent_passwd.llm_wiki[1] }}"
+    hermes_host_gid: "{{ hermes_llm_user.ansible_facts.getent_passwd.llm_wiki[2] }}"
 
 - name: Ensure persistent Hermes data root exists for admin user
   ansible.builtin.file:
@@ -97,6 +97,7 @@
     src: "profiles/{{ item.name }}/skills/"
     owner: llm_wiki
     group: llm_wiki
+    mode: '0644'
   loop: "{{ hermes_profiles }}"
 
 - name: Deploy Hermes config.yaml file

@@ -25,8 +25,8 @@
 
 - name: Set host_uid and host_gid facts from llm_wiki
   ansible.builtin.set_fact:
-    host_uid: "{{ silverbullet_llm_user.ansible_facts.getent_passwd.llm_wiki[1] }}"
-    host_gid: "{{ silverbullet_llm_user.ansible_facts.getent_passwd.llm_wiki[2] }}"
+    silverbullet_host_uid: "{{ silverbullet_llm_user.ansible_facts.getent_passwd.llm_wiki[1] }}"
+    silverbullet_host_gid: "{{ silverbullet_llm_user.ansible_facts.getent_passwd.llm_wiki[2] }}"
 
 - name: Deploy Caddyfile
   ansible.builtin.template:

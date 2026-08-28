@@ -3,7 +3,7 @@ services:
     image: registry.gitlab.com/packaging/signal-cli/signal-cli-native:latest
     container_name: signal-cli
     restart: unless-stopped
-    user: "{{host_uid}}:{{host_gid}}"
+    user: "{{hermes_host_uid}}:{{hermes_host_gid}}"
     volumes:
       - "/opt/hermes/signal-data:/var/lib/signal-cli"
     tmpfs:
@@ -34,8 +34,8 @@ services:
       - "127.0.0.1:9119:9119"
     environment:
       HERMES_DASHBOARD: "1"
-      HERMES_UID: "{{host_uid}}"
-      HERMES_GID: "{{host_gid}}"
+      HERMES_UID: "{{hermes_host_uid}}"
+      HERMES_GID: "{{hermes_host_gid}}"
       GITHUB_TOKEN: "{{hermes_default.github_token}}"
     volumes:
       - "{{ hermes_home }}:/opt/data"
