@@ -59,25 +59,19 @@ delegation:
   model: qwen/qwen3-coder-flash
 {% endif %}
 
-{% set mcp_pkgs = {
-  'context7': '@upstash/context7-mcp',
-  'github': '@modelcontextprotocol/server-github',
-  'playwright': '@modelcontextprotocol/server-playwright'
-} %}
 {% if item.mcp_servers | default([]) | length > 0 %}
 mcp_servers:
-{% for name in item.mcp_servers %}
-  {{ name }}:
-    command: npx
+{% for server in item.mcp_servers %}
+  {{ server.name }}:
+    command: {{ server.command | default('npx') }}
     args:
       - -y
-      - "{{ mcp_pkgs[name] }}"
-{% if name == 'context7' %}
+      - "{{ server.pkg }}"
+{% if server.env is defined %}
     env:
-      CONTEXT7_API_KEY: "{{ item.context7_api_key }}"
-{% elif name == 'github' %}
-    env:
-      GITHUB_PERSONAL_ACCESS_TOKEN: "{{ secrets.hermes_default_github_token }}"
+{% for key, value in server.env.items() %}
+      {{ key }}: "{{ value }}"
+{% endfor %}
 {% endif %}
 {% endfor %}
 {% endif %}

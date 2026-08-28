@@ -28,6 +28,7 @@
           - "('mcp_servers' in cfg) == (item.name != 'intel')"
           - "not ('mcp_servers' in cfg) or (cfg.mcp_servers | length == 3)"
           - "not ('mcp_servers' in cfg) or ('context7' in cfg.mcp_servers and 'github' in cfg.mcp_servers and 'playwright' in cfg.mcp_servers)"
+          - "not ('mcp_servers' in cfg) or (cfg.mcp_servers.context7.env.CONTEXT7_API_KEY | length > 0)"
         fail_msg: "config.yaml mismatch for profile {{ item.name }}: {{ cfg }}"
       loop: "{{ hermes_profiles }}"
       vars:

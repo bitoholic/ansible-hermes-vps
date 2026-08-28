@@ -47,11 +47,17 @@ hermes_profiles:
     skills_auto_load:
       - research/llm-wiki
     onboarding_seen: busy_input_prompt
-    context7_api_key: "{{ secrets.hermes_default_context7_api_key }}"
     mcp_servers:
-      - context7
-      - github
-      - playwright
+      - name: context7
+        pkg: "@upstash/context7-mcp"
+        env:
+          CONTEXT7_API_KEY: "{{ secrets.hermes_default_context7_api_key }}"
+      - name: github
+        pkg: "@modelcontextprotocol/server-github"
+        env:
+          GITHUB_PERSONAL_ACCESS_TOKEN: "{{ secrets.hermes_default_github_token }}"
+      - name: playwright
+        pkg: "@modelcontextprotocol/server-playwright"
   - name: coder
     config_template: config.yaml.j2
     openrouter_api_key: "{{ lookup('env', 'OPENROUTER_API_KEY_CODER') }}"
@@ -65,9 +71,16 @@ hermes_profiles:
     enable_browser: false
     onboarding_seen: tool_progress_prompt
     mcp_servers:
-      - context7
-      - github
-      - playwright
+      - name: context7
+        pkg: "@upstash/context7-mcp"
+        env:
+          CONTEXT7_API_KEY: "{{ lookup('env', 'CONTEXT7_API_KEY_CODER') }}"
+      - name: github
+        pkg: "@modelcontextprotocol/server-github"
+        env:
+          GITHUB_PERSONAL_ACCESS_TOKEN: "{{ secrets.hermes_default_github_token }}"
+      - name: playwright
+        pkg: "@modelcontextprotocol/server-playwright"
   - name: intel
     config_template: config.yaml.j2
     openrouter_api_key: "{{ lookup('env', 'OPENROUTER_API_KEY_INTEL') }}"
