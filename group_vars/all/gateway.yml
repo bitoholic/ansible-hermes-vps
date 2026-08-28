@@ -1,0 +1,17 @@
+---
+# Gateway / reverse-proxy seam (epic 03, ticket #01).
+# Single source of truth for the published ingress surface. The gateway module renders one
+# Caddy site block per entry, wrapping each in the shared `mfa_auth` forward-auth snippet
+# unless `mfa: false`. In ticket #02 these entries move into per-role `gateway_publish`
+# contributions that the gateway assembles; here they are declared inline so the move is
+# byte-equivalent to the pre-change SilverBullet Caddyfile.
+gateway_routes:
+  - host: wiki
+    upstream: silverbullet:3000
+    mfa: true
+  - host: dash
+    upstream: hermes-agent:9119
+    mfa: true
+  - host: auth
+    upstream: authelia:9091
+    mfa: false

@@ -1,0 +1,19 @@
+---
+# Gateway / reverse-proxy seam (epic 03, ticket #01).
+# The gateway is the single writer of the ingress Caddyfile. It owns the route-data interface
+# (`gateway_routes`) and the shared `mfa_auth` forward-auth snippet, and renders one Caddy site
+# block per route. Caddy still runs inside the SilverBullet compose stack, so the file lands in
+# `silverbullet_compose_dir`; SilverBullet no longer authors any routing.
+- name: Ensure ingress (Caddyfile) deploy directory exists
+  ansible.builtin.file:
+    path: "{{ silverbullet_compose_dir }}"
+    state: directory
+    owner: llm_wiki
+    group: llm_wiki
+    mode: '0775'
+
+- name: Deploy Caddyfile (gateway adapter)
+  ansible.builtin.template:
+    src: Caddyfile.j2
+    dest: "{{ silverbullet_compose_dir }}/Caddyfile"
+    mode: '0644'

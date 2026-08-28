@@ -13,6 +13,7 @@ This repository provisions a personal "second brain" + agent stack on a bare Ubu
 | `common` | Installs base hardening packages, enables unattended-upgrades, configures UFW |
 | `docker` | Installs Docker Engine + Compose plugin from the official repo |
 | `authelia` + `silverbullet` | Caddy reverse proxy → Authelia (MFA forward-auth) → SilverBullet wiki, bound to `127.0.0.1` |
+| `gateway` | The single writer of the ingress Caddyfile; renders one site block per entry in `gateway_routes` (`group_vars/all/gateway.yml`), wrapping each in the shared `mfa_auth` snippet unless `mfa: false`. |
 | `hermes` | Builds and runs the single `hermes-agent` container (see below) |
 | `backup` | Real-time wiki→GitHub sync on file change, plus a nightly PR creation cron job |
 

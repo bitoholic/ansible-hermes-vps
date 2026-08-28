@@ -37,12 +37,6 @@
     silverbullet_host_uid: "{{ silverbullet_llm_user.ansible_facts.getent_passwd.llm_wiki[1] }}"
     silverbullet_host_gid: "{{ silverbullet_llm_user.ansible_facts.getent_passwd.llm_wiki[2] }}"
 
-- name: Deploy Caddyfile
-  ansible.builtin.template:
-    src: Caddyfile.j2
-    dest: "{{ silverbullet_compose_dir }}/Caddyfile"
-    mode: '0644'
-
 - name: Deploy docker-compose configuration
   ansible.builtin.template:
     src: docker-compose.yml.j2

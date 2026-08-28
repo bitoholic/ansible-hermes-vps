@@ -80,5 +80,6 @@
     - role: docker
     - role: hermes
     - role: authelia
+    - role: gateway
     - role: silverbullet
     - role: backup

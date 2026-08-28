@@ -11,22 +11,12 @@
   }
 }
 
-wiki.{{ secrets.silverbullet_domain }} {
+{% for route in gateway_routes %}
+{{ route.host }}.{{ secrets.silverbullet_domain }} {
   log
   tls internal
-  import mfa_auth
-  reverse_proxy silverbullet:3000
-}
+{{ '  import mfa_auth
+' if route.mfa else '' }}  reverse_proxy {{ route.upstream }}
+}{% if not loop.last %}
 
-dash.{{ secrets.silverbullet_domain }} {
-  log
-  tls internal
-  import mfa_auth
-  reverse_proxy hermes-agent:9119
-}
-
-auth.{{ secrets.silverbullet_domain }} {
-  log
-  tls internal
-  reverse_proxy authelia:9091
-}
+{% endif %}{% endfor -%}
