@@ -11,9 +11,7 @@ cd "$REPO_ROOT"
 export ANSIBLE_BECOME=false
 
 # Stub the env vars the profile lookups read (none remain after #04, but keep harmless).
-export OPENROUTER_API_KEY_CODER=dummy-coder \
-       OPENROUTER_API_KEY_INTEL=dummy-intel \
-       NOUS_PORTAL_API_KEY=dummy-nous \
+export NOUS_PORTAL_API_KEY=dummy-nous \
        CONTEXT7_API_KEY_CODER=dummy-c7
 
 echo "== hermes profile render behavioral test =="

@@ -1,6 +1,6 @@
 ---
 title: Update tests and confirm lint is green
-status: ready-for-human
+status: done
 blocked_by: []
 depends_on:
   - 01-drop-profiles.md

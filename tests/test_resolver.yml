@@ -18,8 +18,6 @@
           - secrets.silverbullet_domain == 'wiki.example.com'
           - secrets.hermes_default_resend_api_key == ''
           - '"coder_openrouter_api_key" not in secrets'
-          - secrets.profiles.coder.openrouter_api_key == 'CODER_KEY'
-          - secrets.profiles.intel.openrouter_api_key == 'INTEL_KEY'
         fail_msg: >-
           resolver did not resolve secrets as expected:
           {{ secrets | to_nice_json }}

@@ -22,8 +22,6 @@ export SIGNAL_ACCOUNT=sig@example.com
 export SIGNAL_ALLOWED_USERS="u1,u2"
 export DASHBOARD_ADMIN_PASSWORD_HASH=DASH_HASH
 export ADMIN_SSH_PUBLIC_KEY="ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQCtestkey"
-export OPENROUTER_API_KEY_CODER=CODER_KEY
-export OPENROUTER_API_KEY_INTEL=INTEL_KEY
 
 echo "== resolver resolves expected values =="
 ansible-playbook tests/test_resolver.yml --check -e secrets_enforce_required=false
