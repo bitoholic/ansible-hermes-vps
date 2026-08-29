@@ -5,9 +5,11 @@
       - ansible_os_family == 'Debian'
       - secrets.conduit_registration_secret is defined
       - secrets.conduit_registration_secret | string | length > 0
+      - secrets.matrix_bot_password is defined
+      - secrets.matrix_bot_password | string | length > 0
     fail_msg: >-
-      Conduit role requires a Debian/Ubuntu host and secrets.conduit_registration_secret
-      (set the CONDUIT_REGISTRATION_SECRET environment variable).
+      Conduit role requires a Debian/Ubuntu host, secrets.conduit_registration_secret
+      (set CONDUIT_REGISTRATION_SECRET), and secrets.matrix_bot_password (set MATRIX_BOT_PASSWORD).
 
 - name: Ensure Conduit deployment directory exists
   ansible.builtin.file:
@@ -53,4 +55,53 @@
       - docker-compose.yml
     state: present
     pull: missing
+  ignore_errors: "{{ ansible_check_mode }}"
+
+# --- Bot provisioning (@hermes) -------------------------------------------------
+# Hermes logs in with MATRIX_USER_ID + MATRIX_PASSWORD (no access token shared across
+# roles), so the bot account is created here once via Conduit's registration endpoint
+# using the shared registration token. Idempotent: skipped once the user exists.
+- name: Resolve Conduit container IP on the internal network
+  community.docker.docker_container_info:
+    name: conduit
+  register: conduit_container_info
+  ignore_errors: "{{ ansible_check_mode }}"
+
+- name: Compute Conduit API base URL
+  ansible.builtin.set_fact:
+    conduit_api_base: "http://{{ conduit_container_info.container.NetworkSettings.Networks.hermes_net.IPAddress }}:{{ conduit_port }}"
+
+- name: Wait for Conduit to accept connections
+  ansible.builtin.wait_for:
+    host: "{{ conduit_container_info.container.NetworkSettings.Networks.hermes_net.IPAddress }}"
+    port: "{{ conduit_port }}"
+    state: started
+    timeout: 60
+  ignore_errors: "{{ ansible_check_mode }}"
+
+- name: Check whether the @hermes user is already registered
+  ansible.builtin.uri:
+    url: "{{ conduit_api_base }}/_matrix/client/v3/register/available?username=hermes"
+    method: GET
+    status_code: [200, 400]
+  register: conduit_hermes_available
+  ignore_errors: "{{ ansible_check_mode }}"
+
+- name: Register the @hermes bot account via the Conduit registration token
+  ansible.builtin.uri:
+    url: "{{ conduit_api_base }}/_matrix/client/v3/register"
+    method: POST
+    headers:
+      Content-Type: "application/json"
+      x-registration-token: "{{ secrets.conduit_registration_secret }}"
+    body_format: json
+    body:
+      auth:
+        type: m.login.dummy
+      username: hermes
+      password: "{{ secrets.matrix_bot_password }}"
+      inhibit_login: true
+    status_code: [200, 201]
+  when: (conduit_hermes_available.status | default(0)) == 200
+  changed_when: (conduit_hermes_available.status | default(0)) == 200
   ignore_errors: "{{ ansible_check_mode }}"
