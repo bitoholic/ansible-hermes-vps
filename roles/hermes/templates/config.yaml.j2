@@ -54,7 +54,8 @@ stt:
   local:
     model: base
 delegation:
-  max_concurrent_children: 3
+  max_concurrent_children: 5
+  worktree_isolation: true
   provider: nous
   model: qwen/qwen3-coder-flash
 {% endif %}

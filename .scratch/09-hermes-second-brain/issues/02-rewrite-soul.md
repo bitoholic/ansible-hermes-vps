@@ -1,6 +1,6 @@
 ---
 title: Rewrite SOUL as the modern "second brain"
-status: ready-for-human
+status: done
 blocked_by: []
 depends_on: []
 ---
