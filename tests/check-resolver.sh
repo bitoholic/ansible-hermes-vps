@@ -12,7 +12,7 @@ export ANSIBLE_BECOME=false
 
 # Crafted environment: every required secret plus a couple of optional ones whose
 # resolved values we assert explicitly.
-export OPENROUTER_API_KEY_WIKI=WIKI_KEY
+export OPENROUTER_API_KEY=WIKI_KEY
 export NOUS_PORTAL_API_KEY=NOUS_KEY
 export GITHUB_TOKEN=GH_TOKEN
 export AUTHELIA_ADMIN_PASSWORD_HASH=AUTHELIA_HASH

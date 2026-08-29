@@ -12,7 +12,7 @@ export ANSIBLE_BECOME=false
 
 # Stub the env vars the profile lookups read (none remain after #04, but keep harmless).
 export NOUS_PORTAL_API_KEY=dummy-nous \
-       HERMES_DEFAULT_CONTEXT7_API_KEY=dummy-c7
+       CONTEXT7_API_KEY=dummy-c7
 
 echo "== hermes profile render behavioral test =="
 ansible-playbook tests/test_hermes_profile.yml
