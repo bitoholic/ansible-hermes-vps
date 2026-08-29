@@ -40,6 +40,11 @@ python3 scripts/generate-env.py --check
 # default present, .env regression + per-profile secret scoping.
 ./tests/check-hermes-profile.sh
 
+# Conduit personal Matrix homeserver + Hermes Matrix integration (epic 06 ticket #04):
+# config renders with the shared registration secret, no published port, Hermes env wired,
+# gateway surface unchanged, and bot registration is idempotent by contract.
+./tests/check-conduit.sh
+
 # Gateway Caddyfile render test (epic 03 ticket #04): byte-equivalence regression vs the legacy
 # Caddyfile, one site block per route with mfa_auth applied unless mfa: false, fail-fast on
 # malformed routes.

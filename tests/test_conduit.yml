@@ -1,0 +1,44 @@
+---
+- hosts: localhost
+  connection: local
+  gather_facts: false
+  # Stub the vars the Conduit templates read so they resolve without a real host.
+  vars:
+    secrets:
+      conduit_registration_secret: "test-reg-secret"
+      matrix_bot_password: "test-bot-pass"
+    conduit_compose_dir: /tmp/conduit_test
+    conduit_data_dir: /tmp/conduit_test/data
+    conduit_image: matrixconduit/matrix-conduit:v0.10.13
+    conduit_port: 8008
+    conduit_server_name: test-server
+  pre_tasks:
+    - ansible.builtin.file:
+        path: "{{ conduit_compose_dir }}"
+        state: directory
+        mode: '0755'
+  tasks:
+    - ansible.builtin.template:
+        src: "{{ playbook_dir }}/../roles/conduit/templates/conduit.toml.j2"
+        dest: "{{ conduit_compose_dir }}/conduit.toml"
+    - ansible.builtin.template:
+        src: "{{ playbook_dir }}/../roles/conduit/templates/docker-compose.yml.j2"
+        dest: "{{ conduit_compose_dir }}/docker-compose.yml"
+    - ansible.builtin.slurp:
+        path: "{{ conduit_compose_dir }}/conduit.toml"
+      register: rendered_toml
+    - ansible.builtin.slurp:
+        path: "{{ conduit_compose_dir }}/docker-compose.yml"
+      register: rendered_compose
+    - ansible.builtin.assert:
+        that:
+          - "'registration_token = \"test-reg-secret\"' in (rendered_toml.content | b64decode)"
+          - "'allow_federation = false' in (rendered_toml.content | b64decode)"
+          - "'allow_registration = true' in (rendered_toml.content | b64decode)"
+          - "'ports:' not in (rendered_compose.content | b64decode)"
+          - "'hermes_net' in (rendered_compose.content | b64decode)"
+          - "'external: true' in (rendered_compose.content | b64decode)"
+        fail_msg: >-
+          Conduit render invariants violated: registration token must come from the
+          shared secret (not a literal), federation must stay off, and the compose
+          must publish NO host port (private, internal-only).
