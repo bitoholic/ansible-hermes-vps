@@ -5,7 +5,11 @@
 }
 
 (mfa_auth) {
-  forward_auth authelia:9091 {
+  # Source-based MFA (ADR-0001): Tailscale (VPN) clients are already authenticated and
+  # encrypted, so they skip Authelia; everyone else (public net) is challenged. The subnet
+  # is the single constant shared with the tailscale role's ufw allow.
+  @not_tailscale not remote_ip {{ tailscale_subnet }}
+  forward_auth @not_tailscale authelia:9091 {
     uri /api/authz/forward-auth?authelia_url=https://auth.<secret-silverbullet-domain>
     copy_headers Remote-User Remote-Groups Remote-Name Remote-Email
   }

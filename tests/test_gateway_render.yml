@@ -62,7 +62,8 @@
           - "rendered is search('auth.test.example.com {')"
           - "(rendered | regex_findall('import mfa_auth')) | length == (gateway_routes | selectattr('mfa') | list | length)"
           - "rendered is search('auth\\.test\\.example\\.com \\{\\n  log\\n  tls internal\\n  reverse_proxy authelia:9091\\n\\}')"
-          - "'forward_auth authelia:9091' in rendered"
+          - "'forward_auth @not_tailscale authelia:9091' in rendered"
+          - "rendered is search('not remote_ip')"
         fail_msg: "Gateway Caddyfile shape mismatch: {{ rendered }}"
       vars:
         rendered: "{{ lookup('file', '/tmp/gateway_test_render/Caddyfile') }}"
