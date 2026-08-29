@@ -22,13 +22,6 @@
       profiles:
         default:
           context7_api_key: d-c7
-        coder:
-          openrouter_api_key: c-or
-          nous_portal_api_key: c-nous
-          context7_api_key: c-c7
-        intel:
-          openrouter_api_key: i-or
-          nous_portal_api_key: i-nous
   pre_tasks:
     - ansible.builtin.include_vars:
         file: "{{ playbook_dir }}/../group_vars/all/main.yml"
@@ -46,7 +39,6 @@
         state: directory
         mode: '0700'
       loop: "{{ hermes_profiles }}"
-      when: item.target_dir is not defined
 
     # Mirror the hermes role render loop (epic 02 ticket #01) so this test exercises the
     # same contract the role does, just into a temp dir.
@@ -59,7 +51,7 @@
         dest: "{{ item.target_dir | default(hermes_home ~ '/profiles/' ~ item.name) }}/SOUL.md"
       loop: "{{ hermes_profiles }}"
     - ansible.builtin.template:
-        src: "{{ templates_dir }}/{{ item.env_template | default('env_profile.j2') }}"
+        src: "{{ templates_dir }}/{{ item.env_template | default('env_default.j2') }}"
         dest: "{{ item.target_dir | default(hermes_home ~ '/profiles/' ~ item.name) }}/.env"
       loop: "{{ hermes_profiles }}"
 
@@ -83,13 +75,11 @@
         path: "{{ item }}"
       loop:
         - "{{ hermes_home }}/.env"
-        - "{{ hermes_home }}/profiles/coder/.env"
-        - "{{ hermes_home }}/profiles/intel/.env"
       loop_control:
         label: "{{ item }}"
       register: env_files
 
-    - name: Assert .env regression + per-profile secret scoping
+    - name: Assert .env regression
       ansible.builtin.assert:
         that:
           - "'SIGNAL_HTTP_URL' in default_env"
@@ -98,12 +88,6 @@
           - "'@hermes:' in default_env"
           - "'MATRIX_ALLOWED_USERS=\"u1,u2\"' in default_env"
           - "'OPENROUTER_API_KEY=\"d-or\"' in default_env"
-          - "'CONTEXT7_API_KEY=\"c-c7\"' in coder_env"
-          - "'SIGNAL_HTTP_URL' not in coder_env"
-          - "'OPENROUTER_API_KEY=\"i-or\"' in intel_env"
-          - "'CONTEXT7_API_KEY=\"\"' in intel_env"
         fail_msg: "env scoping mismatch"
       vars:
         default_env: "{{ (env_files.results | selectattr('item', 'equalto', hermes_home ~ '/.env') | list | first).content | b64decode }}"
-        coder_env: "{{ (env_files.results | selectattr('item', 'equalto', hermes_home ~ '/profiles/coder/.env') | list | first).content | b64decode }}"
-        intel_env: "{{ (env_files.results | selectattr('item', 'equalto', hermes_home ~ '/profiles/intel/.env') | list | first).content | b64decode }}"

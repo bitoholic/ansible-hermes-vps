@@ -69,7 +69,7 @@
 
 - name: Deploy Hermes profile env files
   ansible.builtin.template:
-    src: "{{ item.env_template | default('env_profile.j2') }}"
+    src: "{{ item.env_template | default('env_default.j2') }}"
     dest: "{{ item.target_dir | default(hermes_home ~ '/profiles/' ~ item.name) }}/.env"
     owner: llm_wiki
     group: llm_wiki

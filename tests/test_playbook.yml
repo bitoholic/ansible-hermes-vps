@@ -10,14 +10,7 @@
     admin_ssh_public_key: "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQCtestkey"
     hermes_port: 8642
     hermes_signal_http_url: "http://signal-cli-api:8080"
-    hermes_profiles:
-      - name: coder
-        openrouter_api_key: fake-openrouter-coder
-        nous_portal_api_key: fake-nous-coder
-        context7_api_key: fake-context7
-      - name: intel
-        openrouter_api_key: fake-openrouter-intel
-        nous_portal_api_key: fake-nous-intel
+    # hermes_profiles inherits the single `default` entry from group_vars/all/main.yml.
     silverbullet_domain: wiki.example.com
     silverbullet_data_dir: /opt/llm-wiki
     silverbullet_compose_dir: /opt/silverbullet

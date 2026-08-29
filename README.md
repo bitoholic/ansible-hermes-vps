@@ -17,15 +17,13 @@ This repository provisions a personal "second brain" + agent stack on a bare Ubu
 | `hermes` | Builds and runs the single `hermes-agent` container (see below) |
 | `backup` | Real-time wiki→GitHub sync on file change, plus a nightly PR creation cron job |
 
-### 🧩 Hermes agent & profiles
+### 🧩 Hermes agent (second brain)
 
-There is **one** `hermes-agent` container, built from the local `Dockerfile` and running three logical "subagents" as profile subdirectories under `/opt/hermes/profiles/`, all sharing the same container filesystem (mounted at `/opt/data`):
+There is **one** `hermes-agent` container, built from the local `Dockerfile` and running a single "second brain" agent (the `default` profile) mounted at `/opt/data`:
 
-- **The Robot** (root/default profile) — Chief-of-staff persona, manages the Markdown wiki at `/opt/data/wiki`, reachable over Signal.
-- **Coder** (`profiles/coder`) — coding sandbox with Git + GitHub MCP + Context7 MCP + Playwright MCP tools enabled.
-- **Intel** (`profiles/intel`) — background news-scraping agent with `terminal`, `filesystem`, and `git` tools explicitly **disabled**.
+- **Second brain** (default profile) — chief-of-staff persona that also codes, researches, and gatekeeps the Markdown wiki at `/opt/data/wiki`, reachable over Signal. Heavy or parallel work is delegated to anonymous `delegate_task` subagents (each gets its own git worktree via `worktree_isolation`), so there is no need for separate Coder/Intel profiles.
 
-The set of agents that exist is defined entirely as **data** in `group_vars/all/main.yml` → `hermes_profiles`. That list is the single source of truth for "which agents exist"; adding or removing an agent is a data change there (model, `tools`, `mcp_servers`, capability scoping), and the `hermes` role renders every profile — including the default — through one identical template loop. Capability scoping (e.g. Intel's disabled `terminal`/`filesystem`/`git`) is declared in the profile's own entry and rendered into its `config.yaml`, so agent behavior is enforced at the profile layer. (True filesystem sandbox isolation between profiles remains a separate, out-of-scope hardening — see the gap noted below.)
+The agent is defined entirely as **data** in `group_vars/all/main.yml` → `hermes_profiles` (a single `default` entry). Model, `tools`, `mcp_servers`, skill auto-load, and capability scoping live in that one entry, and the `hermes` role renders it through a single template loop. (True filesystem sandbox isolation between delegated subagents is provided by git worktree isolation; they share the container filesystem otherwise — see the gap noted below.)
 
 Messaging is handled by a standalone `signal-cli-api` REST container on an internal Docker network only (no published port), restricted to your personal number via `SIGNAL_ALLOWED_USERS`. Voice mode (Whisper STT, NeuTTS/Piper TTS) runs fully offline inside the same container via the `ffmpeg`/`hermes-agent[voice]` Dockerfile layer.
 
@@ -85,7 +83,7 @@ ansible-playbook -i localhost, tests/test_playbook.yml --check --diff
 
 Tracked from the last infrastructure audit. Don't consider this deploy-ready until these are resolved:
 
-- [ ] **No real sandbox isolation for Coder.** All profiles share one container and one bind mount (`hermes_home:/opt/data`); there is no `/workspace`-only mount and no `ALLOWED_DIRECTORIES` enforcement. The coder subagent can currently read the wiki and every profile's `.env`.
+- [ ] **Delegated subagents share the container filesystem.** The single `hermes-agent` container mounts `hermes_home:/opt/data`; `delegate_task` children get isolated git worktrees (`worktree_isolation: true`) but otherwise share the same bind mount, so a child can read the wiki and the agent's `.env`. Filesystem sandboxing per child is out of scope.
 - [x] ~~The GitHub token was embedded directly in the wiki's git remote URL (persists in `.git/config` in plaintext).~~ Closed: the clone now uses a token-less URL and git authenticates via a credential helper / askpass that reads `GITHUB_TOKEN` from the environment (see `roles/backup/files/git-credential-env`). The token value is never written to `.git/config` or any remote URL.
 
 ## 📝 Notes

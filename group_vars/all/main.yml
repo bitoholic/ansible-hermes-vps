@@ -40,14 +40,15 @@ conduit_e2ee_mode: "required"
 tailscale_interface: tailscale0
 tailscale_subnet: "100.64.0.0/10"
 
-# Per-profile Hermes agents, expressed as data and consumed by a single render loop in
-# the hermes role. The `default` entry is The Robot (the chief-of-staff profile) and is
-# deployed to hermes_home directly; sub-profiles are deployed under hermes_home/profiles/<name>.
+# The single Hermes agent, expressed as a data entry and consumed by the render loop in
+# the hermes role. The `default` entry is the main "second brain" agent, deployed to
+# hermes_home directly. (Sub-profiles were removed in epic 09; the loop still supports
+# them should one ever be needed again.)
 # `target_dir` overrides the deploy location; `config_template`/`soul_template`/`env_template`/
 # default to per-profile files under roles/hermes/{templates,files}/profiles/<name>/. Skill packs
 # (superpowers + mattpocock) are no longer vendored here; they are installed at runtime via the
 # Hermes CLI from `hermes_skills` (see group_vars/all/hermes_skills.yml).
-# The shared `config.yaml.j2`/`env_profile.j2` templates are parameterized by the per-profile
+# The shared `config.yaml.j2`/`env_default.j2` templates are parameterized by the per-profile
 # fields below (model_*, enable_base_features, enable_web/browser, mcp_servers, tools_disabled,
 # skills_auto_load, dashboard, onboarding_seen) — see epic 02 tickets #02/#03. Per-profile
 # secrets are NOT stored here; the templates read them from the resolver's
@@ -77,31 +78,6 @@ hermes_profiles:
         pkg: "@modelcontextprotocol/server-github"
       - name: playwright
         pkg: "@modelcontextprotocol/server-playwright"
-  - name: coder
-    config_template: config.yaml.j2
-    model_provider: nous
-    model_default: qwen/qwen3-coder-flash
-    terminal_cwd: /opt/data/projects
-    enable_web: false
-    enable_browser: false
-    onboarding_seen: tool_progress_prompt
-    mcp_servers:
-      - name: context7
-        pkg: "@upstash/context7-mcp"
-      - name: github
-        pkg: "@modelcontextprotocol/server-github"
-      - name: playwright
-        pkg: "@modelcontextprotocol/server-playwright"
-  - name: intel
-    config_template: config.yaml.j2
-    model_provider: openrouter
-    model_default: openrouter/free
-    enable_web: true
-    enable_browser: false
-    tools_disabled:
-      - terminal
-      - filesystem
-      - git
 
 # Backup and sync (non-secret)
 backup_working_branch: vps-sync
