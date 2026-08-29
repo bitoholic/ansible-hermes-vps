@@ -76,16 +76,6 @@
     mode: '0640'
   loop: "{{ hermes_profiles }}"
 
-- name: Deploy Hermes profile skill files
-  ansible.builtin.copy:
-    dest: "{{ item.target_dir | default(hermes_home ~ '/profiles/' ~ item.name) }}/skills/"
-    src: "{{ item.skills_src }}"
-    owner: llm_wiki
-    group: llm_wiki
-    mode: '0644'
-  loop: "{{ hermes_profiles }}"
-  when: item.skills_src is defined
-
 - name: Deploy Hermes Dockerfile
   ansible.builtin.copy:
     src: Dockerfile
@@ -111,3 +101,33 @@
     state: present
     pull: missing
   ignore_errors: "{{ ansible_check_mode }}"
+
+# Skill packs (epic 08): install obra/superpowers + mattpocock/skills via Hermes's own CLI
+# so they are upgradeable and available on-demand to every profile. This replaces the old
+# copy-vendored-skills method. Each entry in `hermes_skills` is installed only if not already
+# registered (exact-match guard on the first column of `hermes skills list`), and the gateway
+# is restarted so the new skills load. spec-kit is intentionally excluded (Hermes <=0.20.6 does
+# not register `specify`-generated skills).
+- name: Pause for Hermes gateway to become ready before installing skills
+  ansible.builtin.pause:
+    seconds: 20
+
+- name: Install Hermes skill packs via Hermes CLI
+  ansible.builtin.command: >-
+    docker exec hermes-agent hermes skills list |
+    awk -F'│' '{n=$2; gsub(/^[ \t]+|[ \t]+$/, "", n); if (n=="{{ item.name }}") f=1} END{exit !f}' ||
+    docker exec hermes-agent hermes skills install {{ item.source }} --force
+  loop: "{{ hermes_skills | default([]) }}"
+  loop_control:
+    label: "{{ item.name }}"
+  register: _hermes_skill_install
+  changed_when: "'Installed' in _hermes_skill_install.stdout"
+  ignore_errors: true
+  when: hermes_skills | default([]) | length > 0
+
+- name: Restart Hermes gateway to load newly installed skills
+  ansible.builtin.command: docker restart hermes-agent
+  changed_when: true
+  when:
+    - hermes_skills | default([]) | length > 0
+    - _hermes_skill_install is changed

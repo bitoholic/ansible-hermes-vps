@@ -62,11 +62,6 @@
         src: "{{ templates_dir }}/{{ item.env_template | default('env_profile.j2') }}"
         dest: "{{ item.target_dir | default(hermes_home ~ '/profiles/' ~ item.name) }}/.env"
       loop: "{{ hermes_profiles }}"
-    - ansible.builtin.copy:
-        dest: "{{ item.target_dir | default(hermes_home ~ '/profiles/' ~ item.name) }}/skills/"
-        src: "{{ files_dir }}/{{ item.skills_src }}"
-      loop: "{{ hermes_profiles }}"
-      when: item.skills_src is defined
 
     - name: Stat rendered config/SOUL/.env for every profile
       ansible.builtin.stat:
@@ -76,18 +71,10 @@
         label: "{{ item.0.name }}/{{ item.1 }}"
       register: rendered_files
 
-    - name: Stat rendered skills dir for every profile
-      ansible.builtin.stat:
-        path: "{{ item.target_dir | default(hermes_home ~ '/profiles/' ~ item.name) }}/skills"
-      loop: "{{ hermes_profiles }}"
-      register: rendered_skills
-
     - name: Assert N profiles -> N file sets; default present
       ansible.builtin.assert:
         that:
           - rendered_files.results | selectattr('stat.exists') | list | length == (hermes_profiles | length * 3)
-          - rendered_skills.results | selectattr('stat.exists') | list | length == (hermes_profiles | selectattr('skills_src', 'defined') | list | length)
-          - rendered_skills.results | rejectattr('stat.exists') | list | length == (hermes_profiles | rejectattr('skills_src', 'defined') | list | length)
           - "'default' in (hermes_profiles | map(attribute='name') | list)"
         fail_msg: "render file-set mismatch"
 

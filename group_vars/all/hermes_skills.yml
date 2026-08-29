@@ -1,0 +1,115 @@
+---
+# Hermes skill packs installed via Hermes's own CLI (upgradeable, on-demand for all
+# profiles) instead of the old copy-vendored-skills method. Consumed by a single loop in
+# roles/hermes/tasks/main.yml that runs `hermes skills install <source> --force` for each
+# entry, skipping any already registered (exact-match guard).
+#
+# Spike result (Hermes v0.20.6): `hermes skills install <source> --force` is the only
+# reliable path. `hermes plugins install` is blocked by the 0.20.6 security scanner, and
+# `specify`-generated spec-kit skills are not registered by Hermes, so spec-kit is excluded.
+#
+# superpowers: per-skill raw GitHub URLs (newest `main`).
+# mattpocock/skills: per-skill skills.sh sources (auto-resolves latest).
+hermes_skills:
+  - name: brainstorming
+    source: "https://github.com/obra/superpowers/raw/main/skills/brainstorming/SKILL.md"
+  - name: dispatching-parallel-agents
+    source: "https://github.com/obra/superpowers/raw/main/skills/dispatching-parallel-agents/SKILL.md"
+  - name: executing-plans
+    source: "https://github.com/obra/superpowers/raw/main/skills/executing-plans/SKILL.md"
+  - name: finishing-a-development-branch
+    source: "https://github.com/obra/superpowers/raw/main/skills/finishing-a-development-branch/SKILL.md"
+  - name: receiving-code-review
+    source: "https://github.com/obra/superpowers/raw/main/skills/receiving-code-review/SKILL.md"
+  - name: requesting-code-review
+    source: "https://github.com/obra/superpowers/raw/main/skills/requesting-code-review/SKILL.md"
+  - name: subagent-driven-development
+    source: "https://github.com/obra/superpowers/raw/main/skills/subagent-driven-development/SKILL.md"
+  - name: systematic-debugging
+    source: "https://github.com/obra/superpowers/raw/main/skills/systematic-debugging/SKILL.md"
+  - name: test-driven-development
+    source: "https://github.com/obra/superpowers/raw/main/skills/test-driven-development/SKILL.md"
+  - name: using-git-worktrees
+    source: "https://github.com/obra/superpowers/raw/main/skills/using-git-worktrees/SKILL.md"
+  - name: using-superpowers
+    source: "https://github.com/obra/superpowers/raw/main/skills/using-superpowers/SKILL.md"
+  - name: verification-before-completion
+    source: "https://github.com/obra/superpowers/raw/main/skills/verification-before-completion/SKILL.md"
+  - name: writing-plans
+    source: "https://github.com/obra/superpowers/raw/main/skills/writing-plans/SKILL.md"
+  - name: writing-skills
+    source: "https://github.com/obra/superpowers/raw/main/skills/writing-skills/SKILL.md"
+  - name: ask-matt
+    source: "skills-sh/mattpocock/skills/engineering/ask-matt"
+  - name: code-review
+    source: "skills-sh/mattpocock/skills/engineering/code-review"
+  - name: codebase-design
+    source: "skills-sh/mattpocock/skills/engineering/codebase-design"
+  - name: diagnosing-bugs
+    source: "skills-sh/mattpocock/skills/engineering/diagnosing-bugs"
+  - name: domain-modeling
+    source: "skills-sh/mattpocock/skills/engineering/domain-modeling"
+  - name: grill-with-docs
+    source: "skills-sh/mattpocock/skills/engineering/grill-with-docs"
+  - name: implement
+    source: "skills-sh/mattpocock/skills/engineering/implement"
+  - name: improve-codebase-architecture
+    source: "skills-sh/mattpocock/skills/engineering/improve-codebase-architecture"
+  - name: prototype
+    source: "skills-sh/mattpocock/skills/engineering/prototype"
+  - name: research
+    source: "skills-sh/mattpocock/skills/engineering/research"
+  - name: resolving-merge-conflicts
+    source: "skills-sh/mattpocock/skills/engineering/resolving-merge-conflicts"
+  - name: setup-matt-pocock-skills
+    source: "skills-sh/mattpocock/skills/engineering/setup-matt-pocock-skills"
+  - name: tdd
+    source: "skills-sh/mattpocock/skills/engineering/tdd"
+  - name: to-spec
+    source: "skills-sh/mattpocock/skills/engineering/to-spec"
+  - name: to-tickets
+    source: "skills-sh/mattpocock/skills/engineering/to-tickets"
+  - name: triage
+    source: "skills-sh/mattpocock/skills/engineering/triage"
+  - name: wayfinder
+    source: "skills-sh/mattpocock/skills/engineering/wayfinder"
+  - name: wizard
+    source: "skills-sh/mattpocock/skills/engineering/wizard"
+  - name: claude-handoff
+    source: "skills-sh/mattpocock/skills/in-progress/claude-handoff"
+  - name: implement-spec
+    source: "skills-sh/mattpocock/skills/in-progress/implement-spec"
+  - name: loop-me
+    source: "skills-sh/mattpocock/skills/in-progress/loop-me"
+  - name: retro
+    source: "skills-sh/mattpocock/skills/in-progress/retro"
+  - name: setup-ts-deep-modules
+    source: "skills-sh/mattpocock/skills/in-progress/setup-ts-deep-modules"
+  - name: writing-beats
+    source: "skills-sh/mattpocock/skills/in-progress/writing-beats"
+  - name: writing-fragments
+    source: "skills-sh/mattpocock/skills/in-progress/writing-fragments"
+  - name: writing-shape
+    source: "skills-sh/mattpocock/skills/in-progress/writing-shape"
+  - name: git-guardrails-claude-code
+    source: "skills-sh/mattpocock/skills/misc/git-guardrails-claude-code"
+  - name: migrate-to-shoehorn
+    source: "skills-sh/mattpocock/skills/misc/migrate-to-shoehorn"
+  - name: scaffold-exercises
+    source: "skills-sh/mattpocock/skills/misc/scaffold-exercises"
+  - name: setup-pre-commit
+    source: "skills-sh/mattpocock/skills/misc/setup-pre-commit"
+  - name: grill-me
+    source: "skills-sh/mattpocock/skills/productivity/grill-me"
+  - name: grilling
+    source: "skills-sh/mattpocock/skills/productivity/grilling"
+  - name: handoff
+    source: "skills-sh/mattpocock/skills/productivity/handoff"
+  - name: teach
+    source: "skills-sh/mattpocock/skills/productivity/teach"
+  - name: to-questionnaire
+    source: "skills-sh/mattpocock/skills/productivity/to-questionnaire"
+  - name: wait-what
+    source: "skills-sh/mattpocock/skills/productivity/wait-what"
+  - name: writing-for-agents
+    source: "skills-sh/mattpocock/skills/productivity/writing-for-agents"

@@ -44,7 +44,9 @@ tailscale_subnet: "100.64.0.0/10"
 # the hermes role. The `default` entry is The Robot (the chief-of-staff profile) and is
 # deployed to hermes_home directly; sub-profiles are deployed under hermes_home/profiles/<name>.
 # `target_dir` overrides the deploy location; `config_template`/`soul_template`/`env_template`/
-# `skills_src` default to per-profile files under roles/hermes/{templates,files}/profiles/<name>/.
+# default to per-profile files under roles/hermes/{templates,files}/profiles/<name>/. Skill packs
+# (superpowers + mattpocock) are no longer vendored here; they are installed at runtime via the
+# Hermes CLI from `hermes_skills` (see group_vars/all/hermes_skills.yml).
 # The shared `config.yaml.j2`/`env_profile.j2` templates are parameterized by the per-profile
 # fields below (model_*, enable_base_features, enable_web/browser, mcp_servers, tools_disabled,
 # skills_auto_load, dashboard, onboarding_seen) — see epic 02 tickets #02/#03. Per-profile
@@ -77,7 +79,6 @@ hermes_profiles:
         pkg: "@modelcontextprotocol/server-playwright"
   - name: coder
     config_template: config.yaml.j2
-    skills_src: profiles/coder/skills/
     model_provider: nous
     model_default: qwen/qwen3-coder-flash
     terminal_cwd: /opt/data/projects
