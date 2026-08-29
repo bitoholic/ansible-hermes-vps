@@ -1,0 +1,21 @@
+[global]
+# Personal homeserver identity. Clients reach it over the internal Docker network as
+# http://conduit:{{ conduit_port }} and over Tailscale via the VPS's Tailscale address.
+server_name = "{{ conduit_server_name }}"
+address = "0.0.0.0"
+port = {{ conduit_port }}
+
+database_backend = "rocksdb"
+database_path = "/var/lib/matrix-conduit/"
+max_request_size = 20000000
+
+# Personal, non-federated homeserver: registration is open but gated behind a static token,
+# and federation is disabled so only accounts we create (operator + Hermes bot) exist.
+allow_registration = true
+registration_token = "{{ secrets.conduit_registration_secret }}"
+allow_federation = false
+allow_encryption = true
+trusted_servers = []
+
+# No public TLS termination here: Conduit is reached only over the internal Docker network
+# / Tailscale, so it serves plain HTTP on the bridge. Do not expose this port publicly.

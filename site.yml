@@ -78,6 +78,7 @@
     - role: ssh_hardening
     - role: common
     - role: docker
+    - role: conduit
     - role: hermes
     - role: authelia
     - role: gateway

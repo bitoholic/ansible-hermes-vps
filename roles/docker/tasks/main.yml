@@ -66,3 +66,9 @@
     name: proxy_net
     state: present
     driver: bridge
+
+- name: Ensure shared Docker hermes internal network exists
+  community.docker.docker_network:
+    name: hermes_net
+    state: present
+    driver: bridge

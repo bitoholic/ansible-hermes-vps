@@ -20,6 +20,14 @@ hermes_user: hermes
 hermes_home: /opt/hermes
 hermes_signal_http_url: "http://signal-cli:8080"
 
+# Conduit personal Matrix homeserver (epic 06 #01): private, non-federated, reached only
+# over the internal Docker network / Tailscale. No public Matrix port is published.
+conduit_compose_dir: /opt/conduit
+conduit_data_dir: /opt/conduit/data
+conduit_image: matrixconduit/matrix-conduit:v0.10.13
+conduit_port: 8008
+conduit_server_name: "{{ inventory_hostname }}"
+
 # Per-profile Hermes agents, expressed as data and consumed by a single render loop in
 # the hermes role. The `default` entry is Jack-O-Rama (the chief-of-staff profile) and is
 # deployed to hermes_home directly; sub-profiles are deployed under hermes_home/profiles/<name>.

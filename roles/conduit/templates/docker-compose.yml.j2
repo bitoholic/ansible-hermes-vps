@@ -1,0 +1,18 @@
+services:
+  conduit:
+    image: "{{ conduit_image }}"
+    container_name: conduit
+    restart: unless-stopped
+    environment:
+      CONDUIT_CONFIG: /etc/matrix-conduit/conduit.toml
+    volumes:
+      - "{{ conduit_data_dir }}:/var/lib/matrix-conduit"
+      - "{{ conduit_compose_dir }}/conduit.toml:/etc/matrix-conduit/conduit.toml:ro"
+    # Reachable by hermes-agent on the shared internal network. No host port is published:
+    # access is over the Docker network (and, from off-host, via Tailscale routing).
+    networks:
+      - hermes_net
+
+networks:
+  hermes_net:
+    external: true
