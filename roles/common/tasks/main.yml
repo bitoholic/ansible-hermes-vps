@@ -6,7 +6,6 @@
       - curl
       - gnupg
       - lsb-release
-      - ufw
       - unattended-upgrades
       - apt-transport-https
       - git
@@ -54,32 +53,5 @@
     opts: defaults,noexec,nosuid
     state: mounted
     boot: true
-
-- name: Determine active SSH port
-  ansible.builtin.set_fact:
-    common_ssh_port: "{{ ansible_port | default(common_ssh_port | default(22)) }}"
-
-- name: Rate-limit SSH, HTTP, and HTTPS traffic
-  community.general.ufw:
-    rule: limit
-    port: "{{ item }}"
-    proto: tcp
-    comment: "{{ 'Limit SSH attempts' if item == common_ssh_port else 'Rate-limit web traffic' }}"
-  loop:
-    - "{{ common_ssh_port }}"
-    - 80
-    - 443
-
-- name: Set UFW default incoming policy
-  community.general.ufw:
-    direction: incoming
-    policy: "{{ common_ufw_default_incoming_policy | lower }}"  # noqa: args[module]
-
-- name: Set UFW default outgoing policy
-  community.general.ufw:
-    direction: outgoing
-    policy: "{{ common_ufw_default_outgoing_policy | lower }}"  # noqa: args[module]
-
-- name: Enable UFW
-  community.general.ufw:
-    state: enabled
+# UFW (host firewall) is now owned by the tailscale role (epic 07 #01), which sets the
+# default-deny policy, the 22/80/443 allow rules, and the Tailscale interface allow.

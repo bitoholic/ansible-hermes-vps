@@ -34,6 +34,12 @@ conduit_internal_url: "http://conduit:{{ conduit_port }}"
 # are missing; switch to "optional" if the agent image lacks mautrix[encryption].
 conduit_e2ee_mode: "required"
 
+# Tailscale private-access overlay (epic 07). The host firewall (tailscale role) and the
+# gateway Caddy MFA bypass (epic 07 #02) both reference these, so a subnet/interface change
+# is a single edit (user story #12).
+tailscale_interface: tailscale0
+tailscale_subnet: "100.64.0.0/10"
+
 # Per-profile Hermes agents, expressed as data and consumed by a single render loop in
 # the hermes role. The `default` entry is Jack-O-Rama (the chief-of-staff profile) and is
 # deployed to hermes_home directly; sub-profiles are deployed under hermes_home/profiles/<name>.

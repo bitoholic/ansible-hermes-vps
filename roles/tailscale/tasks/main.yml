@@ -1,0 +1,96 @@
+---
+- name: Validate Tailscale role prerequisites
+  ansible.builtin.assert:
+    that:
+      - ansible_os_family == 'Debian'
+      - secrets.tailscale_authkey is defined
+      - secrets.tailscale_authkey | string | length > 0
+    fail_msg: >-
+      Tailscale role requires a Debian/Ubuntu host and secrets.tailscale_authkey
+      (set TAILSCALE_AUTHKEY).
+
+# --- Tailscale daemon (VPN overlay) -------------------------------------------
+- name: Install ufw (host firewall package)
+  ansible.builtin.apt:
+    name: ufw
+    state: present
+    update_cache: true
+
+- name: Check whether Tailscale is already installed
+  ansible.builtin.command:
+    cmd: which tailscale
+  register: tailscale_present
+  changed_when: false
+  failed_when: false
+
+- name: Download the official Tailscale install script
+  ansible.builtin.get_url:
+    url: https://tailscale.com/install.sh
+    dest: /tmp/tailscale-install.sh
+    mode: '0755'
+  when: tailscale_present.rc != 0
+
+- name: Install Tailscale
+  ansible.builtin.command:
+    cmd: /tmp/tailscale-install.sh
+  when: tailscale_present.rc != 0
+  changed_when: true
+
+- name: Ensure tailscaled service is enabled and running
+  ansible.builtin.service:
+    name: tailscaled
+    state: started
+    enabled: true
+  ignore_errors: "{{ ansible_check_mode }}"
+
+- name: Probe Tailscale backend state
+  ansible.builtin.command:
+    cmd: tailscale status --json
+  register: tailscale_status
+  changed_when: false
+  failed_when: false
+
+# Idempotent: only bring the node up if it is not already in the Running state.
+- name: Bring up Tailscale (login via auth key)
+  ansible.builtin.command:
+    cmd: "tailscale up --authkey={{ secrets.tailscale_authkey }} --hostname={{ inventory_hostname }}"
+  when: >-
+    tailscale_status.rc != 0 or
+    (tailscale_status.stdout | default('{}') | from_json).BackendState | default('') != 'Running'
+  changed_when: true
+
+# --- Host firewall (single owner of the perimeter) ----------------------------
+# Default-deny inbound; allow the SSH fallback (key-only via ssh_hardening), the
+# Caddy/MFA ingress (80/443), and the Tailscale VPN interface. The Tailscale subnet
+# constant is also consumed by the gateway Caddy MFA bypass (epic 07 #02).
+- name: Allow the Tailscale VPN interface
+  community.general.ufw:
+    rule: allow
+    direction: in
+    interface: "{{ tailscale_interface }}"
+    comment: "Tailscale private access"
+
+- name: Rate-limit SSH, HTTP, and HTTPS
+  community.general.ufw:
+    rule: limit
+    port: "{{ item }}"
+    proto: tcp
+    comment: "{{ 'Limit SSH attempts' if item == common_ssh_port else 'Rate-limit web traffic' }}"
+  loop:
+    - "{{ common_ssh_port }}"
+    - 80
+    - 443
+
+- name: Set UFW default incoming policy (default-deny)
+  community.general.ufw:
+    direction: incoming
+    policy: "{{ common_ufw_default_incoming_policy | lower }}"  # noqa: args[module]
+
+- name: Set UFW default outgoing policy
+  community.general.ufw:
+    direction: outgoing
+    policy: "{{ common_ufw_default_outgoing_policy | lower }}"  # noqa: args[module]
+
+- name: Enable UFW
+  community.general.ufw:
+    state: enabled
