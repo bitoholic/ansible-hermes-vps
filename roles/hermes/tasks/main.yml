@@ -34,7 +34,7 @@
     mode: '0775'
 
 # Single profile-driven render loop. Every entry in `hermes_profiles` (including the
-# `default` Jack-O-Rama profile) is deployed the same way; `target_dir` selects where
+# `default` Robot profile) is deployed the same way; `target_dir` selects where
 # (default -> hermes_home, sub-profiles -> hermes_home/profiles/<name>), and the template
 # paths default to per-profile files under roles/hermes/{templates,files}/profiles/<name>/.
 - name: Ensure Hermes subagent profile directories exist

@@ -41,7 +41,7 @@ tailscale_interface: tailscale0
 tailscale_subnet: "100.64.0.0/10"
 
 # Per-profile Hermes agents, expressed as data and consumed by a single render loop in
-# the hermes role. The `default` entry is Jack-O-Rama (the chief-of-staff profile) and is
+# the hermes role. The `default` entry is The Robot (the chief-of-staff profile) and is
 # deployed to hermes_home directly; sub-profiles are deployed under hermes_home/profiles/<name>.
 # `target_dir` overrides the deploy location; `config_template`/`soul_template`/`env_template`/
 # `skills_src` default to per-profile files under roles/hermes/{templates,files}/profiles/<name>/.
