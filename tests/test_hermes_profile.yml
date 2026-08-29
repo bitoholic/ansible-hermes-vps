@@ -14,6 +14,9 @@
       hermes_default_dashboard_admin_password_hash: d-ph
       hermes_signal_account: sig@example.com
       hermes_signal_allowed_users: "u1,u2"
+      matrix_bot_password: d-mx
+      matrix_allowed_users: "u1,u2"
+      matrix_allowed_rooms: "!room:example.com"
       git_username: "Test User"
       git_email: "test@example.com"
       profiles:
@@ -104,6 +107,9 @@
         that:
           - "'SIGNAL_HTTP_URL' in default_env"
           - "'RESEND_API_KEY' in default_env"
+          - "'MATRIX_HOMESERVER' in default_env"
+          - "'@hermes:' in default_env"
+          - "'MATRIX_ALLOWED_USERS=\"u1,u2\"' in default_env"
           - "'OPENROUTER_API_KEY=\"d-or\"' in default_env"
           - "'CONTEXT7_API_KEY=\"c-c7\"' in coder_env"
           - "'SIGNAL_HTTP_URL' not in coder_env"

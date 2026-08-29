@@ -9,10 +9,12 @@
       - hermes_signal_http_url | default('') | length > 0
       - secrets.hermes_signal_account | default('') | length > 0
       - secrets.hermes_signal_allowed_users | default('') | length > 0
+      - secrets.matrix_bot_password | default('') | length > 0
+      - secrets.matrix_allowed_users | default('') | length > 0
     fail_msg: >-
       Hermes role requires Debian/Ubuntu hosts, admin_username, hermes_port,
       secrets.hermes_default_openrouter_api_key, hermes_signal_http_url, secrets.hermes_signal_account,
-      and secrets.hermes_signal_allowed_users.
+      secrets.hermes_signal_allowed_users, secrets.matrix_bot_password, and secrets.matrix_allowed_users.
 
 - name: Ensure persistent Hermes data root exists for admin user
   ansible.builtin.file:

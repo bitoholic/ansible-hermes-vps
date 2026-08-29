@@ -11,3 +11,12 @@ GIT_COMMITTER_NAME="{{ secrets.git_username | default('', true) }}"
 GIT_COMMITTER_EMAIL="{{ secrets.git_email | default('', true) }}"
 HERMES_WRITE_SAFE_ROOT="/opt/data:/tmp"
 RESEND_API_KEY="{{ secrets.hermes_default_resend_api_key | default('', true) }}"
+
+# Matrix transport (personal Conduit homeserver) — default profile only (epic 06 #03)
+MATRIX_HOMESERVER="{{ conduit_internal_url }}"
+MATRIX_USER_ID="@hermes:{{ conduit_server_name }}"
+MATRIX_PASSWORD="{{ secrets.matrix_bot_password }}"
+MATRIX_ALLOWED_USERS="{{ secrets.matrix_allowed_users }}"
+MATRIX_ALLOWED_ROOMS="{{ secrets.matrix_allowed_rooms | default('', true) }}"
+MATRIX_E2EE_MODE="{{ conduit_e2ee_mode }}"
+MATRIX_DEVICE_ID="HERMES_BOT"

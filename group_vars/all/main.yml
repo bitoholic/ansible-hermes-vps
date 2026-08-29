@@ -27,6 +27,12 @@ conduit_data_dir: /opt/conduit/data
 conduit_image: matrixconduit/matrix-conduit:v0.10.13
 conduit_port: 8008
 conduit_server_name: "{{ inventory_hostname }}"
+# URL Hermes uses to reach the Conduit homeserver from inside the shared Docker
+# network (epic 06 #03: Matrix transport, default profile only).
+conduit_internal_url: "http://conduit:{{ conduit_port }}"
+# E2EE posture for the Hermes Matrix bot. "required" fails closed if crypto deps
+# are missing; switch to "optional" if the agent image lacks mautrix[encryption].
+conduit_e2ee_mode: "required"
 
 # Per-profile Hermes agents, expressed as data and consumed by a single render loop in
 # the hermes role. The `default` entry is Jack-O-Rama (the chief-of-staff profile) and is
