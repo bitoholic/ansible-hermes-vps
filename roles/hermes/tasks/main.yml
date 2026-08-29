@@ -64,7 +64,7 @@
     owner: llm_wiki
     group: llm_wiki
     mode: '0660'
-    force: false
+    force: true
   loop: "{{ hermes_profiles }}"
 
 - name: Deploy Hermes profile env files
