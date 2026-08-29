@@ -12,7 +12,7 @@ export ANSIBLE_BECOME=false
 
 # Stub the env vars the profile lookups read so rendered values are non-empty.
 export NOUS_PORTAL_API_KEY=dummy-nous \
-       CONTEXT7_API_KEY_CODER=dummy-c7
+       HERMES_DEFAULT_CONTEXT7_API_KEY=dummy-c7
 
 echo "== hermes profile config render invariants =="
 ansible-playbook tests/test_config_render.yml
