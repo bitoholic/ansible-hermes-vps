@@ -30,6 +30,15 @@
         state: directory
         mode: '0755'
 
+    # Positive guard: the real assembled gateway_routes must pass shape validation. Unlike the
+    # negative tests below, this is intentionally NOT rescued — a malformed production route must
+    # fail this check loudly instead of rendering a broken (silent-502) Caddyfile.
+    - name: Real assembled gateway_routes must pass shape validation
+      ansible.builtin.include_tasks:
+        file: "{{ playbook_dir }}/../roles/gateway/tasks/validate.yml"
+      vars:
+        gateway_routes: "{{ silverbullet_gateway_publish + hermes_gateway_publish + authelia_gateway_publish }}"
+
     - name: Render the gateway Caddyfile adapter
       ansible.builtin.template:
         src: "{{ playbook_dir }}/../roles/gateway/templates/Caddyfile.j2"
