@@ -12,7 +12,7 @@
     hermes_signal_http_url: "http://signal-cli-api:8080"
     # hermes_profiles inherits the single `default` entry from group_vars/all/main.yml.
     silverbullet_domain: wiki.example.com
-    silverbullet_data_dir: /opt/llm-wiki
+    silverbullet_data_dir: /opt/wiki
     silverbullet_compose_dir: /opt/silverbullet
     backup_working_branch: vps-sync
   tasks:

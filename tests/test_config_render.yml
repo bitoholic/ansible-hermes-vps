@@ -11,13 +11,6 @@
       profiles:
         default:
           context7_api_key: stub-c7-default
-        coder:
-          openrouter_api_key: stub-coder-or
-          nous_portal_api_key: stub-nous
-          context7_api_key: stub-c7-coder
-        intel:
-          openrouter_api_key: stub-intel-or
-          nous_portal_api_key: stub-nous
   pre_tasks:
     - ansible.builtin.include_vars:
         file: "{{ playbook_dir }}/../group_vars/all/main.yml"
@@ -34,11 +27,10 @@
           - cfg is defined
           - (item.name == 'default') == ('dashboard' in cfg)
           - (item.name == 'default') == (cfg.get('skills', {}).get('auto_load') == ['research/llm-wiki'])
-          - (item.name == 'intel') == ('tools' in cfg and not cfg.tools.terminal.enabled and not cfg.tools.filesystem.enabled and not cfg.tools.git.enabled)
-          - "('mcp_servers' in cfg) == (item.name != 'intel')"
-          - "not ('mcp_servers' in cfg) or (cfg.mcp_servers | length == 3)"
-          - "not ('mcp_servers' in cfg) or ('context7' in cfg.mcp_servers and 'github' in cfg.mcp_servers and 'playwright' in cfg.mcp_servers)"
-          - "not ('mcp_servers' in cfg) or (cfg.mcp_servers.context7.env.CONTEXT7_API_KEY | length > 0)"
+          - "'dashboard' in cfg"
+          - "cfg.mcp_servers | length == 3"
+          - "'context7' in cfg.mcp_servers and 'github' in cfg.mcp_servers and 'playwright' in cfg.mcp_servers"
+          - "cfg.mcp_servers.context7.env.CONTEXT7_API_KEY | length > 0"
         fail_msg: "config.yaml mismatch for profile {{ item.name }}: {{ cfg }}"
       loop: "{{ hermes_profiles }}"
       vars:

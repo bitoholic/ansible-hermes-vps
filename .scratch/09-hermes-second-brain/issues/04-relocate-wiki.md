@@ -1,6 +1,6 @@
 ---
 title: Relocate wiki data to a dedicated /opt/wiki volume
-status: ready-for-human
+status: done
 blocked_by: []
 depends_on: []
 ---
