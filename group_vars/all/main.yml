@@ -7,7 +7,7 @@ ansible_python_interpreter: /usr/bin/python3
 
 # Reverse proxy and web domains / paths (non-secret)
 silverbullet_bind: 127.0.0.1:3000
-silverbullet_data_dir: "{{ hermes_home }}/wiki"
+silverbullet_data_dir: /opt/wiki
 silverbullet_compose_dir: /opt/silverbullet
 silverbullet_image: ghcr.io/silverbulletmd/silverbullet:latest
 

@@ -1,6 +1,6 @@
 ---
 title: Enable delegation worktree isolation and raise concurrency
-status: ready-for-human
+status: done
 blocked_by: []
 depends_on: []
 ---

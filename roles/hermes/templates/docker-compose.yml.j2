@@ -39,6 +39,7 @@ services:
       GITHUB_TOKEN: "{{secrets.hermes_default_github_token}}"
     volumes:
       - "{{ hermes_home }}:/opt/data"
+      - "{{ silverbullet_data_dir }}:/opt/data/wiki"
     networks:
       - hermes_net
       - proxy_net
