@@ -20,9 +20,9 @@ authentication_backend:
 access_control:
   default_policy: deny
   rules:
-    - domain: dash.'{{ secrets.silverbullet_domain }}'
+    - domain: 'dash.{{ secrets.silverbullet_domain }}'
       policy: two_factor
-    - domain: wiki.'{{ secrets.silverbullet_domain }}'
+    - domain: 'wiki.{{ secrets.silverbullet_domain }}'
       policy: two_factor
     - domain: 'auth.{{ secrets.silverbullet_domain }}'
       policy: bypass

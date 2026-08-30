@@ -67,16 +67,21 @@
   register: conduit_container_info
   ignore_errors: "{{ ansible_check_mode }}"
 
+- name: Compute Conduit container IP fact
+  ansible.builtin.set_fact:
+    conduit_ip: "{{ (conduit_container_info.container or {}).NetworkSettings.Networks.hermes_net.IPAddress | default('', true) }}"
+
 - name: Compute Conduit API base URL
   ansible.builtin.set_fact:
-    conduit_api_base: "http://{{ conduit_container_info.container.NetworkSettings.Networks.hermes_net.IPAddress }}:{{ conduit_port }}"
+    conduit_api_base: "http://{{ conduit_ip }}:{{ conduit_port }}"
 
 - name: Wait for Conduit to accept connections
   ansible.builtin.wait_for:
-    host: "{{ conduit_container_info.container.NetworkSettings.Networks.hermes_net.IPAddress }}"
+    host: "{{ conduit_ip }}"
     port: "{{ conduit_port }}"
     state: started
     timeout: 60
+  when: conduit_ip | length > 0
   ignore_errors: "{{ ansible_check_mode }}"
 
 - name: Check whether the @hermes user is already registered
@@ -85,6 +90,7 @@
     method: GET
     status_code: [200, 400]
   register: conduit_hermes_available
+  when: conduit_ip | length > 0
   ignore_errors: "{{ ansible_check_mode }}"
 
 - name: Register the @hermes bot account via the Conduit registration token

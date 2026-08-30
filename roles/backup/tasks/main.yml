@@ -60,12 +60,20 @@
     owner: llm_wiki
     group: llm_wiki
 
+- name: Stat the cloned wiki repo so git_config can be gated on its existence
+  ansible.builtin.stat:
+    path: "{{ silverbullet_data_dir }}/.git"
+  register: wiki_repo_stat
+  changed_when: false
+  failed_when: false
+
 - name: Configure repo-local git credential helper (env token, not stored in .git/config)
   community.general.git_config:
     repo: "{{ silverbullet_data_dir }}"
     scope: local
     name: credential.helper
     value: "{{ silverbullet_compose_dir }}/bin/git-credential-env"
+  when: wiki_repo_stat.stat.exists
 
 - name: Initialize git-crypt and export the offline-recovery key (idempotent)
   ansible.builtin.command:

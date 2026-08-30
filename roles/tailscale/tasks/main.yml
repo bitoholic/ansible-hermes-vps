@@ -41,6 +41,7 @@
     name: tailscaled
     state: started
     enabled: true
+  when: tailscale_present.rc == 0 and not ansible_check_mode
   ignore_errors: "{{ ansible_check_mode }}"
 
 - name: Probe Tailscale backend state
@@ -55,8 +56,10 @@
   ansible.builtin.command:
     cmd: "tailscale up --authkey={{ secrets.tailscale_authkey }} --hostname={{ inventory_hostname }}"
   when: >-
+    tailscale_status is not defined or
     tailscale_status.rc != 0 or
-    (tailscale_status.stdout | default('{}') | from_json).BackendState | default('') != 'Running'
+    ((tailscale_status.stdout | string | length > 0) and
+     ((tailscale_status.stdout | from_json).BackendState | default('') != 'Running'))
   changed_when: true
 
 # --- Host firewall (single owner of the perimeter) ----------------------------
