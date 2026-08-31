@@ -84,51 +84,39 @@
         fail_msg: "Play 2 must run as {{ secrets.admin_username }} on Debian/Ubuntu hosts."
 
   roles:
-    - role:
-        name: secrets
-        tags:
-          - secrets
-    - role:
-        name: users
-        tags:
-          - users
-    - role:
-        name: ssh_hardening
-        tags:
-          - ssh_hardening
-    - role:
-        name: common
-        tags:
-          - common
-    - role:
-        name: tailscale
-        tags:
-          - tailscale
-    - role:
-        name: docker
-        tags:
-          - docker
-    - role:
-        name: conduit
-        tags:
-          - conduit
-    - role:
-        name: hermes
-        tags:
-          - hermes
-    - role:
-        name: authelia
-        tags:
-          - authelia
-    - role:
-        name: gateway
-        tags:
-          - gateway
-    - role:
-        name: silverbullet
-        tags:
-          - silverbullet
-    - role:
-        name: backup
-        tags:
-          - backup
+    - role: secrets
+      tags:
+        - secrets
+    - role: users
+      tags:
+        - users
+    - role: ssh_hardening
+      tags:
+        - ssh_hardening
+    - role: common
+      tags:
+        - common
+    - role: tailscale
+      tags:
+        - tailscale
+    - role: docker
+      tags:
+        - docker
+    - role: conduit
+      tags:
+        - conduit
+    - role: hermes
+      tags:
+        - hermes
+    - role: authelia
+      tags:
+        - authelia
+    - role: gateway
+      tags:
+        - gateway
+    - role: silverbullet
+      tags:
+        - silverbullet
+    - role: backup
+      tags:
+        - backup
