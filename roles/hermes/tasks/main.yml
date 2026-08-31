@@ -113,7 +113,7 @@
     seconds: 20
 
 - name: Install Hermes skill packs via Hermes CLI
-  ansible.builtin.command: >-
+  ansible.builtin.shell: >-
     docker exec hermes-agent hermes skills list |
     awk -F'│' '{n=$2; gsub(/^[ \t]+|[ \t]+$/, "", n); if (n=="{{ item.name }}") f=1} END{exit !f}' ||
     docker exec hermes-agent hermes skills install {{ item.source }} --force

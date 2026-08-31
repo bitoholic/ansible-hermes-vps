@@ -99,11 +99,11 @@
     method: POST
     headers:
       Content-Type: "application/json"
-      x-registration-token: "{{ secrets.conduit_registration_secret }}"
     body_format: json
     body:
       auth:
-        type: m.login.dummy
+        type: "m.login.registration_token"
+        token: "{{ secrets.conduit_registration_secret }}"
       username: hermes
       password: "{{ secrets.matrix_bot_password }}"
       inhibit_login: true
