@@ -79,19 +79,18 @@
   ansible.builtin.set_fact:
     conduit_ip: "{{ (conduit_container_info.container or {}).NetworkSettings.Networks.hermes_net.IPAddress | default('', true) }}"
 
-- name: Compute Conduit API base URL
+- name: Compute Conduit API base URL (host IP for Tailscale access)
   tags: [conduit]
   ansible.builtin.set_fact:
-    conduit_api_base: "http://{{ conduit_ip }}:{{ conduit_port }}"
+    conduit_api_base: "http://{{ inventory_hostname }}:{{ conduit_port }}"
 
 - name: Wait for Conduit to accept connections
   tags: [conduit]
   ansible.builtin.wait_for:
-    host: "{{ conduit_ip }}"
+    host: "{{ inventory_hostname }}"
     port: "{{ conduit_port }}"
     state: started
     timeout: 60
-  when: conduit_ip | length > 0
   ignore_errors: "{{ ansible_check_mode }}"
 
 - name: Check whether the @hermes user is already registered

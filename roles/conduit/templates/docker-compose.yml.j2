@@ -8,8 +8,11 @@ services:
     volumes:
       - "{{ conduit_data_dir }}:/var/lib/matrix-conduit"
       - "{{ conduit_compose_dir }}/conduit.toml:/etc/matrix-conduit/conduit.toml:ro"
-    # Reachable by hermes-agent on the shared internal network. No host port is published:
-    # access is over the Docker network (and, from off-host, via Tailscale routing).
+    # Reachable by hermes-agent on the shared internal network (http://conduit:8008)
+    # and by Tailscale clients via the host port (no public exposure — Tailscale
+    # interface is already allowed by the tailscale role's UFW rules).
+    ports:
+      - "{{ conduit_port }}:{{ conduit_port }}"
     networks:
       - hermes_net
 
