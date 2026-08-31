@@ -3,6 +3,17 @@
   hosts: all
   become: true
   gather_facts: true
+  pre_tasks:
+    - name: Validate that protected roles are not skipped via --skip-tags
+      ansible.builtin.assert:
+        that:
+          - "'secrets' not in (ansible_skip_tags | default([]))"
+          - "'users' not in (ansible_skip_tags | default([]))"
+          - "'ssh_hardening' not in (ansible_skip_tags | default([]))"
+          - "'common' not in (ansible_skip_tags | default([]))"
+        fail_msg: >-
+          Cannot skip protected role(s). These are mandatory for system bootstrap and safety.
+          Protected roles: secrets, users, ssh_hardening, common.
   roles:
     - role: secrets
   tasks:
@@ -73,15 +84,51 @@
         fail_msg: "Play 2 must run as {{ secrets.admin_username }} on Debian/Ubuntu hosts."
 
   roles:
-    - role: secrets
-    - role: users
-    - role: ssh_hardening
-    - role: common
-    - role: tailscale
-    - role: docker
-    - role: conduit
-    - role: hermes
-    - role: authelia
-    - role: gateway
-    - role: silverbullet
-    - role: backup
+    - role:
+        name: secrets
+        tags:
+          - secrets
+    - role:
+        name: users
+        tags:
+          - users
+    - role:
+        name: ssh_hardening
+        tags:
+          - ssh_hardening
+    - role:
+        name: common
+        tags:
+          - common
+    - role:
+        name: tailscale
+        tags:
+          - tailscale
+    - role:
+        name: docker
+        tags:
+          - docker
+    - role:
+        name: conduit
+        tags:
+          - conduit
+    - role:
+        name: hermes
+        tags:
+          - hermes
+    - role:
+        name: authelia
+        tags:
+          - authelia
+    - role:
+        name: gateway
+        tags:
+          - gateway
+    - role:
+        name: silverbullet
+        tags:
+          - silverbullet
+    - role:
+        name: backup
+        tags:
+          - backup

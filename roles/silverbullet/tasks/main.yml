@@ -1,5 +1,6 @@
 ---
 - name: Create SilverBullet deployment directory
+  tags: [silverbullet]
   ansible.builtin.file:
     path: "{{ silverbullet_compose_dir }}"
     state: directory
@@ -8,12 +9,14 @@
     mode: '0775'
 
 - name: Deploy docker-compose configuration
+  tags: [silverbullet]
   ansible.builtin.template:
     src: docker-compose.yml.j2
     dest: "{{ silverbullet_compose_dir }}/docker-compose.yml"
     mode: '0644'
 
 - name: Start SilverBullet stack
+  tags: [silverbullet]
   community.docker.docker_compose_v2:
     project_src: "{{ silverbullet_compose_dir }}"
     state: present

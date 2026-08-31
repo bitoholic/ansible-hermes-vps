@@ -1,5 +1,6 @@
 ---
 - name: Validate Tailscale role prerequisites
+  tags: [tailscale]
   ansible.builtin.assert:
     that:
       - ansible_os_family == 'Debian'
@@ -11,12 +12,14 @@
 
 # --- Tailscale daemon (VPN overlay) -------------------------------------------
 - name: Install ufw (host firewall package)
+  tags: [tailscale]
   ansible.builtin.apt:
     name: ufw
     state: present
     update_cache: true
 
 - name: Check whether Tailscale is already installed
+  tags: [tailscale]
   ansible.builtin.command:
     cmd: which tailscale
   register: tailscale_present
@@ -24,6 +27,7 @@
   failed_when: false
 
 - name: Download the official Tailscale install script
+  tags: [tailscale]
   ansible.builtin.get_url:
     url: https://tailscale.com/install.sh
     dest: /tmp/tailscale-install.sh
@@ -31,12 +35,14 @@
   when: tailscale_present.rc != 0
 
 - name: Install Tailscale
+  tags: [tailscale]
   ansible.builtin.command:
     cmd: /tmp/tailscale-install.sh
   when: tailscale_present.rc != 0
   changed_when: true
 
 - name: Ensure tailscaled service is enabled and running
+  tags: [tailscale]
   ansible.builtin.service:
     name: tailscaled
     state: started
@@ -45,6 +51,7 @@
   ignore_errors: "{{ ansible_check_mode }}"
 
 - name: Probe Tailscale backend state
+  tags: [tailscale]
   ansible.builtin.command:
     cmd: tailscale status --json
   register: tailscale_status
@@ -53,6 +60,7 @@
 
 # Idempotent: only bring the node up if it is not already in the Running state.
 - name: Bring up Tailscale (login via auth key)
+  tags: [tailscale]
   ansible.builtin.command:
     cmd: "tailscale up --authkey={{ secrets.tailscale_authkey }} --hostname={{ inventory_hostname }}"
   when: >-
@@ -67,6 +75,7 @@
 # Caddy/MFA ingress (80/443), and the Tailscale VPN interface. The Tailscale subnet
 # constant is also consumed by the gateway Caddy MFA bypass (epic 07 #02).
 - name: Allow the Tailscale VPN interface
+  tags: [tailscale]
   community.general.ufw:
     rule: allow
     direction: in
@@ -74,6 +83,7 @@
     comment: "Tailscale private access"
 
 - name: Rate-limit SSH, HTTP, and HTTPS
+  tags: [tailscale]
   community.general.ufw:
     rule: limit
     port: "{{ item }}"
@@ -85,15 +95,18 @@
     - 443
 
 - name: Set UFW default incoming policy (default-deny)
+  tags: [tailscale]
   community.general.ufw:
     direction: incoming
     policy: "{{ common_ufw_default_incoming_policy | lower }}"  # noqa: args[module]
 
 - name: Set UFW default outgoing policy
+  tags: [tailscale]
   community.general.ufw:
     direction: outgoing
     policy: "{{ common_ufw_default_outgoing_policy | lower }}"  # noqa: args[module]
 
 - name: Enable UFW
+  tags: [tailscale]
   community.general.ufw:
     state: enabled

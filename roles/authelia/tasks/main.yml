@@ -1,5 +1,6 @@
 ---
 - name: Assert mandatory secrets are present
+  tags: [authelia]
   ansible.builtin.assert:
     that:
       - secrets.authelia_admin_password_hash | default('') | string | length > 0
@@ -8,6 +9,7 @@
     fail_msg: Provide the required secrets via --extra-vars or inventory group_vars before running the playbook
 
 - name: Ensure Authelia configuration and data directories exist
+  tags: [authelia]
   ansible.builtin.file:
     path: "{{ item }}"
     state: directory
@@ -19,12 +21,14 @@
     - "{{ authelia_data_dir }}"
 
 - name: Render Authelia configuration
+  tags: [authelia]
   ansible.builtin.template:
     src: authelia-configuration.yml.j2
     dest: "{{ authelia_config_dir }}/configuration.yml"
     mode: '0600'
 
 - name: Render Authelia users database
+  tags: [authelia]
   ansible.builtin.template:
     src: authelia-users.yml.j2
     dest: "{{ authelia_config_dir }}/users.yml"

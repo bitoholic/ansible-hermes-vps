@@ -1,5 +1,6 @@
 ---
 - name: Validate Conduit role prerequisites
+  tags: [conduit]
   ansible.builtin.assert:
     that:
       - ansible_os_family == 'Debian'
@@ -12,6 +13,7 @@
       (set CONDUIT_REGISTRATION_SECRET), and secrets.matrix_bot_password (set MATRIX_BOT_PASSWORD).
 
 - name: Ensure Conduit deployment directory exists
+  tags: [conduit]
   ansible.builtin.file:
     path: "{{ conduit_compose_dir }}"
     state: directory
@@ -22,6 +24,7 @@
 # The matrixconduit/matrix-conduit runner executes as the `conduit` user (UID/GID 1000),
 # so the bind-mounted data dir must be owned by that UID or the container can't write its DB.
 - name: Ensure Conduit data directory exists
+  tags: [conduit]
   ansible.builtin.file:
     path: "{{ conduit_data_dir }}"
     state: directory
@@ -32,6 +35,7 @@
 # The config file embeds the registration token (a secret). It is owned by the container's
 # UID 1000 (plus root) so the process can read it, while other local users cannot.
 - name: Deploy Conduit configuration
+  tags: [conduit]
   ansible.builtin.template:
     src: conduit.toml.j2
     dest: "{{ conduit_compose_dir }}/conduit.toml"
@@ -40,6 +44,7 @@
     mode: '0600'
 
 - name: Deploy Conduit docker-compose file
+  tags: [conduit]
   ansible.builtin.template:
     src: docker-compose.yml.j2
     dest: "{{ conduit_compose_dir }}/docker-compose.yml"
@@ -48,6 +53,7 @@
     mode: '0640'
 
 - name: Start Conduit stack
+  tags: [conduit]
   community.docker.docker_compose_v2:
     project_src: "{{ conduit_compose_dir }}"
     project_name: conduit
@@ -62,20 +68,24 @@
 # roles), so the bot account is created here once via Conduit's registration endpoint
 # using the shared registration token. Idempotent: skipped once the user exists.
 - name: Resolve Conduit container IP on the internal network
+  tags: [conduit]
   community.docker.docker_container_info:
     name: conduit
   register: conduit_container_info
   ignore_errors: "{{ ansible_check_mode }}"
 
 - name: Compute Conduit container IP fact
+  tags: [conduit]
   ansible.builtin.set_fact:
     conduit_ip: "{{ (conduit_container_info.container or {}).NetworkSettings.Networks.hermes_net.IPAddress | default('', true) }}"
 
 - name: Compute Conduit API base URL
+  tags: [conduit]
   ansible.builtin.set_fact:
     conduit_api_base: "http://{{ conduit_ip }}:{{ conduit_port }}"
 
 - name: Wait for Conduit to accept connections
+  tags: [conduit]
   ansible.builtin.wait_for:
     host: "{{ conduit_ip }}"
     port: "{{ conduit_port }}"
@@ -85,6 +95,7 @@
   ignore_errors: "{{ ansible_check_mode }}"
 
 - name: Check whether the @hermes user is already registered
+  tags: [conduit]
   ansible.builtin.uri:
     url: "{{ conduit_api_base }}/_matrix/client/v3/register/available?username=hermes"
     method: GET
@@ -94,6 +105,7 @@
   ignore_errors: "{{ ansible_check_mode }}"
 
 - name: Register the @hermes bot account via the Conduit registration token
+  tags: [conduit]
   ansible.builtin.uri:
     url: "{{ conduit_api_base }}/_matrix/client/v3/register"
     method: POST

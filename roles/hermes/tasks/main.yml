@@ -1,5 +1,6 @@
 ---
 - name: Validate Hermes role prerequisites
+  tags: [hermes]
   ansible.builtin.assert:
     that:
       - ansible_os_family == 'Debian'
@@ -17,6 +18,7 @@
       secrets.hermes_signal_allowed_users, secrets.matrix_bot_password, and secrets.matrix_allowed_users.
 
 - name: Ensure persistent Hermes data root exists for admin user
+  tags: [hermes]
   ansible.builtin.file:
     path: "{{ hermes_home }}"
     state: directory
@@ -26,6 +28,7 @@
     recurse: true
 
 - name: Ensure Hermes Signal data directory exists
+  tags: [hermes]
   ansible.builtin.file:
     path: "{{ hermes_home }}/signal-data"
     state: directory
@@ -38,6 +41,7 @@
 # (default -> hermes_home, sub-profiles -> hermes_home/profiles/<name>), and the template
 # paths default to per-profile files under roles/hermes/{templates,files}/profiles/<name>/.
 - name: Ensure Hermes subagent profile directories exist
+  tags: [hermes]
   ansible.builtin.file:
     path: "{{ hermes_home }}/profiles/{{ item.name }}"
     state: directory
@@ -48,6 +52,7 @@
   when: item.target_dir is not defined
 
 - name: Deploy Hermes profile config.yaml
+  tags: [hermes]
   ansible.builtin.template:
     src: "{{ item.config_template | default('config.yaml.j2') }}"
     dest: "{{ item.target_dir | default(hermes_home ~ '/profiles/' ~ item.name) }}/config.yaml"
@@ -58,6 +63,7 @@
   loop: "{{ hermes_profiles }}"
 
 - name: Ensure Hermes profile SOUL.md files exist
+  tags: [hermes]
   ansible.builtin.template:
     src: "{{ item.soul_template | default('profiles/' ~ item.name ~ '/SOUL.md.j2') }}"
     dest: "{{ item.target_dir | default(hermes_home ~ '/profiles/' ~ item.name) }}/SOUL.md"
@@ -68,6 +74,7 @@
   loop: "{{ hermes_profiles }}"
 
 - name: Deploy Hermes profile env files
+  tags: [hermes]
   ansible.builtin.template:
     src: "{{ item.env_template | default('env_default.j2') }}"
     dest: "{{ item.target_dir | default(hermes_home ~ '/profiles/' ~ item.name) }}/.env"
@@ -77,6 +84,7 @@
   loop: "{{ hermes_profiles }}"
 
 - name: Deploy Hermes Dockerfile
+  tags: [hermes]
   ansible.builtin.copy:
     src: Dockerfile
     dest: "{{ hermes_home }}/Dockerfile"
@@ -85,6 +93,7 @@
     mode: '0640'
 
 - name: Deploy Hermes docker-compose file
+  tags: [hermes]
   ansible.builtin.template:
     src: docker-compose.yml.j2
     dest: "{{ hermes_home }}/docker-compose.yml"
@@ -93,6 +102,7 @@
     mode: '0640'
 
 - name: Start Hermes container stack
+  tags: [hermes]
   community.docker.docker_compose_v2:
     project_src: "{{ hermes_home }}"
     project_name: "hermes-agent"
@@ -109,10 +119,12 @@
 # is restarted so the new skills load. spec-kit is intentionally excluded (Hermes <=0.20.6 does
 # not register `specify`-generated skills).
 - name: Pause for Hermes gateway to become ready before installing skills
+  tags: [hermes]
   ansible.builtin.pause:
     seconds: 20
 
 - name: Install Hermes skill packs via Hermes CLI
+  tags: [hermes]
   ansible.builtin.shell: >-
     docker exec hermes-agent hermes skills list |
     awk -F'│' '{n=$2; gsub(/^[ \t]+|[ \t]+$/, "", n); if (n=="{{ item.name }}") f=1} END{exit !f}' ||
@@ -126,6 +138,7 @@
   when: hermes_skills | default([]) | length > 0
 
 - name: Restart Hermes gateway to load newly installed skills
+  tags: [hermes]
   ansible.builtin.command: docker restart hermes-agent
   changed_when: true
   when:

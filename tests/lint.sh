@@ -70,3 +70,19 @@ python3 scripts/generate-env.py --check
 # the wiki_volume role, and no other role re-resolves llm_wiki via getent. A live idempotency/owner
 # run of the role is operator-validated on the VPS (guarded/skipped when llm_wiki is absent).
 ./tests/check-wiki-volume.sh
+
+# Role skip-tags guard (epic 10): every role in site.yml carries a tags entry matching its name,
+# and the protected roles (secrets, users, ssh_hardening, common) are guarded by a pre-flight assert
+# in site.yml so they cannot be skipped via --skip-tags.
+echo "== role skip-tags guard =="
+for role in secrets users ssh_hardening common tailscale docker conduit hermes authelia gateway silverbullet backup; do
+  if ! grep -q "tags:" "roles/${role}/tasks/main.yml"; then
+    echo "FAIL: roles/${role}/tasks/main.yml has no task-level tags entry" >&2
+    exit 1
+  fi
+done
+if ! grep -q "Protected roles: secrets, users, ssh_hardening, common" site.yml; then
+  echo "FAIL: site.yml is missing the protected-roles pre-flight assert" >&2
+  exit 1
+fi
+echo "role skip-tags guard OK"

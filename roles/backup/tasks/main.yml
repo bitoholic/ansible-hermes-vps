@@ -6,6 +6,7 @@
 # remote URL — so it is not persisted in .git/config (closes the README Known Limitation).
 
 - name: Ensure SilverBullet bin directory exists
+  tags: [backup]
   ansible.builtin.file:
     path: "{{ silverbullet_compose_dir }}/bin"
     state: directory
@@ -14,6 +15,7 @@
     mode: '0755'
 
 - name: Deploy git credential helper (reads GITHUB_TOKEN from env, no token stored)
+  tags: [backup]
   ansible.builtin.copy:
     src: git-credential-env
     dest: "{{ silverbullet_compose_dir }}/bin/git-credential-env"
@@ -22,6 +24,7 @@
     group: llm_wiki
 
 - name: Bootstrap clone of the private wiki repository (token-less URL)
+  tags: [backup]
   # No token in the URL: git authenticates via GIT_ASKPASS -> git-credential-env, which reads
   # GITHUB_TOKEN from the environment. The token value is never written to .git/config.
   ansible.builtin.git:
@@ -38,6 +41,7 @@
   ignore_errors: "{{ ansible_check_mode }}"
 
 - name: Set correct ownership on cloned repository files
+  tags: [backup]
   ansible.builtin.file:
     path: "{{ silverbullet_data_dir }}"
     owner: llm_wiki
@@ -45,6 +49,7 @@
     recurse: true
 
 - name: Deploy .gitattributes
+  tags: [backup]
   ansible.builtin.template:
     src: .gitattributes.j2
     dest: "{{ silverbullet_data_dir }}/.gitattributes"
@@ -53,6 +58,7 @@
     group: llm_wiki
 
 - name: Deploy backup_sync module
+  tags: [backup]
   ansible.builtin.copy:
     src: "{{ playbook_dir }}/backup_sync/backup_sync"
     dest: "{{ backup_sync_bin }}"
@@ -61,6 +67,7 @@
     group: llm_wiki
 
 - name: Stat the cloned wiki repo so git_config can be gated on its existence
+  tags: [backup]
   ansible.builtin.stat:
     path: "{{ silverbullet_data_dir }}/.git"
   register: wiki_repo_stat
@@ -68,6 +75,7 @@
   failed_when: false
 
 - name: Configure repo-local git credential helper (env token, not stored in .git/config)
+  tags: [backup]
   community.general.git_config:
     repo: "{{ silverbullet_data_dir }}"
     scope: local
@@ -76,6 +84,7 @@
   when: wiki_repo_stat.stat.exists
 
 - name: Initialize git-crypt and export the offline-recovery key (idempotent)
+  tags: [backup]
   ansible.builtin.command:
     cmd: "{{ backup_sync_bin }} git-crypt-init --repo {{ silverbullet_data_dir }} --key-out {{ silverbullet_compose_dir }}/git-crypt.key"
     creates: "{{ silverbullet_data_dir }}/.git/git-crypt/keys/default"
@@ -85,6 +94,7 @@
   register: backup_git_crypt
 
 - name: Restrict permissions on the exported git-crypt key
+  tags: [backup]
   ansible.builtin.file:
     path: "{{ silverbullet_compose_dir }}/git-crypt.key"
     owner: llm_wiki
@@ -93,6 +103,7 @@
   when: wiki_repo_stat.stat.exists
 
 - name: Fetch git-crypt key back to the control node for safekeeping
+  tags: [backup]
   ansible.builtin.fetch:
     src: "{{ silverbullet_compose_dir }}/git-crypt.key"
     dest: "./{{ inventory_hostname }}-git-crypt.key"
@@ -100,18 +111,21 @@
   when: backup_git_crypt is changed  # noqa: no-handler
 
 - name: Deploy llm-wiki watcher path unit
+  tags: [backup]
   ansible.builtin.template:
     src: llm-wiki-watcher.path.j2
     dest: /etc/systemd/system/llm-wiki-watcher.path
     mode: '0644'
 
 - name: Deploy llm-wiki watcher service unit
+  tags: [backup]
   ansible.builtin.template:
     src: llm-wiki-watcher.service.j2
     dest: /etc/systemd/system/llm-wiki-watcher.service
     mode: '0644'
 
 - name: Enable and start llm-wiki watcher path
+  tags: [backup]
   ansible.builtin.systemd:
     name: llm-wiki-watcher.path
     enabled: true
@@ -120,6 +134,7 @@
   ignore_errors: "{{ ansible_check_mode }}"
 
 - name: Schedule nightly PR creation via backup_sync
+  tags: [backup]
   ansible.builtin.cron:
     name: create daily backup PR
     minute: '59'

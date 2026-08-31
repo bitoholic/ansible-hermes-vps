@@ -67,6 +67,24 @@ source .env
 ansible-playbook -i "${TARGET_HOST}," site.yml --check --diff
 ```
 
+### 4️⃣ Selective role skipping (fast redeploys)
+
+You can skip specific roles during deployment using `--skip-tags`:
+
+```bash
+# Skip slow roles when only updating hermes configuration
+ansible-playbook -i "${TARGET_HOST}," site.yml --skip-tags hermes,backup
+
+# Minimal API deployment: skip everything except conduit and hermes
+ansible-playbook -i "${TARGET_HOST}," site.yml --skip-tags tailscale,docker,authelia,gateway,silverbullet,backup
+
+# Full deploy (default, no skips)
+ansible-playbook -i "${TARGET_HOST}," site.yml
+```
+
+Protected roles that **cannot** be skipped: `secrets`, `users`, `ssh_hardening`, `common`.
+Skippable roles: `tailscale`, `docker`, `conduit`, `hermes`, `authelia`, `gateway`, `silverbullet`, `backup`.
+
 ## 🧪 Local Testing
 
 ```bash

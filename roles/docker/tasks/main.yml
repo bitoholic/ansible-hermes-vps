@@ -1,5 +1,6 @@
 ---
 - name: Validate Docker role prerequisites
+  tags: [docker]
   ansible.builtin.assert:
     that:
       - ansible_os_family == 'Debian'
@@ -8,6 +9,7 @@
     fail_msg: "Docker role requires a Debian/Ubuntu target and admin_username defined."
 
 - name: Install Docker prerequisites
+  tags: [docker]
   ansible.builtin.apt:
     name:
       - ca-certificates
@@ -18,18 +20,21 @@
     update_cache: true
 
 - name: Create Docker apt keyring directory
+  tags: [docker]
   ansible.builtin.file:
     path: /etc/apt/keyrings
     state: directory
     mode: '0755'
 
 - name: Download Docker apt signing key
+  tags: [docker]
   ansible.builtin.get_url:
     url: https://download.docker.com/linux/{{ ansible_distribution | lower }}/gpg
     dest: /etc/apt/keyrings/docker.asc
     mode: '0644'
 
 - name: Add Docker apt repository
+  tags: [docker]
   ansible.builtin.apt_repository:
     repo: >-
       deb [arch={{ 'amd64' if ansible_architecture == 'x86_64' else ansible_architecture }} signed-by=/etc/apt/keyrings/docker.asc]
@@ -38,6 +43,7 @@
     state: present
 
 - name: Install Docker Engine and Compose plugin
+  tags: [docker]
   ansible.builtin.apt:
     name:
       - docker-ce
@@ -48,6 +54,7 @@
     update_cache: true
 
 - name: Ensure admin user is in the docker group
+  tags: [docker]
   ansible.builtin.user:
     name: "{{ secrets.admin_username }}"
     groups: docker
@@ -55,6 +62,7 @@
     state: present
 
 - name: Ensure Docker service is enabled and running
+  tags: [docker]
   ansible.builtin.service:
     name: docker
     state: started
@@ -62,12 +70,14 @@
   ignore_errors: "{{ ansible_check_mode }}"
 
 - name: Ensure shared Docker proxy network exists
+  tags: [docker]
   community.docker.docker_network:
     name: proxy_net
     state: present
     driver: bridge
 
 - name: Ensure shared Docker hermes internal network exists
+  tags: [docker]
   community.docker.docker_network:
     name: hermes_net
     state: present

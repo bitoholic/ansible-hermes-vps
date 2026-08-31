@@ -1,5 +1,6 @@
 ---
 - name: Install common hardening packages
+  tags: [common]
   ansible.builtin.apt:
     name:
       - ca-certificates
@@ -15,6 +16,7 @@
     update_cache: true
 
 - name: Configure global git user.name for admin user
+  tags: [common]
   community.general.git_config:
     name: user.name
     scope: global
@@ -25,6 +27,7 @@
   when: secrets.git_username | default('') | length > 0
 
 - name: Configure global git user.email for admin user
+  tags: [common]
   community.general.git_config:
     name: user.email
     scope: global
@@ -35,6 +38,7 @@
   when: secrets.git_email | default('') | length > 0
 
 - name: Configure unattended-upgrades
+  tags: [common]
   ansible.builtin.copy:
     dest: /etc/apt/apt.conf.d/50unattended-upgrades
     mode: '0644'
@@ -46,6 +50,7 @@
       Unattended-Upgrade::Automatic-Reboot "false";
 
 - name: Mount /run/shm with noexec,nosuid
+  tags: [common]
   ansible.posix.mount:
     path: /run/shm
     src: tmpfs

@@ -1,5 +1,6 @@
 ---
 - name: Assert admin username is provided
+  tags: [users]
   ansible.builtin.assert:
     that:
       - secrets.admin_username is defined
@@ -7,12 +8,14 @@
     fail_msg: "admin_username must be defined before creating host users."
 
 - name: Create llm_wiki system group
+  tags: [users]
   ansible.builtin.group:
     name: llm_wiki
     state: present
     system: true
 
 - name: Create llm_wiki system user
+  tags: [users]
   ansible.builtin.user:
     name: llm_wiki
     group: llm_wiki
@@ -22,6 +25,7 @@
     state: present
 
 - name: Add admin user to llm_wiki group
+  tags: [users]
   ansible.builtin.user:
     name: "{{ secrets.admin_username }}"
     groups: llm_wiki

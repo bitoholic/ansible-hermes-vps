@@ -6,6 +6,7 @@
 # `gateway_caddyfile_dir` (default `silverbullet_compose_dir`); SilverBullet no longer authors
 # any routing.
 - name: Load per-role gateway_publish contributions
+  tags: [gateway]
   ansible.builtin.include_vars:
     file: "{{ playbook_dir }}/roles/{{ item }}/defaults/main.yml"
   loop:
@@ -14,9 +15,11 @@
     - hermes
 
 - name: Validate gateway_routes shape
+  tags: [gateway]
   ansible.builtin.include_tasks: validate.yml
 
 - name: Ensure ingress (Caddyfile) deploy directory exists
+  tags: [gateway]
   ansible.builtin.file:
     path: "{{ gateway_caddyfile_dir }}"
     state: directory
@@ -25,6 +28,7 @@
     mode: '0775'
 
 - name: Deploy Caddyfile (gateway adapter)
+  tags: [gateway]
   ansible.builtin.template:
     src: Caddyfile.j2
     dest: "{{ gateway_caddyfile_dir }}/Caddyfile"
