@@ -61,8 +61,8 @@ hermes_profiles:
     soul_template: SOUL.md.j2
     env_template: env_default.j2
     is_default: true
-    model_provider: nous
-    model_default: deepseek/deepseek-v4-flash
+    model_provider: openrouter
+    model_default: openrouter/free
     terminal_cwd: /opt/data/wiki
     enable_base_features: true
     enable_web: true

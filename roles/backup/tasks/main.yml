@@ -79,6 +79,7 @@
   ansible.builtin.command:
     cmd: "{{ backup_sync_bin }} git-crypt-init --repo {{ silverbullet_data_dir }} --key-out {{ silverbullet_compose_dir }}/git-crypt.key"
     creates: "{{ silverbullet_data_dir }}/.git/git-crypt/keys/default"
+  when: wiki_repo_stat.stat.exists
   become: true
   become_user: llm_wiki
   register: backup_git_crypt
@@ -89,6 +90,7 @@
     owner: llm_wiki
     group: llm_wiki
     mode: '0600'
+  when: wiki_repo_stat.stat.exists
 
 - name: Fetch git-crypt key back to the control node for safekeeping
   ansible.builtin.fetch:
