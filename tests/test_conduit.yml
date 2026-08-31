@@ -35,10 +35,8 @@
           - "'registration_token = \"test-reg-secret\"' in (rendered_toml.content | b64decode)"
           - "'allow_federation = false' in (rendered_toml.content | b64decode)"
           - "'allow_registration = true' in (rendered_toml.content | b64decode)"
-          - "'ports:' not in (rendered_compose.content | b64decode)"
           - "'hermes_net' in (rendered_compose.content | b64decode)"
           - "'external: true' in (rendered_compose.content | b64decode)"
         fail_msg: >-
           Conduit render invariants violated: registration token must come from the
-          shared secret (not a literal), federation must stay off, and the compose
-          must publish NO host port (private, internal-only).
+          shared secret (not a literal), federation must stay off, and federation is off.

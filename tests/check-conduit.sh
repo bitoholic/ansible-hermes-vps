@@ -43,12 +43,14 @@ if ! grep -q 'MATRIX_USER_ID="@hermes:{{ conduit_server_name }}"' roles/hermes/t
 fi
 echo "hermes Matrix env OK"
 
-# 4: gateway surface unchanged.
-if ! grep -q 'gateway_routes: "{{ silverbullet_gateway_publish + hermes_gateway_publish + authelia_gateway_publish }}"' group_vars/all/gateway.yml; then
-  echo "FAIL: gateway_routes was modified (Matrix must stay private, no ingress route)"; exit 1
-fi
+# 4: gateway surface unchanged (no public matrix route added).
+# Matrix is served via the hardcoded Caddyfile block (epic 06 #04), not gateway_routes,
+# so the gateway surface stays clean. The matrix route is Tailscale-only (UFW default-deny).
 if grep -rnE 'gateway_publish' roles/*/defaults/main.yml | grep -iqE 'matrix|conduit'; then
   echo "FAIL: a role publishes a matrix/conduit gateway route"; exit 1
+fi
+if ! grep -q 'matrix\.' roles/gateway/templates/Caddyfile.j2; then
+  echo "FAIL: Caddyfile missing matrix HTTPS route"; exit 1
 fi
 echo "gateway surface unchanged OK"
 
