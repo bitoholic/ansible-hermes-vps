@@ -29,6 +29,7 @@
     silverbullet_image: ghcr.io/silverbulletmd/silverbullet:latest
     wiki_volume_uid: 1000
     wiki_volume_gid: 1000
+    IP_ADDRESS: "[IP_ADDRESS]"
     authelia_config_dir: /opt/authelia
     authelia_data_dir: /opt/authelia-data
     conduit_compose_dir: /opt/conduit
