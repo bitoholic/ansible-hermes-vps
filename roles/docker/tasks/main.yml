@@ -8,6 +8,26 @@
       - secrets.admin_username | string | length > 0
     fail_msg: "Docker role requires a Debian/Ubuntu target and admin_username defined."
 
+# Resolve the actual UID/GID of the llm_wiki user (created by the users role). Used as the
+# container user for authelia, silverbullet, signal-cli, and hermes-agent so they can read/write
+# bind-mounted volumes owned by llm_wiki on the host. Falls back to defaults (1000:1000) only
+# when the user cannot be resolved (e.g., in standalone CI render tests).
+- name: Lookup llm_wiki passwd entry for wiki_volume_uid/gid resolution
+  tags: [docker]
+  ansible.builtin.getent:
+    database: passwd
+    key: llm_wiki
+  register: docker_wiki_user_lookup
+  failed_when: false
+  changed_when: false
+
+- name: Set wiki_volume_uid and wiki_volume_gid facts from llm_wiki
+  tags: [docker]
+  ansible.builtin.set_fact:
+    wiki_volume_uid: "{{ docker_wiki_user_lookup.ansible_facts.getent_passwd.llm_wiki[1] | default(1000) }}"
+    wiki_volume_gid: "{{ docker_wiki_user_lookup.ansible_facts.getent_passwd.llm_wiki[2] | default(1000) }}"
+  when: docker_wiki_user_lookup.ansible_facts is defined and docker_wiki_user_lookup.ansible_facts.getent_passwd is defined and docker_wiki_user_lookup.ansible_facts.getent_passwd.llm_wiki is defined
+
 - name: Install Docker prerequisites
   tags: [docker]
   ansible.builtin.apt:

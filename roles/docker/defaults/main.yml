@@ -6,12 +6,6 @@ docker_project_name: hermes-vps
 # config address arguments. Bind to all interfaces by default.
 IP_ADDRESS: "[IP_ADDRESS]"
 
-# UID/GID for services that run as the llm_wiki user (authelia, silverbullet, signal-cli).
-# These are normally set by the wiki_volume role, but defaults are provided to allow the
-# docker role to render templates standalone (e.g., in CI without the wiki_volume role).
-wiki_volume_uid: 1000
-wiki_volume_gid: 1000
-
 # Standard networks
 docker_networks:
   - name: gateway
