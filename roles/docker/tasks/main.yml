@@ -82,3 +82,45 @@
     name: hermes_net
     state: present
     driver: bridge
+
+- name: Create Docker Compose project directory
+  tags: [docker]
+  ansible.builtin.file:
+    path: "{{ docker_compose_dir }}"
+    state: directory
+    mode: '0755'
+
+- name: Ensure Docker gateway network exists
+  tags: [docker]
+  community.docker.docker_network:
+    name: gateway
+    state: present
+    driver: bridge
+
+- name: Ensure Docker internal network exists
+  tags: [docker]
+  community.docker.docker_network:
+    name: internal
+    state: present
+    driver: bridge
+
+- name: Render consolidated docker-compose.yml
+  tags: [docker]
+  ansible.builtin.template:
+    src: docker-compose.yml.j2
+    dest: "{{ docker_compose_dir }}/docker-compose.yml"
+    mode: '0644'
+
+- name: Validate consolidated docker-compose.yml syntax
+  tags: [docker]
+  ansible.builtin.command:
+    cmd: "docker compose -f {{ docker_compose_dir }}/docker-compose.yml config"
+  changed_when: false
+  register: docker_compose_config
+  ignore_errors: "{{ ansible_check_mode }}"
+
+- name: Fail if docker compose config validation fails
+  tags: [docker]
+  ansible.builtin.fail:
+    msg: "Consolidated docker-compose.yml failed validation: {{ docker_compose_config.stderr }}"
+  when: docker_compose_config is failed

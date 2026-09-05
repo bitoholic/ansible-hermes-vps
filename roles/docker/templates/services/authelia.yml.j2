@@ -1,0 +1,12 @@
+authelia:
+  image: authelia/authelia:latest
+  container_name: authelia
+  user: "{{wiki_volume_uid}}:{{wiki_volume_gid}}"
+  environment:
+    - PUID={{wiki_volume_uid}}
+    - PGID={{wiki_volume_gid}}
+  volumes:
+    - "{{ authelia_config_dir }}:/config:ro"
+    - "{{ authelia_data_dir }}:/var/lib/authelia"
+  networks:
+    - gateway

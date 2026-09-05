@@ -1,0 +1,26 @@
+---
+docker_compose_dir: /opt/hermes-vps
+docker_project_name: hermes-vps
+
+# Standard networks
+docker_networks:
+  - name: gateway
+    driver: bridge
+  - name: internal
+    driver: bridge
+
+# Named volumes declared at the top level of the consolidated compose file.
+# Services reference these by short name in their fragment's `volumes:` block.
+docker_volumes:
+  - caddy_data
+  - caddy_config
+
+# Services to enable. Each service must have a corresponding fragment in
+# roles/docker/templates/services/<name>.yml.j2
+docker_enabled_services:
+  - caddy
+  - authelia
+  - silverbullet
+  - conduit
+  - signal-cli
+  - hermes-agent

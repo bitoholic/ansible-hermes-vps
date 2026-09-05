@@ -1,0 +1,17 @@
+conduit:
+  image: "{{ conduit_image }}"
+  container_name: conduit
+  restart: unless-stopped
+  environment:
+    CONDUIT_CONFIG: /etc/matrix-conduit/conduit.toml
+  volumes:
+    - "{{ conduit_data_dir }}:/var/lib/matrix-conduit"
+    - "{{ conduit_compose_dir }}/conduit.toml:/etc/matrix-conduit/conduit.toml:ro"
+  # Reachable by hermes-agent on the shared internal network (http://conduit:8008)
+  # and by Tailscale clients via the host port (no public exposure — Tailscale
+  # interface is already allowed by the tailscale role's UFW rules).
+  ports:
+    - "{{ conduit_port }}:{{ conduit_port }}"
+  networks:
+    - gateway
+    - internal

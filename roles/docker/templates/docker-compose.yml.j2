@@ -1,0 +1,15 @@
+services:
+{% for service_name in docker_enabled_services %}
+  {{ lookup('template', 'services/' + service_name + '.yml.j2') | indent(4) }}
+{% endfor %}
+
+networks:
+{% for network in docker_networks %}
+  {{ network.name }}:
+    driver: {{ network.driver }}
+{% endfor %}
+
+volumes:
+{% for volume in docker_volumes %}
+  {{ volume }}:
+{% endfor %}
