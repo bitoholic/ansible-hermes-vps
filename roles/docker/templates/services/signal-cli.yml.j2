@@ -7,13 +7,13 @@ signal-cli:
     - "/opt/hermes/signal-data:/var/lib/signal-cli"
   tmpfs:
     - /tmp:exec
-  command:
+command:
     - "--config"
     - "/var/lib/signal-cli"
     - "-u"
     - "{{ secrets.hermes_signal_account }}"
     - "daemon"
     - "--http"
-    - "[IP_ADDRESS]:8080"
+    - "{{ IP_ADDRESS }}:8080"
   networks:
     - internal

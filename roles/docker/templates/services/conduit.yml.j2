@@ -1,6 +1,7 @@
 conduit:
   image: "{{ conduit_image }}"
   container_name: conduit
+  user: "{{ wiki_volume_uid }}:{{ wiki_volume_gid }}"
   restart: unless-stopped
   environment:
     CONDUIT_CONFIG: /etc/matrix-conduit/conduit.toml

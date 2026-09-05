@@ -21,19 +21,18 @@
     group: "{{ secrets.admin_username }}"
     mode: '0755'
 
-# The matrixconduit/matrix-conduit runner executes as the `conduit` user (UID/GID 1000),
+# The matrixconduit/matrix-conduit runner executes as the `llm_wiki` user (UID/GID 10000),
 # so the bind-mounted data dir must be owned by that UID or the container can't write its DB.
 - name: Ensure Conduit data directory exists
   tags: [conduit]
   ansible.builtin.file:
     path: "{{ conduit_data_dir }}"
     state: directory
-    owner: '1000'
-    group: '1000'
+    owner: '10000'
+    group: '10000'
     mode: '0700'
 
-# The config file embeds the registration token (a secret). It is owned by the container's
-# UID 1000 (plus root) so the process can read it, while other local users cannot.
+# The config file is owned by the llm_wiki user (10000) for consistency with other host volumes.
 - name: Ensure conduit.toml is a file (remove directory if previously misplaced)
   tags: [conduit]
   ansible.builtin.file:
@@ -45,9 +44,9 @@
   ansible.builtin.template:
     src: conduit.toml.j2
     dest: "{{ conduit_compose_dir }}/conduit.toml"
-    owner: '1000'
-    group: '1000'
-    mode: '0600'
+    owner: '10000'
+    group: '10000'
+    mode: '0644'
 
 # --- Bot provisioning (@hermes) -------------------------------------------------
 # Hermes logs in with MATRIX_USER_ID + MATRIX_PASSWORD (no access token shared across
