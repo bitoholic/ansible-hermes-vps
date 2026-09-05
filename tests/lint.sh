@@ -36,6 +36,10 @@ python3 scripts/generate-env.py --check
 # renders through the single shared config.yaml.j2 without losing its shape.
 ./tests/check-config-render.sh
 
+# Docker compose render invariants (epic 11 ticket #06): the consolidated docker-compose.yml
+# renders all enabled services correctly and passes docker compose config validation.
+./tests/check-docker-compose-render.sh
+
 # Hermes profile render behavioral test (epic 02 ticket #05): N profiles -> N file sets,
 # default present, .env regression + per-profile secret scoping.
 ./tests/check-hermes-profile.sh

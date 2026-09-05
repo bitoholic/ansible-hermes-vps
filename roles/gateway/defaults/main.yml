@@ -7,4 +7,3 @@
 gateway_caddyfile_dir: "{{ docker_compose_dir }}"
 gateway_caddyfile_owner: llm_wiki
 gateway_caddyfile_group: llm_wiki
-

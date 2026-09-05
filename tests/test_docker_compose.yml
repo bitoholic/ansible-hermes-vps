@@ -1,0 +1,77 @@
+---
+# Consolidated docker-compose.yml render test (epic 11 ticket #06).
+# Validates that the docker role's docker-compose.yml.j2 template renders all enabled
+# services correctly and passes `docker compose config`.
+- name: Docker compose render invariants
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    docker_compose_dir: /tmp/docker_compose_test
+    docker_project_name: test-hermes-vps
+    docker_enabled_services:
+      - caddy
+      - authelia
+      - silverbullet
+      - conduit
+      - signal-cli
+      - hermes-agent
+    docker_networks:
+      - name: gateway
+        driver: bridge
+      - name: internal
+        driver: bridge
+    docker_volumes:
+      - caddy_data
+      - caddy_config
+    silverbullet_compose_dir: /opt/silverbullet
+    silverbullet_data_dir: /opt/wiki
+    silverbullet_image: ghcr.io/silverbulletmd/silverbullet:latest
+    wiki_volume_uid: 1000
+    wiki_volume_gid: 1000
+    authelia_config_dir: /opt/authelia
+    authelia_data_dir: /opt/authelia-data
+    conduit_compose_dir: /opt/conduit
+    conduit_data_dir: /opt/conduit/data
+    conduit_image: matrixconduit/matrix-conduit:v0.10.13
+    conduit_port: 8008
+    hermes_home: /opt/hermes
+    secrets:
+      silverbullet_admin_username: admin
+      silverbullet_admin_password: P4ssw04d
+      hermes_signal_account: "+15551234567"
+      hermes_default_github_token: fake-github-token
+
+  pre_tasks:
+    - name: Ensure temp render dir exists
+      ansible.builtin.file:
+        path: "{{ docker_compose_dir }}"
+        state: directory
+        mode: '0755'
+
+  tasks:
+    - name: Render consolidated docker-compose.yml
+      ansible.builtin.template:
+        src: "{{ playbook_dir }}/../roles/docker/templates/docker-compose.yml.j2"
+        dest: "{{ docker_compose_dir }}/docker-compose.yml"
+        mode: '0644'
+
+    - name: Slurp rendered docker-compose.yml for assertions
+      ansible.builtin.slurp:
+        path: "{{ docker_compose_dir }}/docker-compose.yml"
+      register: rendered_compose
+
+    - name: Assert all enabled services are present in rendered docker-compose.yml
+      ansible.builtin.assert:
+        that:
+          - "'caddy:' in (rendered_compose.content | b64decode)"
+          - "'authelia:' in (rendered_compose.content | b64decode)"
+          - "'silverbullet:' in (rendered_compose.content | b64decode)"
+          - "'conduit:' in (rendered_compose.content | b64decode)"
+          - "'signal-cli:' in (rendered_compose.content | b64decode)"
+          - "'hermes-agent:' in (rendered_compose.content | b64decode)"
+          - "'gateway:' in (rendered_compose.content | b64decode)"
+          - "'internal:' in (rendered_compose.content | b64decode)"
+          - "'caddy_data:' in (rendered_compose.content | b64decode)"
+          - "'caddy_config:' in (rendered_compose.content | b64decode)"
+        fail_msg: "Rendered docker-compose.yml is missing expected services or configuration."
