@@ -2,7 +2,7 @@
 # Personal homeserver identity. Clients reach it over the internal Docker network as
 # http://conduit:{{ conduit_port }} and over Tailscale via the VPS's Tailscale address.
 server_name = "{{ conduit_server_name }}"
-address = "0.0.0.0"
+address = "[IP_ADDRESS]"
 port = {{ conduit_port }}
 
 database_backend = "rocksdb"

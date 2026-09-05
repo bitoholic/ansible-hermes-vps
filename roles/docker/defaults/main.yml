@@ -2,10 +2,9 @@
 docker_compose_dir: /opt/hermes-vps
 docker_project_name: hermes-vps
 
-# IP_ADDRESS is used in service templates for host port bindings and container
-# command arguments. Defaults to 0.0.0.0 (bind all interfaces) but can be
-# overridden in group_vars or the environment.
-IP_ADDRESS: 0.0.0.0
+# IP_ADDRESS used in service templates for host port bindings and container
+# config address arguments. Bind to all interfaces by default.
+IP_ADDRESS: "[IP_ADDRESS]"
 
 # UID/GID for services that run as the llm_wiki user (authelia, silverbullet, signal-cli).
 # These are normally set by the wiki_volume role, but defaults are provided to allow the
