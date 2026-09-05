@@ -11,34 +11,34 @@
 # superpowers: per-skill raw GitHub URLs (newest `main`).
 # mattpocock/skills: per-skill skills.sh sources (auto-resolves latest).
 hermes_skills:
-  - name: brainstorming
-    source: "https://github.com/obra/superpowers/raw/main/skills/brainstorming/SKILL.md"
-  - name: dispatching-parallel-agents
-    source: "https://github.com/obra/superpowers/raw/main/skills/dispatching-parallel-agents/SKILL.md"
-  - name: executing-plans
-    source: "https://github.com/obra/superpowers/raw/main/skills/executing-plans/SKILL.md"
-  - name: finishing-a-development-branch
-    source: "https://github.com/obra/superpowers/raw/main/skills/finishing-a-development-branch/SKILL.md"
-  - name: receiving-code-review
-    source: "https://github.com/obra/superpowers/raw/main/skills/receiving-code-review/SKILL.md"
-  - name: requesting-code-review
-    source: "https://github.com/obra/superpowers/raw/main/skills/requesting-code-review/SKILL.md"
-  - name: subagent-driven-development
-    source: "https://github.com/obra/superpowers/raw/main/skills/subagent-driven-development/SKILL.md"
-  - name: systematic-debugging
-    source: "https://github.com/obra/superpowers/raw/main/skills/systematic-debugging/SKILL.md"
-  - name: test-driven-development
-    source: "https://github.com/obra/superpowers/raw/main/skills/test-driven-development/SKILL.md"
-  - name: using-git-worktrees
-    source: "https://github.com/obra/superpowers/raw/main/skills/using-git-worktrees/SKILL.md"
-  - name: using-superpowers
-    source: "https://github.com/obra/superpowers/raw/main/skills/using-superpowers/SKILL.md"
-  - name: verification-before-completion
-    source: "https://github.com/obra/superpowers/raw/main/skills/verification-before-completion/SKILL.md"
-  - name: writing-plans
-    source: "https://github.com/obra/superpowers/raw/main/skills/writing-plans/SKILL.md"
-  - name: writing-skills
-    source: "https://github.com/obra/superpowers/raw/main/skills/writing-skills/SKILL.md"
+#  - name: brainstorming
+#    source: "https://github.com/obra/superpowers/raw/main/skills/brainstorming/SKILL.md"
+#  - name: dispatching-parallel-agents
+#    source: "https://github.com/obra/superpowers/raw/main/skills/dispatching-parallel-agents/SKILL.md"
+#  - name: executing-plans
+#    source: "https://github.com/obra/superpowers/raw/main/skills/executing-plans/SKILL.md"
+#  - name: finishing-a-development-branch
+#    source: "https://github.com/obra/superpowers/raw/main/skills/finishing-a-development-branch/SKILL.md"
+#  - name: receiving-code-review
+#    source: "https://github.com/obra/superpowers/raw/main/skills/receiving-code-review/SKILL.md"
+#  - name: requesting-code-review
+#    source: "https://github.com/obra/superpowers/raw/main/skills/requesting-code-review/SKILL.md"
+#  - name: subagent-driven-development
+#    source: "https://github.com/obra/superpowers/raw/main/skills/subagent-driven-development/SKILL.md"
+#  - name: systematic-debugging
+#    source: "https://github.com/obra/superpowers/raw/main/skills/systematic-debugging/SKILL.md"
+#  - name: test-driven-development
+#    source: "https://github.com/obra/superpowers/raw/main/skills/test-driven-development/SKILL.md"
+#  - name: using-git-worktrees
+#    source: "https://github.com/obra/superpowers/raw/main/skills/using-git-worktrees/SKILL.md"
+#  - name: using-superpowers
+#    source: "https://github.com/obra/superpowers/raw/main/skills/using-superpowers/SKILL.md"
+#  - name: verification-before-completion
+#    source: "https://github.com/obra/superpowers/raw/main/skills/verification-before-completion/SKILL.md"
+#  - name: writing-plans
+#    source: "https://github.com/obra/superpowers/raw/main/skills/writing-plans/SKILL.md"
+#  - name: writing-skills
+#    source: "https://github.com/obra/superpowers/raw/main/skills/writing-skills/SKILL.md"
   - name: ask-matt
     source: "skills-sh/mattpocock/skills/engineering/ask-matt"
   - name: code-review
@@ -75,22 +75,22 @@ hermes_skills:
     source: "skills-sh/mattpocock/skills/engineering/wayfinder"
   - name: wizard
     source: "skills-sh/mattpocock/skills/engineering/wizard"
-  - name: claude-handoff
-    source: "skills-sh/mattpocock/skills/in-progress/claude-handoff"
-  - name: implement-spec
-    source: "skills-sh/mattpocock/skills/in-progress/implement-spec"
-  - name: loop-me
-    source: "skills-sh/mattpocock/skills/in-progress/loop-me"
-  - name: retro
-    source: "skills-sh/mattpocock/skills/in-progress/retro"
-  - name: setup-ts-deep-modules
-    source: "skills-sh/mattpocock/skills/in-progress/setup-ts-deep-modules"
-  - name: writing-beats
-    source: "skills-sh/mattpocock/skills/in-progress/writing-beats"
-  - name: writing-fragments
-    source: "skills-sh/mattpocock/skills/in-progress/writing-fragments"
-  - name: writing-shape
-    source: "skills-sh/mattpocock/skills/in-progress/writing-shape"
+#  - name: claude-handoff
+#    source: "skills-sh/mattpocock/skills/in-progress/claude-handoff"
+#  - name: implement-spec
+#    source: "skills-sh/mattpocock/skills/in-progress/implement-spec"
+#  - name: loop-me
+#    source: "skills-sh/mattpocock/skills/in-progress/loop-me"
+#  - name: retro
+#    source: "skills-sh/mattpocock/skills/in-progress/retro"
+#  - name: setup-ts-deep-modules
+#    source: "skills-sh/mattpocock/skills/in-progress/setup-ts-deep-modules"
+#  - name: writing-beats
+#    source: "skills-sh/mattpocock/skills/in-progress/writing-beats"
+#  - name: writing-fragments
+#    source: "skills-sh/mattpocock/skills/in-progress/writing-fragments"
+#  - name: writing-shape
+#    source: "skills-sh/mattpocock/skills/in-progress/writing-shape"
   - name: git-guardrails-claude-code
     source: "skills-sh/mattpocock/skills/misc/git-guardrails-claude-code"
   - name: migrate-to-shoehorn
