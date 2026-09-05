@@ -124,3 +124,15 @@
   ansible.builtin.fail:
     msg: "Consolidated docker-compose.yml failed validation: {{ docker_compose_config.stderr }}"
   when: docker_compose_config is failed
+
+- name: Start consolidated docker compose stack
+  tags: [docker]
+  community.docker.docker_compose_v2:
+    project_src: "{{ docker_compose_dir }}"
+    project_name: "{{ docker_project_name }}"
+    files:
+      - docker-compose.yml
+    services: "{{ docker_enabled_services }}"
+    state: present
+    pull: missing
+  ignore_errors: "{{ ansible_check_mode }}"

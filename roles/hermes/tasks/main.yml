@@ -92,17 +92,6 @@
     group: llm_wiki
     mode: '0640'
 
-- name: Start Hermes from consolidated docker compose
-  tags: [hermes]
-  community.docker.docker_compose_v2:
-    project_src: "{{ docker_compose_dir }}"
-    project_name: "{{ docker_project_name }}"
-    services:
-      - hermes-agent
-    state: present
-    pull: missing
-  ignore_errors: "{{ ansible_check_mode }}"
-
 # Skill packs (epic 08): install obra/superpowers + mattpocock/skills via Hermes's own CLI
 # so they are upgradeable and available on-demand to every profile. This replaces the old
 # copy-vendored-skills method. Each entry in `hermes_skills` is installed only if not already

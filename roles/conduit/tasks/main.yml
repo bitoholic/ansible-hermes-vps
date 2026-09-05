@@ -43,19 +43,6 @@
     group: '1000'
     mode: '0600'
 
-- name: Start Conduit from consolidated docker compose
-  tags: [conduit]
-  community.docker.docker_compose_v2:
-    project_src: "{{ docker_compose_dir }}"
-    project_name: "{{ docker_project_name }}"
-    files:
-      - docker-compose.yml
-    services:
-      - conduit
-    state: present
-    pull: missing
-  ignore_errors: "{{ ansible_check_mode }}"
-
 # --- Bot provisioning (@hermes) -------------------------------------------------
 # Hermes logs in with MATRIX_USER_ID + MATRIX_PASSWORD (no access token shared across
 # roles), so the bot account is created here once via Conduit's registration endpoint
