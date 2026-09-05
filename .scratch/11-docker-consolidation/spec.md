@@ -32,5 +32,14 @@ Implement a centralized `docker` role that consolidates all service definitions 
 - Migrating data volumes (volumes should stay in their current locations to avoid disruptive data moves).
 - Setting up a container orchestrator (like Swarm or K8s).
 
+## Implementation Notes
+- **Ticket 01**: Expanded the `docker` role to own a `docker-compose.yml.j2` template that iterates over `docker_enabled_services` and includes each service fragment from `roles/docker/templates/services/<name>.yml.j2`. Networks (`gateway`, `internal`) and named volumes (`caddy_data`, `caddy_config`) are data-driven via `docker_networks` and `docker_volumes`.
+- **Ticket 02**: Caddy fragment added to `roles/docker/templates/services/caddy.yml.j2`; the Caddyfile is rendered to `{{ docker_compose_dir }}/Caddyfile` by the `gateway` role, which now points `gateway_caddyfile_dir` at `{{ docker_compose_dir }}`.
+- **Ticket 03**: Conduit migrated to a service fragment; the per-role `docker-compose.yml.j2` was removed and the `docker_compose_v2` start task moved to the `docker` role. Bot provisioning (Conduit registration) remains in the `conduit` role.
+- **Ticket 04**: SilverBullet + Authelia migrated to service fragments; the per-role `docker-compose.yml.j2` was removed.
+- **Ticket 05**: Hermes agent + signal-cli consolidated into service fragments; `project_name` consistency fixed (`"hermes-agent"` → `"{{ docker_project_name }}"`).
+- **Ticket 06**: Added `tests/test_docker_compose.yml` and `tests/check-docker-compose-render.sh` to validate consolidated compose rendering; lint pipeline updated.
+- **Ticket 07**: All per-role `docker-compose.yml.j2` templates and `docker_compose_v2` start tasks removed. The `docker` role now owns the single `docker_compose_v2` start task. Each service role reduces to directory/config/fragment tasks only.
+
 ## Triage
 - ready-for-agent

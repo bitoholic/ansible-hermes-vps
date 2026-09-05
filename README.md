@@ -11,7 +11,7 @@ This repository provisions a personal "second brain" + agent stack on a bare Ubu
 | `users` | Creates the dedicated `llm_wiki` system user/group that owns all persistent data |
 | `ssh_hardening` | Disables password auth, disables root login, deploys `AllowUsers` |
 | `common` | Installs base hardening packages, enables unattended-upgrades, configures UFW |
-| `docker` | Installs Docker Engine + Compose plugin from the official repo |
+| `docker` | Installs Docker Engine + Compose plugin, owns the consolidated `docker-compose.yml` at `/opt/hermes-vps`, and brings up the full stack (Caddy, Authelia, SilverBullet, Conduit, signal-cli, hermes-agent) on the `gateway` and `internal` networks |
 | `authelia` + `silverbullet` | Caddy reverse proxy → Authelia (MFA forward-auth) → SilverBullet wiki, bound to `127.0.0.1` |
 | `gateway` | The single writer of the ingress Caddyfile; renders one site block per entry in `gateway_routes` (`group_vars/all/gateway.yml`), wrapping each in the shared `mfa_auth` snippet unless `mfa: false`. |
 | `hermes` | Builds and runs the single `hermes-agent` container (see below) |
@@ -26,6 +26,19 @@ There is **one** `hermes-agent` container, built from the local `Dockerfile` and
 The agent is defined entirely as **data** in `group_vars/all/main.yml` → `hermes_profiles` (a single `default` entry). Model, `tools`, `mcp_servers`, skill auto-load, and capability scoping live in that one entry, and the `hermes` role renders it through a single template loop. (True filesystem sandbox isolation between delegated subagents is provided by git worktree isolation; they share the container filesystem otherwise — see the gap noted below.)
 
 Messaging is handled by a standalone `signal-cli-api` REST container on an internal Docker network only (no published port), restricted to your personal number via `SIGNAL_ALLOWED_USERS`. Voice mode (Whisper STT, NeuTTS/Piper TTS) runs fully offline inside the same container via the `ffmpeg`/`hermes-agent[voice]` Dockerfile layer.
+
+### 🐳 Consolidated Docker Compose Stack
+
+All Docker services are managed by a **single** `docker-compose.yml` at `/opt/hermes-vps/docker-compose.yml`, rendered by the `docker` role. The stack is composed of service fragments in `roles/docker/templates/services/`, each declaring its image, volumes, networks, and dependencies:
+
+- **`caddy`** — Reverse proxy on the `gateway` network; terminates TLS, proxies to backends, and runs Authelia forward-auth for public routes.
+- **`authelia`** — MFA provider on the `gateway` network; challenges non-Tailscale clients.
+- **`silverbullet`** — Markdown wiki on the `gateway` network, bound to `[IP_ADDRESS]`.
+- **`conduit`** — Personal Matrix homeserver on the `internal` network; reachable by Hermes over the shared internal network.
+- **`signal-cli`** — Standalone Signal REST API on the `internal` network (no published port).
+- **`hermes-agent`** — The single agent container on the `internal` network, depends on `signal-cli`.
+
+The `docker` role owns the consolidated compose file and brings up the full stack via `docker compose up -d`. Each service role (conduit, silverbullet, hermes) reduces to: create directories/volumes with ownership, render config files, and write service fragments.
 
 ## 🔐 Local Secrets Workflow
 

@@ -1,7 +1,7 @@
 # ADR-0002: Consolidated Docker Compose Stack
 
 ## Status
-Proposed
+Completed
 
 ## Context
 Originally, the VPS deployed services using separate `docker-compose.yml` files managed by individual roles (`hermes`, `conduit`, `silverbullet`). This led to:
@@ -22,3 +22,12 @@ We will consolidate all Docker services into a single Compose project managed by
 - **Improved Connectivity**: Caddy can now reach any backend simply by being on the same `gateway` network.
 - **Role Dependency**: Roles like `hermes` or `conduit` no longer manage their own `docker-compose.yml` file; they depend on the `docker` role to render the final stack.
 - **Single Point of Failure**: A syntax error in one fragment can prevent the entire stack from starting. We must use `docker compose config` validation.
+
+## Ticket History
+- #01: Expand docker role to support consolidated compose
+- #02: Caddy fragment consolidation into docker role
+- #03: Migrate Conduit to consolidated docker compose
+- #04: Migrate SilverBullet stack to consolidated docker compose
+- #05: Consolidate Hermes agent (signal-cli + hermes-agent) fragment
+- #06: Add tests for consolidated docker-compose.yml rendering
+- #07: Remove legacy per-role compose files and enforce single project
