@@ -125,6 +125,45 @@
     msg: "Consolidated docker-compose.yml failed validation: {{ docker_compose_config.stderr }}"
   when: docker_compose_config is failed
 
+- name: Ensure Hermes home directory exists for image build context
+  tags: [docker]
+  ansible.builtin.file:
+    path: "{{ hermes_home }}"
+    state: directory
+    owner: llm_wiki
+    group: llm_wiki
+    mode: '0700'
+    recurse: true
+
+- name: Ensure Hermes Signal data directory exists
+  tags: [docker]
+  ansible.builtin.file:
+    path: "{{ hermes_home }}/signal-data"
+    state: directory
+    owner: llm_wiki
+    group: llm_wiki
+    mode: '0775'
+
+- name: Ensure Hermes profile directories exist
+  tags: [docker]
+  ansible.builtin.file:
+    path: "{{ hermes_home }}/profiles/{{ item.name }}"
+    state: directory
+    owner: llm_wiki
+    group: llm_wiki
+    mode: '0700'
+  loop: "{{ hermes_profiles }}"
+  when: item.target_dir is not defined
+
+- name: Copy Hermes Dockerfile to hermes home
+  tags: [docker]
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/roles/hermes/files/Dockerfile"
+    dest: "{{ hermes_home }}/Dockerfile"
+    owner: "{{ secrets.admin_username }}"
+    group: llm_wiki
+    mode: '0640'
+
 - name: Start consolidated docker compose stack
   tags: [docker]
   community.docker.docker_compose_v2:
