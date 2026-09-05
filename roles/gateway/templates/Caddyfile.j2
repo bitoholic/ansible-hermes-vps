@@ -25,8 +25,8 @@
 {% endfor %}
 
 # Matrix (Conduit) HTTPS listener — Tailscale-only via UFW.
-# Caddy terminates TLS on 8448 and proxies to Conduit (plain HTTP on localhost:8008).
+# Caddy terminates TLS on 8448 and proxies to Conduit via the gateway network.
 {{ secrets.silverbullet_domain }}:8448 {
   tls internal
-  reverse_proxy http://{{ inventory_hostname }}:{{ conduit_port }}
+  reverse_proxy http://conduit:{{ conduit_port }}
 }

@@ -43,22 +43,15 @@
     group: '1000'
     mode: '0600'
 
-- name: Deploy Conduit docker-compose file
-  tags: [conduit]
-  ansible.builtin.template:
-    src: docker-compose.yml.j2
-    dest: "{{ conduit_compose_dir }}/docker-compose.yml"
-    owner: "{{ secrets.admin_username }}"
-    group: "{{ secrets.admin_username }}"
-    mode: '0640'
-
-- name: Start Conduit stack
+- name: Start Conduit from consolidated docker compose
   tags: [conduit]
   community.docker.docker_compose_v2:
-    project_src: "{{ conduit_compose_dir }}"
-    project_name: conduit
+    project_src: "{{ docker_compose_dir }}"
+    project_name: "{{ docker_project_name }}"
     files:
       - docker-compose.yml
+    services:
+      - conduit
     state: present
     pull: missing
   ignore_errors: "{{ ansible_check_mode }}"
@@ -67,17 +60,23 @@
 # Hermes logs in with MATRIX_USER_ID + MATRIX_PASSWORD (no access token shared across
 # roles), so the bot account is created here once via Conduit's registration endpoint
 # using the shared registration token. Idempotent: skipped once the user exists.
-- name: Resolve Conduit container IP on the internal network
+- name: Resolve Conduit container IP on the gateway/internal network
   tags: [conduit]
   community.docker.docker_container_info:
     name: conduit
   register: conduit_container_info
   ignore_errors: "{{ ansible_check_mode }}"
 
+# Conduit IP fact: prefer the `internal` network (consolidated compose), fall back to
+# `hermes_net` (legacy compose) so the fact stays valid during the transition window.
 - name: Compute Conduit container IP fact
   tags: [conduit]
   ansible.builtin.set_fact:
-    conduit_ip: "{{ (conduit_container_info.container or {}).NetworkSettings.Networks.hermes_net.IPAddress | default('', true) }}"
+    conduit_ip: >-
+      {%- set info = conduit_container_info.container | default({}) -%}
+      {%- set nets = info.NetworkSettings.Networks | default({}) -%}
+      {%- set primary = nets.internal.IPAddress | default('') if nets.internal is defined else nets.hermes_net.IPAddress | default('') -%}
+      {{ primary }}
 
 - name: Compute Conduit API base URL (host IP for Tailscale access)
   tags: [conduit]
