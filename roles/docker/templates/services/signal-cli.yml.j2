@@ -2,12 +2,12 @@ signal-cli:
   image: registry.gitlab.com/packaging/signal-cli/signal-cli-native:latest
   container_name: signal-cli
   restart: unless-stopped
-  user: "{{wiki_volume_uid}}:{{wiki_volume_gid}}"
+  user: "{{ wiki_volume_uid }}:{{ wiki_volume_gid }}"
   volumes:
     - "/opt/hermes/signal-data:/var/lib/signal-cli"
   tmpfs:
     - /tmp:exec
-command:
+  command:
     - "--config"
     - "/var/lib/signal-cli"
     - "-u"
