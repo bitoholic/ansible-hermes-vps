@@ -8,17 +8,15 @@
     group: llm_wiki
     mode: '0775'
 
-- name: Deploy SilverBullet docker-compose configuration
-  tags: [silverbullet]
-  ansible.builtin.template:
-    src: docker-compose.yml.j2
-    dest: "{{ silverbullet_compose_dir }}/docker-compose.yml"
-    mode: '0644'
-
-- name: Start SilverBullet stack
+- name: Start consolidated docker compose
   tags: [silverbullet]
   community.docker.docker_compose_v2:
-    project_src: "{{ silverbullet_compose_dir }}"
+    project_src: "{{ docker_compose_dir }}"
+    project_name: "{{ docker_project_name }}"
+    services:
+      - caddy
+      - authelia
+      - silverbullet
     state: present
     pull: missing
   ignore_errors: "{{ ansible_check_mode }}"

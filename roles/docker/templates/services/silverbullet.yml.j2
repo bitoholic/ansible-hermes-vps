@@ -1,7 +1,7 @@
 silverbullet:
   image: "{{ silverbullet_image }}"
   container_name: silverbullet
-  user: "{{wiki_volume_uid}}:{{wiki_volume_gid}}"
+  user: "{{ wiki_volume_uid }}:{{ wiki_volume_gid }}"
   environment:
     - SB_USER={{ secrets.silverbullet_admin_username }}:{{ secrets.silverbullet_admin_password }}
   ports:
