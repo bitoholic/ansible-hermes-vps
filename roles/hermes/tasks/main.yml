@@ -83,7 +83,7 @@
     mode: '0640'
   loop: "{{ hermes_profiles }}"
 
-- name: Deploy Hermes Dockerfile
+- name: Copy Hermes Dockerfile to hermes home
   tags: [hermes]
   ansible.builtin.copy:
     src: Dockerfile
@@ -92,22 +92,13 @@
     group: llm_wiki
     mode: '0640'
 
-- name: Deploy Hermes docker-compose file
-  tags: [hermes]
-  ansible.builtin.template:
-    src: docker-compose.yml.j2
-    dest: "{{ hermes_home }}/docker-compose.yml"
-    owner: "{{ secrets.admin_username }}"
-    group: llm_wiki
-    mode: '0640'
-
-- name: Start Hermes container stack
+- name: Start Hermes from consolidated docker compose
   tags: [hermes]
   community.docker.docker_compose_v2:
-    project_src: "{{ hermes_home }}"
-    project_name: "hermes-agent"
-    files:
-      - docker-compose.yml
+    project_src: "{{ docker_compose_dir }}"
+    project_name: "{{ docker_project_name }}"
+    services:
+      - hermes-agent
     state: present
     pull: missing
   ignore_errors: "{{ ansible_check_mode }}"

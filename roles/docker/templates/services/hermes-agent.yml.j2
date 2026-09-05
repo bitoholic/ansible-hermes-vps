@@ -1,7 +1,7 @@
 hermes-agent:
   #image: ghcr.io/nousresearch/hermes-agent:latest
   build:
-    context: .
+    context: "{{ hermes_home }}"
     dockerfile: Dockerfile
   container_name: "hermes-agent"
   restart: unless-stopped
