@@ -9,8 +9,8 @@ hermes-agent:
   depends_on:
     - signal-cli
   ports:
-    - "[IP_ADDRESS]:8642:8642"
-    - "[IP_ADDRESS]:9119:9119"
+    - "8642:8642"
+    - "9119:9119"
   environment:
     HERMES_DASHBOARD: "1"
     HERMES_UID: "{{wiki_volume_uid}}"

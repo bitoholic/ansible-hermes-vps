@@ -14,6 +14,6 @@ signal-cli:
     - "{{ secrets.hermes_signal_account }}"
     - "daemon"
     - "--http"
-    - "[IP_ADDRESS]:8080"
+    - "{{ IP_ADDRESS }}:8080"
   networks:
     - internal

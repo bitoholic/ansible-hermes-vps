@@ -5,7 +5,7 @@ silverbullet:
   environment:
     - SB_USER={{ secrets.silverbullet_admin_username }}:{{ secrets.silverbullet_admin_password }}
   ports:
-    - "[IP_ADDRESS]:3000:3000"
+    - "3000:3000"
   volumes:
     - "{{ silverbullet_data_dir }}:/space"
   networks:
