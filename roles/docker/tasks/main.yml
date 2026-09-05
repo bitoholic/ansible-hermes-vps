@@ -164,12 +164,6 @@
     group: llm_wiki
     mode: '0640'
 
-- name: Ensure Caddyfile is a proper file (remove stale directory if present)
-  tags: [docker]
-  ansible.builtin.file:
-    path: "{{ docker_compose_dir }}/Caddyfile"
-    state: absent
-
 - name: Start consolidated docker compose stack
   tags: [docker]
   community.docker.docker_compose_v2:

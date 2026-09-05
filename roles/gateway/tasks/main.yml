@@ -18,6 +18,12 @@
   tags: [gateway]
   ansible.builtin.include_tasks: validate.yml
 
+- name: Remove stale Caddyfile directory if present (from pre-compose state)
+  tags: [gateway]
+  ansible.builtin.file:
+    path: "{{ gateway_caddyfile_dir }}/Caddyfile"
+    state: absent
+
 - name: Ensure ingress (Caddyfile) deploy directory exists
   tags: [gateway]
   ansible.builtin.file:
