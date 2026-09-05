@@ -1,6 +1,10 @@
 ---
 # Gateway / reverse-proxy seam (epic 03, #01 / #02 / #03).
 # Overridable so the render test can deploy into a temp dir as the current user.
-gateway_caddyfile_dir: "{{ silverbullet_compose_dir }}"
+# With the consolidated docker compose stack, the Caddyfile lives in the docker
+# compose project dir, so gateway_caddyfile_dir points there instead of
+# silverbullet_compose_dir.
+gateway_caddyfile_dir: "{{ docker_compose_dir }}"
 gateway_caddyfile_owner: llm_wiki
 gateway_caddyfile_group: llm_wiki
+
