@@ -99,6 +99,9 @@
     - role: tailscale
       tags:
         - tailscale
+    - role: gateway
+      tags:
+        - gateway
     - role: docker
       tags:
         - docker
@@ -111,9 +114,6 @@
     - role: authelia
       tags:
         - authelia
-    - role: gateway
-      tags:
-        - gateway
     - role: silverbullet
       tags:
         - silverbullet
