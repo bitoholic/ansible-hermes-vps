@@ -1,0 +1,8 @@
+---
+# Conduit's ingress contribution (epic 03, #02): the matrix homeserver.
+conduit_gateway_publish:
+  - host: matrix
+    upstream: conduit:{{ conduit_port }}
+    mfa: false
+    tls_mode: "internal"
+    port: 8448

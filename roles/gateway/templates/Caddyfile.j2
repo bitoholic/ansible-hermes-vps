@@ -1,6 +1,6 @@
 {
   servers {
-    trusted_proxies static private_ranges 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16 ::1/128 fc00::/7
+    trusted_proxies static private_ranges [IP_ADDRESS]/8 [IP_ADDRESS]/12 [IP_ADDRESS]/16 ::1/128 fc00::/7
   }
 }
 
@@ -16,17 +16,10 @@
 }
 
 {% for route in gateway_routes %}
-{{ route.host }}.{{ secrets.silverbullet_domain }} {
+{{ route.host }}.{{ secrets.silverbullet_domain }}{% if route.port %}:{{ route.port }}{% endif %} {
   log
-  tls internal
+  {{ 'tls' if route.tls_mode == 'auto' else 'tls internal' }}
 {{ '  import mfa_auth
 ' if route.mfa else '' }}  reverse_proxy {{ route.upstream }}
 }
 {% endfor %}
-
-# Matrix (Conduit) HTTPS listener — Tailscale-only via UFW.
-# Caddy terminates TLS on 8448 and proxies to Conduit via the gateway network.
-{{ secrets.silverbullet_domain }}:8448 {
-  tls internal
-  reverse_proxy http://conduit:{{ conduit_port }}
-}

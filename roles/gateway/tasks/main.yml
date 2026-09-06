@@ -13,6 +13,7 @@
     - silverbullet
     - authelia
     - hermes
+    - conduit
 
 - name: Validate gateway_routes shape
   tags: [gateway]

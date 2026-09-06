@@ -13,7 +13,12 @@
       - gateway_routes | selectattr('upstream', 'equalto', '') | list | length == 0
       - gateway_routes | selectattr('mfa', 'undefined') | list | length == 0
       - gateway_routes | rejectattr('mfa', 'boolean') | list | length == 0
+      # tls_mode: if defined, must be "internal" or "auto"
+      - gateway_routes | rejectattr('tls_mode', 'undefined') | list | selectattr('tls_mode', 'not in', ['internal', 'auto']) | list | length == 0
+      # port: if defined, must be an integer
+      - gateway_routes | rejectattr('port', 'undefined') | list | selectattr('port', 'not type', 'integer') | list | length == 0
     fail_msg: >-
       Each entry in gateway_routes must declare `host`, a non-empty `upstream`, and a
-      boolean `mfa`. A malformed entry means a broken Caddyfile (silent 502). Fix the
-      offending role's `gateway_publish` contribution.
+      boolean `mfa`. Optional `tls_mode` must be "internal" or "auto", and optional
+      `port` must be an integer. A malformed entry means a broken Caddyfile (silent 502).
+      Fix the offending role's `gateway_publish` contribution.
