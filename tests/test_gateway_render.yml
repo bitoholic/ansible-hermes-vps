@@ -66,7 +66,7 @@
           - "rendered is search('matrix.test.example.com:8448 \\{')"
           - "rendered is search('owntracks.test.example.com:8448 \\{')"
           # OwnTracks: tls_mode auto renders a bare `tls` (ACME), mfa false omits import mfa_auth.
-          - "rendered is search('owntracks\\.test\\.example\\.com:8448 \\{\\n  log\\n  tls\\n  reverse_proxy owntracks:8080\\n\\}')"
+          - "rendered is search('owntracks\\.test\\.example\\.com:8448 \\{\\n  log\\n  tls\\n  reverse_proxy owntracks:8083\\n\\}')"
           - "(rendered | regex_findall('import mfa_auth')) | length == (gateway_routes | selectattr('mfa') | list | length)"
           - "rendered is search('auth\\.test\\.example\\.com \\{\\n  log\\n  reverse_proxy authelia:9091\\n\\}')"
           - "'forward_auth @not_tailscale authelia:9091' in rendered"

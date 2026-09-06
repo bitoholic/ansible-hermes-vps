@@ -8,7 +8,7 @@ owntracks_htpasswd_path: "{{ docker_compose_dir }}/owntracks/htpasswd"
 # because mobile apps can't handle forward-auth — auth is the htpasswd file.
 owntracks_gateway_publish:
   - host: owntracks
-    upstream: owntracks:8080
+    upstream: owntracks:8083
     mfa: false
     tls_mode: "auto"
     port: 8448

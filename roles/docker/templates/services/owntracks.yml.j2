@@ -3,8 +3,12 @@ owntracks:
   container_name: owntracks
   user: "{{ wiki_volume_uid }}:{{ wiki_volume_gid }}"
   environment:
-    - OTR_HOST={{ IP_ADDRESS }}
-    - OTR_PORT=8080
+    # OTR_PORT/OTR_HOST configure the MQTT client — disabled (0): no broker in
+    # this stack. The HTTP server is OTR_HTTPPORT binding OTR_HTTPHOST; it must
+    # bind all interfaces so Caddy on the gateway network can reach it.
+    - OTR_PORT=0
+    - OTR_HTTPHOST={{ IP_ADDRESS }}
+    - OTR_HTTPPORT=8083
     - OTR_AUTH_FILE=/store/htpasswd
     - OTR_STORAGE=/store
   volumes:

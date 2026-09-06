@@ -13,5 +13,6 @@
     path: "{{ owntracks_htpasswd_path }}"
     name: "{{ secrets.owntracks_admin_username }}"
     password: "{{ secrets.owntracks_admin_password }}"
-    hash: bcrypt
+    hash_scheme: bcrypt
+    mode: '0644'
   register: owntracks_htpasswd_result
