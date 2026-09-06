@@ -1,2 +1,3 @@
+---
 # Owntracks role defaults (epic 12, #02)
 owntracks_htpasswd_path: "{{ docker_compose_dir }}/owntracks/htpasswd"
