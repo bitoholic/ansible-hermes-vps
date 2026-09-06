@@ -23,6 +23,8 @@
         file: "{{ playbook_dir }}/../roles/hermes/defaults/main.yml"
     - ansible.builtin.include_vars:
         file: "{{ playbook_dir }}/../roles/conduit/defaults/main.yml"
+    - ansible.builtin.include_vars:
+        file: "{{ playbook_dir }}/../group_vars/all/main.yml"
 
   tasks:
     - name: Ensure temp render dir exists
@@ -61,12 +63,13 @@
           - "rendered is search('auth.test.example.com \\{')"
           - "rendered is search('matrix.test.example.com:8448 \\{')"
           - "(rendered | regex_findall('import mfa_auth')) | length == (gateway_routes | selectattr('mfa') | list | length)"
-          - "rendered is search('auth\\.test\\.example\\.com \\{\\n  log\\n  tls internal\\n  reverse_proxy authelia:9091\\n\\}')"
+          - "rendered is search('auth\\.test\\.example\\.com \\{\\n  log\\n  reverse_proxy authelia:9091\\n\\}')"
           - "'forward_auth @not_tailscale authelia:9091' in rendered"
           - "rendered is search('not remote_ip')"
         fail_msg: "Gateway Caddyfile shape mismatch: {{ rendered }}"
       vars:
         rendered: "{{ lookup('file', '/tmp/gateway_test_render/Caddyfile') }}"
+        gateway_routes: "{{ silverbullet_gateway_publish + hermes_gateway_publish + authelia_gateway_publish + conduit_gateway_publish }}"
 
     - name: Malformed route (missing upstream) must fail fast
       block:

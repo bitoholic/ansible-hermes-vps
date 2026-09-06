@@ -16,10 +16,12 @@
 }
 
 {% for route in gateway_routes %}
-{{ route.host }}.{{ secrets.silverbullet_domain }}{% if route.port %}:{{ route.port }}{% endif %} {
+{{ route.host }}.{{ secrets.silverbullet_domain }}{% if route.port is defined %}:{{ route.port }}{% endif %} {
   log
+{% if route.tls_mode is defined %}
   {{ 'tls' if route.tls_mode == 'auto' else 'tls internal' }}
-{{ '  import mfa_auth
-' if route.mfa else '' }}  reverse_proxy {{ route.upstream }}
+{% endif %}
+{% if route.mfa %}  import mfa_auth
+{% endif %}  reverse_proxy {{ route.upstream }}
 }
 {% endfor %}
