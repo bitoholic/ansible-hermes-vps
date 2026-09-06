@@ -4,7 +4,7 @@ docker_project_name: hermes-vps
 
 # IP_ADDRESS used in service templates for host port bindings and container
 # config address arguments. Bind to all interfaces by default.
-IP_ADDRESS: "[IP_ADDRESS]"
+IP_ADDRESS: "0.0.0.0"
 
 # Standard networks
 docker_networks:

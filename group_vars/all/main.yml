@@ -6,7 +6,7 @@ ansible_python_interpreter: /usr/bin/python3
 # and consumed by roles as `secrets.*`.
 
 # Reverse proxy and web domains / paths (non-secret)
-silverbullet_bind: "[IP_ADDRESS]:3000"
+# silverbullet_bind: all interfaces on port 3000 (used in silverbullet service ports binding)
 silverbullet_data_dir: /opt/hermes/wiki
 silverbullet_compose_dir: /opt/silverbullet
 silverbullet_image: ghcr.io/silverbulletmd/silverbullet:latest

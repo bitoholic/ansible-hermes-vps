@@ -25,6 +25,8 @@
   ansible.builtin.template:
     src: authelia-configuration.yml.j2
     dest: "{{ authelia_config_dir }}/configuration.yml"
+    owner: llm_wiki
+    group: llm_wiki
     mode: '0600'
 
 - name: Render Authelia users database
@@ -32,4 +34,6 @@
   ansible.builtin.template:
     src: authelia-users.yml.j2
     dest: "{{ authelia_config_dir }}/users.yml"
+    owner: llm_wiki
+    group: llm_wiki
     mode: '0600'

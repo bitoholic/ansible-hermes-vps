@@ -24,8 +24,8 @@
 - name: Set wiki_volume_uid and wiki_volume_gid facts from llm_wiki
   tags: [docker]
   ansible.builtin.set_fact:
-    wiki_volume_uid: "{{ docker_wiki_user_lookup.ansible_facts.getent_passwd.llm_wiki[1] | default(1000) }}"
-    wiki_volume_gid: "{{ docker_wiki_user_lookup.ansible_facts.getent_passwd.llm_wiki[2] | default(1000) }}"
+    wiki_volume_uid: "{{ docker_wiki_user_lookup.ansible_facts.getent_passwd.llm_wiki[1] | default(10000) }}"
+    wiki_volume_gid: "{{ docker_wiki_user_lookup.ansible_facts.getent_passwd.llm_wiki[2] | default(10000) }}"
   when: docker_wiki_user_lookup.ansible_facts is defined and docker_wiki_user_lookup.ansible_facts.getent_passwd is defined and docker_wiki_user_lookup.ansible_facts.getent_passwd.llm_wiki is defined
 
 - name: Install Docker prerequisites

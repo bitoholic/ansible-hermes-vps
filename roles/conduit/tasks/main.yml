@@ -28,24 +28,17 @@
   ansible.builtin.file:
     path: "{{ conduit_data_dir }}"
     state: directory
-    owner: '10000'
-    group: '10000'
+    owner: llm_wiki
+    group: llm_wiki
     mode: '0700'
-
-# The config file is owned by the llm_wiki user (10000) for consistency with other host volumes.
-- name: Ensure conduit.toml is a file (remove directory if previously misplaced)
-  tags: [conduit]
-  ansible.builtin.file:
-    path: "{{ conduit_compose_dir }}/conduit.toml"
-    state: absent
 
 - name: Deploy Conduit configuration
   tags: [conduit]
   ansible.builtin.template:
     src: conduit.toml.j2
     dest: "{{ conduit_compose_dir }}/conduit.toml"
-    owner: '10000'
-    group: '10000'
+    owner: llm_wiki
+    group: llm_wiki
     mode: '0644'
 
 # --- Bot provisioning (@hermes) -------------------------------------------------
