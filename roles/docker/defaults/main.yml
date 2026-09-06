@@ -18,6 +18,7 @@ docker_networks:
 docker_volumes:
   - caddy_data
   - caddy_config
+  - owntracks_data
 
 # Services to enable. Each service must have a corresponding fragment in
 # roles/docker/templates/services/<name>.yml.j2
@@ -28,3 +29,4 @@ docker_enabled_services:
   - conduit
   - signal-cli
   - hermes-agent
+  - owntracks

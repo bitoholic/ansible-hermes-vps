@@ -1,0 +1,15 @@
+owntracks:
+  image: owntracks/recorder:latest
+  container_name: owntracks
+  user: "{{ wiki_volume_uid }}:{{ wiki_volume_gid }}"
+  environment:
+    - OTR_HOST={{ IP_ADDRESS }}
+    - OTR_PORT=8080
+    - OTR_AUTH_FILE=/store/htpasswd
+    - OTR_STORAGE=/store
+  volumes:
+    - owntracks_data:/store
+    - "{{ docker_compose_dir }}/owntracks/htpasswd:/store/htpasswd:ro"
+  networks:
+    - gateway
+  restart: unless-stopped
