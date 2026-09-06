@@ -58,6 +58,12 @@ python3 scripts/generate-env.py --check
 # malformed routes.
 ./tests/check-gateway-render.sh
 
+# Custom Docker services (epic 12 ticket #07): OwnTracks + Syncplay compose render
+# (and docker compose config when docker is present), Caddyfile owntracks/matrix blocks,
+# firewall contract greps (8448 rate-limit; syncplay per-IP limit-from), secrets manifest
+# entries, and syncplay_allowed_ips defined.
+./tests/check-custom-services.sh
+
 # Tailscale private-access + source-based MFA access model (epic 07 ticket #03): secrets defined,
 # Caddyfile renders the mfa_auth bypass matcher, and the tailscale role defines the ufw allow
 # rules. Live ufw/Tailscale behavior is operator-validated on the VPS (guarded/skipped in CI).

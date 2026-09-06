@@ -128,3 +128,22 @@
             that:
               - invalid_tls_mode_failed_fast | default(false)
             fail_msg: "gateway did NOT fail fast on an invalid tls_mode"
+
+    - name: Malformed route (non-integer port) must fail fast
+      block:
+        - ansible.builtin.include_tasks:
+            file: "{{ playbook_dir }}/../roles/gateway/tasks/validate.yml"
+          vars:
+            gateway_routes:
+              - host: wiki
+                upstream: silverbullet:3000
+                mfa: true
+                port: "8448"
+      rescue:
+        - ansible.builtin.set_fact:
+            noninteger_port_failed_fast: true
+      always:
+        - ansible.builtin.assert:
+            that:
+              - noninteger_port_failed_fast | default(false)
+            fail_msg: "gateway did NOT fail fast on a non-integer port"

@@ -16,6 +16,8 @@
       - conduit
       - signal-cli
       - hermes-agent
+      - owntracks
+      - syncplay
     docker_networks:
       - name: gateway
         driver: bridge
@@ -24,6 +26,8 @@
     docker_volumes:
       - caddy_data
       - caddy_config
+      - owntracks_data
+      - syncplay_data
     silverbullet_compose_dir: /opt/silverbullet
     silverbullet_data_dir: /opt/hermes/wiki
     silverbullet_image: ghcr.io/silverbulletmd/silverbullet:latest
@@ -42,6 +46,7 @@
       silverbullet_admin_password: P4ssw04d
       hermes_signal_account: "+15551234567"
       hermes_default_github_token: fake-github-token
+      syncplay_password: fake-syncplay-pass
 
   pre_tasks:
     - name: Ensure temp render dir exists
@@ -71,8 +76,16 @@
           - "'conduit:' in (rendered_compose.content | b64decode)"
           - "'signal-cli:' in (rendered_compose.content | b64decode)"
           - "'hermes-agent:' in (rendered_compose.content | b64decode)"
+          - "'owntracks:' in (rendered_compose.content | b64decode)"
+          - "'syncplay:' in (rendered_compose.content | b64decode)"
           - "'gateway:' in (rendered_compose.content | b64decode)"
           - "'internal:' in (rendered_compose.content | b64decode)"
           - "'caddy_data:' in (rendered_compose.content | b64decode)"
           - "'caddy_config:' in (rendered_compose.content | b64decode)"
+          - "'owntracks_data:' in (rendered_compose.content | b64decode)"
+          - "'syncplay_data:' in (rendered_compose.content | b64decode)"
+          # Syncplay publishes its host port for UFW/DOCKER-USER IP filtering;
+          # OwnTracks must NOT publish one (Caddy proxies it on the gateway net).
+          - "'8999:8999' in (rendered_compose.content | b64decode)"
+          - "'8080:8080' not in (rendered_compose.content | b64decode)"
         fail_msg: "Rendered docker-compose.yml is missing expected services or configuration."

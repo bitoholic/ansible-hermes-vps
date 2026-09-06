@@ -6,7 +6,9 @@
 #   2. Conduit compose publishes NO host port (reachable only over the internal Docker network
 #      / Tailscale, never the public ingress).
 #   3. Hermes default profile env wires the bot to Conduit via MATRIX_HOMESERVER/MATRIX_USER_ID.
-#   4. Public gateway surface is unchanged (no matrix/conduit ingress route was added).
+#   4. Matrix ingress comes from the gateway loop (epic 12 #00): conduit_gateway_publish
+#      contributes the matrix.<domain>:8448 route (SNI-shared with owntracks); the Caddyfile
+#      has no hardcoded matrix block and the route seam is wired in group_vars.
 #   5. Bot registration is idempotent by construction: guarded by the availability probe
 #      (when status == 200) and declares changed_when so a re-run is a no-op once registered.
 # Live run (guarded by CONDUIT_LIVE=1): runs the conduit role twice against the real stack and
@@ -43,16 +45,23 @@ if ! grep -q 'MATRIX_USER_ID="@hermes:{{ conduit_server_name }}"' roles/hermes/t
 fi
 echo "hermes Matrix env OK"
 
-# 4: gateway surface unchanged (no public matrix route added).
-# Matrix is served via the hardcoded Caddyfile block (epic 06 #04), not gateway_routes,
-# so the gateway surface stays clean. The matrix route is Tailscale-only (UFW default-deny).
-if grep -rnE 'gateway_publish' roles/*/defaults/main.yml | grep -iqE 'matrix|conduit'; then
-  echo "FAIL: a role publishes a matrix/conduit gateway route"; exit 1
+# 4: gateway surface (epic 12 #00): Matrix is published through the gateway loop via
+# conduit_gateway_publish — not hardcoded in the Caddyfile. The rendered block itself
+# (matrix.<domain>:8448, tls internal, port SNI-shared with owntracks) is asserted by
+# tests/test_gateway_render.yml; here we pin the seam wiring.
+if ! grep -q 'conduit_gateway_publish' roles/conduit/defaults/main.yml; then
+  echo "FAIL: conduit role does not contribute conduit_gateway_publish"; exit 1
 fi
-if ! grep -q 'matrix\.' roles/gateway/templates/Caddyfile.j2; then
-  echo "FAIL: Caddyfile missing matrix HTTPS route"; exit 1
+if ! grep -q 'conduit_gateway_publish' group_vars/all/gateway.yml; then
+  echo "FAIL: gateway_routes concatenation missing conduit_gateway_publish"; exit 1
 fi
-echo "gateway surface unchanged OK"
+if ! grep -q 'conduit' roles/gateway/tasks/main.yml; then
+  echo "FAIL: gateway include_vars loop missing conduit"; exit 1
+fi
+if grep -q 'matrix\.' roles/gateway/templates/Caddyfile.j2; then
+  echo "FAIL: Caddyfile hardcodes a matrix block (must come from the gateway loop)"; exit 1
+fi
+echo "gateway surface (gateway loop) OK"
 
 echo "conduit integration guard OK"
 
