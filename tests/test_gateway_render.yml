@@ -24,6 +24,8 @@
     - ansible.builtin.include_vars:
         file: "{{ playbook_dir }}/../roles/conduit/defaults/main.yml"
     - ansible.builtin.include_vars:
+        file: "{{ playbook_dir }}/../roles/owntracks/defaults/main.yml"
+    - ansible.builtin.include_vars:
         file: "{{ playbook_dir }}/../group_vars/all/main.yml"
 
   tasks:
@@ -40,14 +42,14 @@
       ansible.builtin.include_tasks:
         file: "{{ playbook_dir }}/../roles/gateway/tasks/validate.yml"
       vars:
-        gateway_routes: "{{ silverbullet_gateway_publish + hermes_gateway_publish + authelia_gateway_publish + conduit_gateway_publish }}"
+        gateway_routes: "{{ silverbullet_gateway_publish + hermes_gateway_publish + authelia_gateway_publish + conduit_gateway_publish + owntracks_gateway_publish }}"
 
     - name: Render the gateway Caddyfile adapter
       ansible.builtin.template:
         src: "{{ playbook_dir }}/../roles/gateway/templates/Caddyfile.j2"
         dest: /tmp/gateway_test_render/Caddyfile
       vars:
-        gateway_routes: "{{ silverbullet_gateway_publish + hermes_gateway_publish + authelia_gateway_publish + conduit_gateway_publish }}"
+        gateway_routes: "{{ silverbullet_gateway_publish + hermes_gateway_publish + authelia_gateway_publish + conduit_gateway_publish + owntracks_gateway_publish }}"
 
     # Regression guard removed — the template change (moving Conduit from hardcoded block to
     # gateway loop, adding tls_mode/port fields, and adding matrix. prefix) is an intentional
@@ -62,6 +64,9 @@
           - "rendered is search('dash.test.example.com \\{')"
           - "rendered is search('auth.test.example.com \\{')"
           - "rendered is search('matrix.test.example.com:8448 \\{')"
+          - "rendered is search('owntracks.test.example.com:8448 \\{')"
+          # OwnTracks: tls_mode auto renders a bare `tls` (ACME), mfa false omits import mfa_auth.
+          - "rendered is search('owntracks\\.test\\.example\\.com:8448 \\{\\n  log\\n  tls\\n  reverse_proxy owntracks:8080\\n\\}')"
           - "(rendered | regex_findall('import mfa_auth')) | length == (gateway_routes | selectattr('mfa') | list | length)"
           - "rendered is search('auth\\.test\\.example\\.com \\{\\n  log\\n  reverse_proxy authelia:9091\\n\\}')"
           - "'forward_auth @not_tailscale authelia:9091' in rendered"
@@ -69,7 +74,7 @@
         fail_msg: "Gateway Caddyfile shape mismatch: {{ rendered }}"
       vars:
         rendered: "{{ lookup('file', '/tmp/gateway_test_render/Caddyfile') }}"
-        gateway_routes: "{{ silverbullet_gateway_publish + hermes_gateway_publish + authelia_gateway_publish + conduit_gateway_publish }}"
+        gateway_routes: "{{ silverbullet_gateway_publish + hermes_gateway_publish + authelia_gateway_publish + conduit_gateway_publish + owntracks_gateway_publish }}"
 
     - name: Malformed route (missing upstream) must fail fast
       block:

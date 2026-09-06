@@ -5,4 +5,4 @@
 # so publishing a new service is a one-line entry in that service's role — SilverBullet no
 # longer encodes knowledge of Hermes or Authelia. The gateway role is the only writer of the
 # Caddyfile; it loads these contributions (via include_vars) before rendering.
-gateway_routes: "{{ silverbullet_gateway_publish + hermes_gateway_publish + authelia_gateway_publish + conduit_gateway_publish }}"
+gateway_routes: "{{ silverbullet_gateway_publish + hermes_gateway_publish + authelia_gateway_publish + conduit_gateway_publish + owntracks_gateway_publish }}"

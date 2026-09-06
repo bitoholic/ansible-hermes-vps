@@ -1,3 +1,14 @@
 ---
 # Owntracks role defaults (epic 12, #02)
 owntracks_htpasswd_path: "{{ docker_compose_dir }}/owntracks/htpasswd"
+
+# Owntracks' ingress contribution (epic 12, #03): public HTTPS with basic auth.
+# Port 8448 is shared with matrix.* via Caddy SNI-based routing. tls_mode: auto
+# issues a real ACME cert (mobile apps can't trust the internal CA); mfa: false
+# because mobile apps can't handle forward-auth — auth is the htpasswd file.
+owntracks_gateway_publish:
+  - host: owntracks
+    upstream: owntracks:8080
+    mfa: false
+    tls_mode: "auto"
+    port: 8448
