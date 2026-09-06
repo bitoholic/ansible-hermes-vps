@@ -1,0 +1,6 @@
+---
+# OwnTracks resolves the htpasswd file's ownership from wiki_volume_uid/gid before
+# the docker role renders the stack that bind-mounts it, so it pulls wiki_volume
+# itself (same seam as the docker role, epic 12 #08 Part B).
+dependencies:
+  - role: wiki_volume

@@ -60,6 +60,52 @@ if ! grep -A 8 'Allow and rate-limit Syncplay from allowed IPs' roles/tailscale/
 fi
 echo "ufw syncplay per-IP limit OK"
 
+# 3b: DOCKER-USER contract (epic 12 #08) — the real enforcement layer for published
+# ports. Declared in the tailscale role (single firewall owner); live iptables state
+# is operator-validated on the VPS. Pins the declarative contract here.
+TS_TASKS=roles/tailscale/tasks/main.yml
+if ! grep -q 'chain: DOCKER-USER' "$TS_TASKS"; then
+  echo "FAIL: tailscale role does not manage the DOCKER-USER chain"; exit 1
+fi
+if ! grep -q 'declarative rebuild' "$TS_TASKS"; then
+  echo "FAIL: DOCKER-USER chain is not rebuilt declaratively"; exit 1
+fi
+if ! grep -q 'in_interface: "{{ item }}"' "$TS_TASKS" || ! grep -q 'br+' "$TS_TASKS"; then
+  echo "FAIL: docker bridge traffic must RETURN early (container-to-container flows)"; exit 1
+fi
+if ! grep -q 'destination_port: 8999' "$TS_TASKS"; then
+  echo "FAIL: DOCKER-USER has no 8999 (syncplay) rules"; exit 1
+fi
+if ! grep -q 'syncplay_allowed_ips | default' "$TS_TASKS"; then
+  echo "FAIL: DOCKER-USER syncplay allow rule does not iterate syncplay_allowed_ips"; exit 1
+fi
+if ! grep -q 'destination_port: "{{ item }}"' "$TS_TASKS" || ! grep -q 'docker_published_restricted_ports' "$TS_TASKS"; then
+  echo "FAIL: DOCKER-USER restricted-port rules missing"; exit 1
+fi
+if ! grep -q 'docker_published_public_ports' "$TS_TASKS"; then
+  echo "FAIL: DOCKER-USER public-port rules missing"; exit 1
+fi
+if ! grep -q 'tailscale_subnet_v6' "$TS_TASKS"; then
+  echo "FAIL: DOCKER-USER v6 rules missing (published ports are dual-stack)"; exit 1
+fi
+if ! grep -q '^docker_published_restricted_ports:' group_vars/all/main.yml || \
+   ! grep -q '^docker_published_public_ports:' group_vars/all/main.yml; then
+  echo "FAIL: published-port classes not defined in group_vars/all/main.yml"; exit 1
+fi
+echo "docker-user contract OK"
+
+# 3c: owntracks deployment wiring (epic 12 #08 Part B).
+if ! grep -q 'role: owntracks' site.yml; then
+  echo "FAIL: owntracks role not wired into site.yml"; exit 1
+fi
+if ! grep -q 'owntracks' tests/lint.sh; then
+  echo "FAIL: owntracks missing from the skip-tags guard role list"; exit 1
+fi
+if ! grep -q 'role: wiki_volume' roles/owntracks/meta/main.yml; then
+  echo "FAIL: owntracks role missing wiki_volume meta dependency (uid/gid seam)"; exit 1
+fi
+echo "owntracks deployment wiring OK"
+
 # 4: secrets manifest entries.
 for entry in owntracks_admin_username owntracks_admin_password acme_email syncplay_password; do
   if ! grep -q "^  ${entry}:" group_vars/all/secrets.yml; then

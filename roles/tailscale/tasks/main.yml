@@ -123,6 +123,173 @@
     direction: outgoing
     policy: "{{ common_ufw_default_outgoing_policy | lower }}"  # noqa: args[module]
 
+# --- Docker published ports (epic 12, #08) ------------------------------------------
+# Docker-published ports bypass UFW entirely: DNAT happens in nat PREROUTING and
+# Docker's own FORWARD rules ACCEPT the traffic before UFW's INPUT is ever
+# consulted. The supported enforcement point is the DOCKER-USER chain (processed
+# before Docker's rules). This role is the single firewall owner, so it owns that
+# chain too.
+#
+# Declarative rebuild: the chain is flushed and rebuilt on every run (end state
+# identical each time; no duplicate/clobbered rules). Traffic from Docker bridge
+# networks (container-to-container, e.g. caddy -> conduit:8008) RETURNs early so
+# Docker's own forwarding applies — only host-uplink traffic is classified by port.
+#
+# Port classes (group_vars/all/main.yml): public (80/443/8448), Tailscale-only
+# (3000, conduit 8008, 8642, 9119), and syncplay 8999 (syncplay_allowed_ips).
+# NOTE: 1:1 host:container mappings only — post-DNAT dport == original dport.
+# The rules are not persisted across reboot; the deployment model restores them
+# by playbook run (Docker recreates the empty chain at daemon start).
+- name: Reset the DOCKER-USER chain (declarative rebuild)
+  tags: [tailscale]
+  ansible.builtin.iptables:
+    chain: DOCKER-USER
+    chain_management: true
+    flush: true
+
+- name: DOCKER-USER v4 - container networks return to Docker's own rules
+  tags: [tailscale]
+  ansible.builtin.iptables:
+    chain: DOCKER-USER
+    in_interface: "{{ item }}"
+    jump: RETURN
+    comment: "docker bridge traffic is not host-ingress"
+  loop:
+    - br+
+    - docker+
+
+- name: DOCKER-USER v4 - established/related accepted
+  tags: [tailscale]
+  ansible.builtin.iptables:
+    chain: DOCKER-USER
+    ctstate: [ESTABLISHED, RELATED]
+    jump: ACCEPT
+    comment: "accept established forwarded flows"
+
+- name: DOCKER-USER v4 - syncplay allowed IPs
+  tags: [tailscale]
+  ansible.builtin.iptables:
+    chain: DOCKER-USER
+    source: "{{ item }}"
+    protocol: tcp
+    destination_port: 8999
+    jump: ACCEPT
+    comment: "syncplay friend access"
+  loop: "{{ syncplay_allowed_ips | default([]) }}"
+
+- name: DOCKER-USER v4 - syncplay denied for everyone else
+  tags: [tailscale]
+  ansible.builtin.iptables:
+    chain: DOCKER-USER
+    protocol: tcp
+    destination_port: 8999
+    jump: DROP
+    comment: "syncplay IP allowlist (empty list = fully blocked)"
+
+- name: DOCKER-USER v4 - restricted ports from Tailscale subnet
+  tags: [tailscale]
+  ansible.builtin.iptables:
+    chain: DOCKER-USER
+    source: "{{ tailscale_subnet }}"
+    protocol: tcp
+    destination_port: "{{ item }}"
+    jump: ACCEPT
+    comment: "tailscale-only service"
+  loop: "{{ docker_published_restricted_ports }}"
+
+- name: DOCKER-USER v4 - restricted ports denied for everyone else
+  tags: [tailscale]
+  ansible.builtin.iptables:
+    chain: DOCKER-USER
+    protocol: tcp
+    destination_port: "{{ item }}"
+    jump: DROP
+    comment: "tailscale-only service deny"
+  loop: "{{ docker_published_restricted_ports }}"
+
+- name: DOCKER-USER v4 - public ingress ports
+  tags: [tailscale]
+  ansible.builtin.iptables:
+    chain: DOCKER-USER
+    protocol: tcp
+    destination_port: "{{ item }}"
+    jump: ACCEPT
+    comment: "public ingress (Caddy)"
+  loop: "{{ docker_published_public_ports }}"
+
+- name: Reset the DOCKER-USER chain for IPv6 (declarative rebuild)
+  tags: [tailscale]
+  ansible.builtin.iptables:
+    chain: DOCKER-USER
+    chain_management: true
+    flush: true
+    ip_version: ipv6
+
+- name: DOCKER-USER v6 - container networks return to Docker's own rules
+  tags: [tailscale]
+  ansible.builtin.iptables:
+    chain: DOCKER-USER
+    ip_version: ipv6
+    in_interface: "{{ item }}"
+    jump: RETURN
+    comment: "docker bridge traffic is not host-ingress"
+  loop:
+    - br+
+    - docker+
+
+- name: DOCKER-USER v6 - established/related accepted
+  tags: [tailscale]
+  ansible.builtin.iptables:
+    chain: DOCKER-USER
+    ip_version: ipv6
+    ctstate: [ESTABLISHED, RELATED]
+    jump: ACCEPT
+    comment: "accept established forwarded flows"
+
+- name: DOCKER-USER v6 - syncplay denied (allowlist is IPv4-only)
+  tags: [tailscale]
+  ansible.builtin.iptables:
+    chain: DOCKER-USER
+    ip_version: ipv6
+    protocol: tcp
+    destination_port: 8999
+    jump: DROP
+    comment: "syncplay allowlist is IPv4-only"
+
+- name: DOCKER-USER v6 - restricted ports from Tailscale ULA
+  tags: [tailscale]
+  ansible.builtin.iptables:
+    chain: DOCKER-USER
+    ip_version: ipv6
+    source: "{{ tailscale_subnet_v6 }}"
+    protocol: tcp
+    destination_port: "{{ item }}"
+    jump: ACCEPT
+    comment: "tailscale-only service"
+  loop: "{{ docker_published_restricted_ports }}"
+
+- name: DOCKER-USER v6 - restricted ports denied for everyone else
+  tags: [tailscale]
+  ansible.builtin.iptables:
+    chain: DOCKER-USER
+    ip_version: ipv6
+    protocol: tcp
+    destination_port: "{{ item }}"
+    jump: DROP
+    comment: "tailscale-only service deny"
+  loop: "{{ docker_published_restricted_ports }}"
+
+- name: DOCKER-USER v6 - public ingress ports
+  tags: [tailscale]
+  ansible.builtin.iptables:
+    chain: DOCKER-USER
+    ip_version: ipv6
+    protocol: tcp
+    destination_port: "{{ item }}"
+    jump: ACCEPT
+    comment: "public ingress (Caddy)"
+  loop: "{{ docker_published_public_ports }}"
+
 - name: Enable UFW
   tags: [tailscale]
   community.general.ufw:

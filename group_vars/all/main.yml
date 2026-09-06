@@ -5,6 +5,11 @@ ansible_python_interpreter: /usr/bin/python3
 # resolved by the `secrets` role from the single manifest in group_vars/all/secrets.yml
 # and consumed by roles as `secrets.*`.
 
+# Consolidated compose stack directory (epic 11). Stack-level constant so roles that
+# run before docker (e.g. owntracks, epic 12 #08 Part B) resolve the same path the
+# compose fragments bind-mount. Overrides docker role's default via group_vars precedence.
+docker_compose_dir: /opt/hermes-vps
+
 # Reverse proxy and web domains / paths (non-secret)
 # silverbullet_bind: all interfaces on port 3000 (used in silverbullet service ports binding)
 silverbullet_data_dir: /opt/hermes/wiki
@@ -39,6 +44,26 @@ conduit_e2ee_mode: "required"
 # is a single edit (user story #12).
 tailscale_interface: tailscale0
 tailscale_subnet: "100.64.0.0/10"
+# Tailscale's standard ULA prefix (same range for every tailnet) - used by the
+# DOCKER-USER v6 rules that mirror the v4 source-based restrictions (epic 12 #08).
+tailscale_subnet_v6: "fd7a:115c:a1e0::/48"
+
+# Docker published-port firewall classes (epic 12 #08). Published ports bypass UFW
+# INPUT (Docker DNATs in nat PREROUTING), so access classes are enforced in the
+# DOCKER-USER chain by the tailscale role (single firewall owner).
+#   public:     reachable from anywhere (Caddy ingress; cert/HTTP challenge ports)
+#   restricted: Tailscale clients only (services with no public ingress)
+#   8999:       syncplay - special-cased: allow from syncplay_allowed_ips, drop rest
+# NOTE: only 1:1 host:container port mappings are supported (post-DNAT dport matching).
+docker_published_public_ports:
+  - 80
+  - 443
+  - 8448
+docker_published_restricted_ports:
+  - 3000
+  - "{{ conduit_port }}"
+  - 8642
+  - 9119
 
 # The single Hermes agent, expressed as a data entry and consumed by the render loop in
 # the hermes role. The `default` entry is the main "second brain" agent, deployed to
@@ -90,9 +115,10 @@ common_ufw_default_outgoing_policy: allow
 common_unattended_upgrades_enabled: true
 
 # Syncplay IP allowlist (epic 12, #06): friends with dynamic home IPs connect
-# to the syncplay TCP port (8999) from these addresses. UFW allow+rate-limits
-# each entry; everyone else hits the default-deny policy. Empty list = port
-# effectively blocked.
+# to the syncplay TCP port (8999) from these addresses. Enforced at the
+# DOCKER-USER layer by the tailscale role (epic 12 #08) — published ports bypass
+# UFW INPUT, so UFW rules alone would never match this traffic. IPv4 only;
+# empty list = port effectively blocked.
 syncplay_allowed_ips:
   - "192.0.2.1"  # placeholder — replace with your friend's actual IP before run
 

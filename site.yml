@@ -102,6 +102,9 @@
     - role: gateway
       tags:
         - gateway
+    - role: owntracks
+      tags:
+        - owntracks
     - role: docker
       tags:
         - docker

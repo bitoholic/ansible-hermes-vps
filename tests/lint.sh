@@ -85,7 +85,7 @@ python3 scripts/generate-env.py --check
 # and the protected roles (secrets, users, ssh_hardening, common) are guarded by a pre-flight assert
 # in site.yml so they cannot be skipped via --skip-tags.
 echo "== role skip-tags guard =="
-for role in secrets users ssh_hardening common tailscale docker conduit hermes authelia gateway silverbullet backup; do
+for role in secrets users ssh_hardening common tailscale docker conduit hermes authelia gateway silverbullet owntracks backup; do
   if ! grep -q "tags:" "roles/${role}/tasks/main.yml"; then
     echo "FAIL: roles/${role}/tasks/main.yml has no task-level tags entry" >&2
     exit 1

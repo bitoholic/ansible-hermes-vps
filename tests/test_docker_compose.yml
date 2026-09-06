@@ -67,6 +67,20 @@
         path: "{{ docker_compose_dir }}/docker-compose.yml"
       register: rendered_compose
 
+    - name: Assert owntracks publishes no host port (structural, not substring)
+      ansible.builtin.assert:
+        that:
+          - compose.services.owntracks.ports is not defined
+          # Syncplay publishes exactly its 1:1 host port for DOCKER-USER IP filtering.
+          - compose.services.syncplay.ports == ['8999:8999']
+          - compose.services.owntracks.networks == ['gateway']
+          - compose.services.syncplay.volumes == ['syncplay_data:/data']
+        fail_msg: >-
+          owntracks must not publish a host port (Caddy proxies it) and syncplay must
+          publish exactly 8999:8999. Rendered services: {{ compose.services.keys() | list }}
+      vars:
+        compose: "{{ rendered_compose.content | b64decode | from_yaml }}"
+
     - name: Assert all enabled services are present in rendered docker-compose.yml
       ansible.builtin.assert:
         that:
@@ -84,8 +98,4 @@
           - "'caddy_config:' in (rendered_compose.content | b64decode)"
           - "'owntracks_data:' in (rendered_compose.content | b64decode)"
           - "'syncplay_data:' in (rendered_compose.content | b64decode)"
-          # Syncplay publishes its host port for UFW/DOCKER-USER IP filtering;
-          # OwnTracks must NOT publish one (Caddy proxies it on the gateway net).
-          - "'8999:8999' in (rendered_compose.content | b64decode)"
-          - "'8080:8080' not in (rendered_compose.content | b64decode)"
         fail_msg: "Rendered docker-compose.yml is missing expected services or configuration."
