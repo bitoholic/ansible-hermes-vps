@@ -1,0 +1,17 @@
+---
+# OwnTracks htpasswd generation (epic 12, #02).
+- name: Ensure owntracks data directory exists
+  ansible.builtin.file:
+    path: "{{ docker_compose_dir }}/owntracks"
+    state: directory
+    owner: "{{ wiki_volume_uid }}"
+    group: "{{ wiki_volume_gid }}"
+    mode: '0755'
+
+- name: Generate htpasswd for owntracks basic auth
+  community.general.htpasswd:
+    path: "{{ owntracks_htpasswd_path }}"
+    name: "{{ secrets.owntracks_admin_username }}"
+    password: "{{ secrets.owntracks_admin_password }}"
+    hash: bcrypt
+  register: owntracks_htpasswd_result
