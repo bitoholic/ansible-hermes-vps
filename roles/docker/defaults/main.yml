@@ -19,6 +19,7 @@ docker_volumes:
   - caddy_data
   - caddy_config
   - owntracks_data
+  - syncplay_data
 
 # Services to enable. Each service must have a corresponding fragment in
 # roles/docker/templates/services/<name>.yml.j2
@@ -30,3 +31,4 @@ docker_enabled_services:
   - signal-cli
   - hermes-agent
   - owntracks
+  - syncplay

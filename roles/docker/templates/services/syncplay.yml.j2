@@ -1,0 +1,19 @@
+syncplay:
+  image: dnomd343/syncplay:latest
+  container_name: syncplay
+  user: "{{ wiki_volume_uid }}:{{ wiki_volume_gid }}"
+  restart: unless-stopped
+  environment:
+    # Custom TCP protocol (not HTTP) — Caddy can't proxy it. Reachability is
+    # controlled at the host level via UFW IP allowlist (epic 12, #06).
+    # Env vars map 1:1 to server CLI args (dnomd343/syncplay convention).
+    - PASSWORD={{ secrets.syncplay_password }}
+    - PORT=8999
+  # /data is the image's working dir (room state, config.yml, MOTD config).
+  volumes:
+    - syncplay_data:/data
+  # Host port published so UFW can IP-filter it before it reaches the container.
+  ports:
+    - "8999:8999"
+  networks:
+    - gateway
