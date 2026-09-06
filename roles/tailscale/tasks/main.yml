@@ -95,6 +95,22 @@
     - 443
     - 8448
 
+# --- Syncplay IP allowlist (epic 12, #06) --------------------------------------
+# IP-restricted public access: each allowed IP gets allow + rate-limit in one
+# rule (ufw limit = allow with a 6-connections/30s flood guard); every other
+# source falls through to the default-deny incoming policy below. Deliberately
+# NO catch-all `limit 8999` rule: ufw limit *allows* traffic (rate-limited),
+# so it would open the port to the whole internet and defeat the allowlist.
+- name: Allow and rate-limit Syncplay from allowed IPs
+  tags: [tailscale]
+  community.general.ufw:
+    rule: limit
+    from: "{{ item }}"
+    port: 8999
+    proto: tcp
+    comment: "Syncplay friend access"
+  loop: "{{ syncplay_allowed_ips | default([]) }}"
+
 - name: Set UFW default incoming policy (default-deny)
   tags: [tailscale]
   community.general.ufw:

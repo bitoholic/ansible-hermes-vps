@@ -89,4 +89,11 @@ common_ufw_default_incoming_policy: deny
 common_ufw_default_outgoing_policy: allow
 common_unattended_upgrades_enabled: true
 
+# Syncplay IP allowlist (epic 12, #06): friends with dynamic home IPs connect
+# to the syncplay TCP port (8999) from these addresses. UFW allow+rate-limits
+# each entry; everyone else hits the default-deny policy. Empty list = port
+# effectively blocked.
+syncplay_allowed_ips:
+  - "192.0.2.1"  # placeholder — replace with your friend's actual IP before run
+
 # Dedicated application system user is llm_wiki
