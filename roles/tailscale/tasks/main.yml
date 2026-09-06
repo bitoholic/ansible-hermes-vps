@@ -82,7 +82,7 @@
     interface: "{{ tailscale_interface }}"
     comment: "Tailscale private access"
 
-- name: Rate-limit SSH, HTTP, and HTTPS
+- name: Rate-limit SSH, HTTP, HTTPS, and OwnTracks HTTPS
   tags: [tailscale]
   community.general.ufw:
     rule: limit
@@ -93,6 +93,7 @@
     - "{{ common_ssh_port }}"
     - 80
     - 443
+    - 8448
 
 - name: Set UFW default incoming policy (default-deny)
   tags: [tailscale]
