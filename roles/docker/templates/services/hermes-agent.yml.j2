@@ -18,7 +18,6 @@ hermes-agent:
     GITHUB_TOKEN: "{{secrets.hermes_default_github_token}}"
   volumes:
     - "{{ hermes_home }}:/opt/data"
-    - "{{ silverbullet_data_dir }}:/opt/data/wiki"
   networks:
     - internal
     - gateway

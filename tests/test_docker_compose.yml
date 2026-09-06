@@ -25,7 +25,7 @@
       - caddy_data
       - caddy_config
     silverbullet_compose_dir: /opt/silverbullet
-    silverbullet_data_dir: /opt/wiki
+    silverbullet_data_dir: /opt/hermes/wiki
     silverbullet_image: ghcr.io/silverbulletmd/silverbullet:latest
     wiki_volume_uid: 1000
     wiki_volume_gid: 1000

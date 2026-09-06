@@ -17,8 +17,8 @@
   ansible.builtin.file:
     path: "{{ conduit_compose_dir }}"
     state: directory
-    owner: "{{ secrets.admin_username }}"
-    group: "{{ secrets.admin_username }}"
+    owner: llm_wiki
+    group: llm_wiki
     mode: '0755'
 
 # The matrixconduit/matrix-conduit runner executes as the `llm_wiki` user (UID/GID 10000),
