@@ -1,11 +1,11 @@
 # Ticket #03: OwnTracks gateway route contribution
 
-**Blocked by:** #01
+**Blocked by:** #00
 **Blocks:** #05
 
 ## Description
 
-Wire the OwnTracks gateway route contribution into the Caddyfile render.
+Wire the OwnTracks gateway route contribution into the Caddyfile render. The Caddyfile template changes (port suffix, tls_mode conditional) are handled by ticket #00 — this ticket just adds OwnTracks on top.
 
 1. **Create `roles/owntracks/defaults/main.yml`**:
    ```yaml
@@ -14,34 +14,31 @@ Wire the OwnTracks gateway route contribution into the Caddyfile render.
        upstream: owntracks:8080
        mfa: false
        tls_mode: "auto"
+       port: 8448
    ```
 
-2. **Gateway task loop** in `roles/gateway/tasks/main.yml`:
-   - Add `owntracks` to the `include_vars` loop alongside `silverbullet`, `authelia`, `hermes`
-   - The gateway aggregates all `*_gateway_publish` contributions into `gateway_routes`
+2. **Update `roles/gateway/tasks/main.yml`**:
+   - Add `owntracks` to the `include_vars` loop alongside `silverbullet`, `authelia`, `hermes`, `conduit`
+   - Loop loads `*_gateway_publish` from each role's defaults into `gateway_routes`
 
-3. **Gateway route validation** in `roles/gateway/tasks/validate.yml`:
-   - Add `tls_mode` field validation: optional, must be `"internal"` or `"auto"` if present
-   - Default is `"internal"` when `tls_mode` is not specified
-
-4. **Caddyfile template extension** in `roles/gateway/templates/Caddyfile.j2`:
-   - Existing template uses `tls internal` for all routes
-   - Add conditional: `{{ '  tls\n' if route.tls_mode == "auto" else '  tls internal\n' }}`
-   - When `tls_mode == "auto"`, Caddy will attempt ACME for the hostname
-   - When `tls_mode == "internal"` (or missing), render `tls internal` (self-signed)
+3. **Update `group_vars/all/gateway.yml`**:
+   - Add `owntracks_gateway_publish` to the `gateway_routes` concatenation:
+     ```yaml
+     gateway_routes: "{{ silverbullet_gateway_publish + hermes_gateway_publish + authelia_gateway_publish + conduit_gateway_publish + owntracks_gateway_publish }}"
+     ```
 
 ## Acceptance criteria
 
 - `roles/owntracks/defaults/main.yml` exports `owntracks_gateway_publish` with required fields
 - Gateway task loop loads `owntracks_gateway_publish` from defaults
-- `gateway_routes` shape validation accepts `tls_mode` field
-- Caddyfile template renders `owntracks.{{ secrets.silverbullet_domain }}` block
-- Block contains `tls` directive when `tls_mode == "auto"` (no `import mfa_auth`)
-- `gateway_routes` validation fails fast on malformed entries
+- `group_vars/all/gateway.yml` includes `owntracks_gateway_publish` in the concatenation
+- Caddyfile template renders `owntracks.{{ secrets.silverbullet_domain }}:8448` block
+- Block contains `tls` directive (not `tls internal`) when `tls_mode == "auto"`
+- Block has no `import mfa_auth` (since `mfa: false`)
 
 ## Notes
 
-- The existing Caddyfile has `{{ secrets.silverbullet_domain }}:8448` for Matrix/Conduit and route blocks for wiki/dash/auth on port 80.
-- Adding `owntracks.{{ secrets.silverbullet_domain }}` to the route loop renders it on port 80 by default.
-- For port 8448 sharing with Caddy, Caddy uses SNI-based routing (same port, different hostnames). The route block can be on port 8448 via a separate entry or the `tls_mode: "auto"` path handles this automatically.
+- **Caddyfile template changes** (port suffix, tls_mode conditional) are already done by ticket #00 — this ticket just adds OwnTracks on top.
+- **Sequential change**: this ticket adds `owntracks` to the include_vars loop AFTER #00 adds `conduit`. Do not work on both simultaneously.
+- Port 8448 shared between `matrix.*` and `owntracks.*` via Caddy SNI-based routing.
 - `mfa: false` means no `import mfa_auth` in the rendered block — mobile apps can't handle forward-auth.

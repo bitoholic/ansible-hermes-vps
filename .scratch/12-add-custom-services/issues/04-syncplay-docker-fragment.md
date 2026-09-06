@@ -8,11 +8,11 @@
 Create the Syncplay server Docker service fragment for the consolidated compose stack.
 
 1. **Service fragment** at `roles/docker/templates/services/syncplay.yml.j2`:
-   - Image: `dnomd343/syncplay` (or `kayabe/syncplay-server`)
+   - Image: `kayabe/syncplay-server` (env-var based config)
    - Container name: `syncplay`
-   - Port: host `8999` → container `8999` (exposed to host for raw TCP access — UFW filters it)
+   - Port: host `8999` → container `8999` (exposed for UFW IP filtering)
    - Volume: named `syncplay_data` → `/syncplaydata` (MOTD, room state persistence)
-   - Environment:
+   - Env:
      - `PASSWORD={{ secrets.syncplay_password }}` (Syncplay server password)
      - `PORT=8999`
    - Networks: `gateway`
@@ -35,5 +35,5 @@ Create the Syncplay server Docker service fragment for the consolidated compose 
 ## Notes
 
 - Syncplay uses a custom TCP protocol (not HTTP), so Caddy cannot reverse-proxy it.
-- Access is controlled at the host level via UFW IP allowlist (ticket #05).
-- The official Syncplay server has no built-in web panel — all configuration is via CLI args or env vars.
+- Access is controlled at the host level via UFW IP allowlist (ticket #06).
+- The official Syncplay server has no web panel — all configuration is via env vars or CLI args.

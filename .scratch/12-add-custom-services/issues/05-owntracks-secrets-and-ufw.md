@@ -1,7 +1,7 @@
 # Ticket #05: OwnTracks secrets and UFW rules
 
-**Blocked by:** #01–#03
-**Blocks:** #05
+**Blocked by:** #01–#04
+**Blocks:** #06
 
 ## Description
 
@@ -22,9 +22,20 @@ Add OwnTracks secrets to the manifest and UFW rules for public HTTPS access.
      default: "admin@{{ secrets.silverbullet_domain }}"
    ```
 
-2. **UFW rule**: in `roles/tailscale/tasks/main.yml`, add rate-limiting for port 8448 (Caddy's public HTTPS port that now serves owntracks):
-   - Add `8448` to the existing `limit` loop alongside 80 and 443
-   - This ensures Caddy's HTTPS endpoint for owntracks is rate-limited (and Tailscale-only for Conduit)
+2. **UFW rule**: in `roles/tailscale/tasks/main.yml`, add 8448 to the existing `limit` loop (ports 80, 443 → **80, 443, 8448**):
+   ```yaml
+   - name: Rate-limit SSH, HTTP, HTTPS, and OwnTracks HTTPS
+     community.general.ufw:
+       rule: limit
+       port: "{{ item }}"
+       proto: tcp
+       comment: "Rate-limit web traffic"
+     loop:
+       - "{{ common_ssh_port }}"
+       - 80
+       - 443
+       - 8448
+   ```
 
 ## Acceptance criteria
 
@@ -34,6 +45,7 @@ Add OwnTracks secrets to the manifest and UFW rules for public HTTPS access.
 
 ## Notes
 
-- OwnTracks is served via Caddy on port 8448 (same port as Matrix/Conduit). Caddy uses SNI-based routing to differentiate hostnames on the same port.
-- The existing UFW loop `limit` for ports 80/443 needs 8448 added.
-- `owntracks_admin_password` is plaintext — Ansible's `htpasswd` module hashes it for the htpasswd file.
+- OwnTracks is served via Caddy on port 8448 (same port as Matrix/Conduit). Caddy uses SNI-based routing to differentiate hostnames.
+- The existing UFW loop for rate-limiting ports 80/443 gets 8448 added.
+- `owntracks_admin_password` is plaintext — Ansible's `community.general.htpasswd` module hashes it for the htpasswd file.
+- `acme_email` is optional with a sensible default for Caddy ACME certificate issuance.

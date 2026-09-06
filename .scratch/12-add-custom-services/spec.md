@@ -1,6 +1,6 @@
 # Spec: Custom Docker Services (OwnTracks, Syncplay)
 
-> Status: ready-for-agent (draft)
+> Status: ready-for-agent (no longer draft — all grill/me decisions captured, pattern verified against epic 11)
 > Source: Epic 12 — "Add additional custom docker services to this VPS"
 > Related: `03-gateway-reverse-proxy` (ingress seam), `11-docker-consolidation` (docker role), `07-tailscale-private-access` (UFW ownership)
 > Vocabulary: "gateway", "service fragment", "gateway_publish", "tailscale subnet", "source-based MFA bypass", "OwnTracks recorder", "Syncplay server", "IP-restricted public access", "Tailscale interface", "tls_mode"
@@ -153,7 +153,7 @@ Conduit becomes a standard route entry with `host: matrix`, `port: 8448`, and th
   acme_email:
     env: ACME_EMAIL
     required: false
-    default: "admin@{{ secrets.silverbullet_domain }}"
+    default: ""
   ```
 
 ### Service 2: Syncplay
@@ -232,7 +232,9 @@ Conduit becomes a standard route entry with `host: matrix`, `port: 8448`, and th
 
 - The **gateway remains the single Caddyfile writer** — HTTP services declare intent via `gateway_publish`; non-HTTP services (Syncplay) skip the gateway entirely.
 
-- **Caddyfile fix**: Conduit must move from a hardcoded block into the gateway loop. The current hardcoded block is missing the `matrix.` prefix — an existing bug. This fix is a prerequisite (ticket #01).
+- **Syncplay image (image verification required)**: the spec assumes `kayabe/syncplay-server` — **THIS IMAGE IS UNVERIFIED**. The official Docker Hub image is `syncplay/syncplay`, which uses ARGS (not env vars) for configuration. Ticket #04 must verify the correct image and its config mechanism (ARGS vs env vars) before implementation. If `syncplay/syncplay` is used, the `PASSWORD={{ secrets.syncplay_password }}` env-var assumption likely doesn't work — must adjust the service fragment accordingly.
+
+- **Caddyfile fix**: Conduit must move from a hardcoded block into the gateway loop. The current hardcoded block is missing the `matrix.` prefix — an existing bug. This fix is a prerequisite (ticket #00), NOT ticket #01. Ticket #00 also adds port suffix and tls_mode support to the Caddyfile template (see ticket #00 scope below).
 
 - **Syncplay IP management**: `syncplay_allowed_ips` is a list of CIDR ranges or individual IPs. Starting with one example entry. Friends with dynamic IPs update their home router IP.
 
