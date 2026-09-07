@@ -5,11 +5,14 @@
 # assert clauses per field — adding a field here is enough for validate.yml to
 # enforce it; there's no second hand-copied assert list left to drift from this.
 #
-# Each entry: `field` name, `required` (boolean), and exactly one constraint —
-# `type` (string/boolean/integer) or `allowed_values` (an enum list). The
-# `string` constraints on host/basic_auth_user/basic_auth_hash are a deliberate,
-# low-risk narrow addition beyond what validate.yml checked before this epic
-# (which never type-checked those three) — see epic 13 ticket #01's Notes.
+# Each entry: `field` name, `required` (boolean), and one or more constraints —
+# `type` (string/boolean/integer), `allowed_values` (an enum list), and/or
+# `non_empty` (rejects an empty string; only meaningful alongside `type: string`,
+# and only `upstream` uses it today). The `string` constraints on
+# host/basic_auth_user/basic_auth_hash are a deliberate, low-risk narrow addition
+# beyond what validate.yml checked before this epic (which never type-checked
+# those three) — see epic 13 ticket #01's Notes. validate_route.yml (ticket #02)
+# checks `non_empty` as its own constraint kind alongside `type`/`allowed_values`.
 #
 # basic_auth_user/basic_auth_hash mutual presence is NOT expressed here — it's
 # the one relational constraint among these fields (not a per-field check) and

@@ -1,30 +1,41 @@
 ---
-# Gateway / reverse-proxy seam (epic 03, #03).
-# Fail-fast validation of `gateway_routes` — runs before the Caddyfile is rendered so a malformed
-# ingress entry can't produce a silent-502 Caddyfile. Extracted so the render test can invoke just
-# the validation (without the deploy-dir/file step).
-- name: Validate gateway_routes shape (fail fast on malformed ingress)
+# Gateway / reverse-proxy seam (epic 03, #03; rewritten as a schema-driven engine in
+# epic 13, #02). Fail-fast validation of `gateway_routes` — runs before the Caddyfile
+# is rendered so a malformed ingress entry can't produce a silent-502 Caddyfile.
+# Extracted so the render test can invoke just the validation (without the
+# deploy-dir/file step).
+#
+# Walks roles/gateway/vars/route_schema.yml generically (via validate_route.yml)
+# instead of one hand-written assert per field — adding a field to the schema is
+# enough for this to enforce it; there's no second hand-copied assert list left to
+# drift from it.
+- name: Assert gateway_routes is a non-empty list
   ansible.builtin.assert:
     that:
       - gateway_routes is defined
       - gateway_routes | length > 0
-      - gateway_routes | selectattr('host', 'undefined') | list | length == 0
-      - gateway_routes | selectattr('upstream', 'undefined') | list | length == 0
-      - gateway_routes | selectattr('upstream', 'equalto', '') | list | length == 0
-      - gateway_routes | selectattr('mfa', 'undefined') | list | length == 0
-      - gateway_routes | rejectattr('mfa', 'boolean') | list | length == 0
-      # tls_mode: if defined, must be "internal" or "auto"
-      - (gateway_routes | selectattr('tls_mode', 'defined') | rejectattr('tls_mode', 'in', ['internal', 'auto']) | list | length == 0)
-      # port: if defined, must be an integer
-      - (gateway_routes | selectattr('port', 'defined') | rejectattr('port', 'integer') | list | length == 0)
-      # basic_auth_user/basic_auth_hash: must be defined together or not at all — a lone
-      # one renders either a broken `basic_auth {  }` block (no creds, Caddy refuses to
-      # start) or silently skips auth entirely.
-      - (gateway_routes | selectattr('basic_auth_user', 'defined') | rejectattr('basic_auth_hash', 'defined') | list | length == 0)
-      - (gateway_routes | selectattr('basic_auth_hash', 'defined') | rejectattr('basic_auth_user', 'defined') | list | length == 0)
+    fail_msg: "gateway_routes must be defined and non-empty."
+
+- name: Validate each route against the route schema
+  ansible.builtin.include_tasks: validate_route.yml
+  loop: "{{ gateway_routes }}"
+  loop_control:
+    loop_var: gateway_route
+    label: "{{ gateway_route.host | default('?') }}"
+
+# basic_auth_user/basic_auth_hash mutual presence: the only relational rule among the
+# 7 fields (everything else is a per-field check owned by the schema) — kept as one
+# small, explicit check here rather than generalized into the schema vocabulary for a
+# single instance. A lone one renders either a broken `basic_auth {  }` block (no
+# creds, Caddy refuses to start) or silently skips auth entirely.
+- name: Assert basic_auth_user/basic_auth_hash mutual presence
+  ansible.builtin.assert:
+    that:
+      - ("basic_auth_user" in gateway_route) == ("basic_auth_hash" in gateway_route)
     fail_msg: >-
-      Each entry in gateway_routes must declare `host`, a non-empty `upstream`, and a
-      boolean `mfa`. Optional `tls_mode` must be "internal" or "auto", optional `port`
-      must be an integer, and optional `basic_auth_user`/`basic_auth_hash` must both be
-      present or both absent. A malformed entry means a broken Caddyfile (silent 502).
-      Fix the offending role's `gateway_publish` contribution.
+      route '{{ gateway_route.host | default('?') }}': basic_auth_user and
+      basic_auth_hash must both be present or both absent.
+  loop: "{{ gateway_routes }}"
+  loop_control:
+    loop_var: gateway_route
+    label: "{{ gateway_route.host | default('?') }}"

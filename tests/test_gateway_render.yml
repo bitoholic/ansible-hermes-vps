@@ -196,3 +196,61 @@
             that:
               - lone_basic_auth_user_failed_fast | default(false)
             fail_msg: "gateway did NOT fail fast on basic_auth_user without a matching hash"
+
+    # Epic 13, #02: spot-check that the schema-driven engine's failure message names
+    # the specific field it violated (not one giant combined message covering all 7).
+    - name: Malformed route (non-string host) must fail fast naming the host field
+      block:
+        - ansible.builtin.include_tasks:
+            file: "{{ playbook_dir }}/../roles/gateway/tasks/validate.yml"
+          vars:
+            gateway_routes:
+              - host: 12345
+                upstream: silverbullet:3000
+                mfa: true
+      rescue:
+        - ansible.builtin.set_fact:
+            nonstring_host_failed_fast: true
+            # A looped task's own .msg is just "One or more items failed" — the
+            # per-item fail_msg text lives in .results[i].msg for the failing item(s).
+            nonstring_host_error_msg: >-
+              {{ ansible_failed_result.results | default([ansible_failed_result])
+                 | selectattr('failed', 'defined') | selectattr('failed')
+                 | map(attribute='msg') | list | join('; ') }}
+      always:
+        - ansible.builtin.assert:
+            that:
+              - nonstring_host_failed_fast | default(false)
+              - "'host' in nonstring_host_error_msg"
+              - "'string' in nonstring_host_error_msg"
+            fail_msg: >-
+              gateway did NOT fail fast with a host-specific message;
+              got: {{ nonstring_host_error_msg | default('nothing') }}
+
+    - name: Malformed route (non-string basic_auth_hash) must fail fast naming that field
+      block:
+        - ansible.builtin.include_tasks:
+            file: "{{ playbook_dir }}/../roles/gateway/tasks/validate.yml"
+          vars:
+            gateway_routes:
+              - host: wiki
+                upstream: silverbullet:3000
+                mfa: true
+                basic_auth_user: someone
+                basic_auth_hash: 42
+      rescue:
+        - ansible.builtin.set_fact:
+            nonstring_hash_failed_fast: true
+            nonstring_hash_error_msg: >-
+              {{ ansible_failed_result.results | default([ansible_failed_result])
+                 | selectattr('failed', 'defined') | selectattr('failed')
+                 | map(attribute='msg') | list | join('; ') }}
+      always:
+        - ansible.builtin.assert:
+            that:
+              - nonstring_hash_failed_fast | default(false)
+              - "'basic_auth_hash' in nonstring_hash_error_msg"
+              - "'string' in nonstring_hash_error_msg"
+            fail_msg: >-
+              gateway did NOT fail fast with a basic_auth_hash-specific message;
+              got: {{ nonstring_hash_error_msg | default('nothing') }}

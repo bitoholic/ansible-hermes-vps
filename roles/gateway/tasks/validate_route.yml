@@ -1,0 +1,40 @@
+---
+# Epic 13, #02: generic per-field schema check for one route (`gateway_route`, set by
+# the loop in validate.yml). One assert per schema field, so a violation names its
+# specific route/field/constraint instead of one giant combined message covering all
+# 7 fields at once. Each `that:` clause is an implication ("constraint doesn't apply,
+# or it's satisfied") so a missing optional field never triggers a false violation.
+- name: "Assert route field satisfies its schema constraint: {{ gateway_field.field }}"
+  ansible.builtin.assert:
+    that:
+      - not gateway_field_required or gateway_field_present
+      - not gateway_field_present or gateway_field_type != 'string' or gateway_field_value is string
+      - not gateway_field_present or gateway_field_type != 'boolean' or gateway_field_value is boolean
+      - not gateway_field_present or gateway_field_type != 'integer' or gateway_field_value is integer
+      - not gateway_field_present or not gateway_field_non_empty or (gateway_field_value | string | length > 0)
+      - not gateway_field_present or not gateway_field_has_allowed or gateway_field_value in gateway_field_allowed
+    fail_msg: >-
+      {{ "route '" ~ (gateway_route.host | default('?')) ~ "': field '" ~ gateway_field.field ~ "' " ~
+      ('is required but missing'
+       if (not gateway_field_present)
+       else ('must be a string, got ' ~ (gateway_field_value | string))
+       if (gateway_field_type == 'string' and gateway_field_value is not string)
+       else ('must be a boolean, got ' ~ (gateway_field_value | string))
+       if (gateway_field_type == 'boolean' and gateway_field_value is not boolean)
+       else ('must be an integer, got ' ~ (gateway_field_value | string))
+       if (gateway_field_type == 'integer' and gateway_field_value is not integer)
+       else 'must not be empty'
+       if (gateway_field_non_empty and (gateway_field_value | string | length) == 0)
+       else ('must be one of ' ~ (gateway_field_allowed | string) ~ ', got ' ~ (gateway_field_value | string))) }}
+  vars:
+    gateway_field_required: "{{ gateway_field.required | default(false) }}"
+    gateway_field_present: "{{ gateway_field.field in gateway_route }}"
+    gateway_field_type: "{{ gateway_field.type | default('') }}"
+    gateway_field_non_empty: "{{ gateway_field.non_empty | default(false) }}"
+    gateway_field_has_allowed: "{{ gateway_field.allowed_values is defined }}"
+    gateway_field_allowed: "{{ gateway_field.allowed_values | default([]) }}"
+    gateway_field_value: "{{ gateway_route[gateway_field.field] | default(None) }}"
+  loop: "{{ gateway_route_schema }}"
+  loop_control:
+    loop_var: gateway_field
+    label: "{{ gateway_field.field }}"
