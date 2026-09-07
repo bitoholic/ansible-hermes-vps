@@ -1,0 +1,81 @@
+# Spec: Gateway Route Schema (deepen the gateway_routes module)
+
+> Status: ready-for-agent (no longer draft — all grill/me decisions captured, this is a direct follow-up to epic 12)
+> Source: Epic 13 — architecture review candidate "Unify the gateway_routes module" (top recommendation, hot-spot scan of git log)
+> Related: `03-gateway-reverse-proxy` (origin of `gateway_routes`/`validate.yml`/`Caddyfile.j2`), `12-add-custom-services` (the missing-`matrix.`-prefix bug and the `basic_auth_user`/`basic_auth_hash` fields that motivated this epic)
+> Vocabulary: "gateway", "gateway_routes", "gateway_publish", "route schema", "seam", "deep module" — no existing ADR governs this specifically (ADR-0002 covers docker-compose fragment/aggregation, a sibling pattern applied to a different seam, not this one)
+
+## Problem Statement
+
+The operator keeps hitting the same class of bug when the gateway's ingress route schema grows a field: `roles/gateway/tasks/validate.yml` and `roles/gateway/templates/Caddyfile.j2` hand-synchronize what a valid `gateway_routes` entry looks like, with nothing structurally linking the two. `validate.yml` is a list of independently-authored `assert` clauses; `Caddyfile.j2` is a matching set of `{% if %}` conditionals. Nothing catches the two drifting apart.
+
+This has already caused a real production bug: Conduit's hardcoded Caddyfile block was missing the `matrix.` hostname prefix, silently, until it needed its own dedicated ticket (epic 12, ticket #00) to find and fix. Since then, every field added to the route schema — `mfa` → `tls_mode` → `port` → `basic_auth_user`/`basic_auth_hash` (the last pair added in the OwnTracks HTTP-auth security fix, now merged to main) — required touching both files by hand, with no cross-check that they agree.
+
+The operator wants `validate.yml` to be structurally incapable of going incomplete relative to itself: adding a route field should be an act of *declaring* it somewhere, not an act of remembering to independently re-derive the same validation logic a second time.
+
+## Solution
+
+Introduce a declarative route schema — `roles/gateway/vars/route_schema.yml` — as the single source of truth for what a `gateway_routes` entry may contain. `validate.yml` stops being a hand-written list of assert clauses and becomes a generic engine: one Jinja loop that walks every route against every schema-declared field, generically enforcing `required`, `type`, and `allowed-values` constraints, plus per-field failure messages that name the offending route, field, and value.
+
+`Caddyfile.j2` is explicitly **not** part of this deepening's render side beyond what it already does: the address line, port suffix, `tls_mode`-driven https-scheme logic, and the `log` line stay exactly as they render today. Only the two live *inner* optional directives (`import mfa_auth`, the `basic_auth` block) are in scope, and they stay an explicit, ordered `{% if %}` chain rather than becoming schema-driven — two live cases don't clear the bar for building a generic per-field template-inclusion mechanism, and no custom Python is introduced anywhere in this repo to do the job either (verified: zero existing `filter_plugins`/`library`/`module_utils`, zero Python test tooling, and `tests/lint.sh` is entirely Python-blind — a custom filter plugin would ship with no lint or test coverage of its own).
+
+**Framing correction, load-bearing for whoever implements this:** this is *not* "3 hand-synced edits become 1." Adding a new field going forward is still two logic edits (one schema-table row in `route_schema.yml`, one `{% if %}` block in `Caddyfile.j2`) plus the data key in the contributing role's own `defaults/main.yml` dict, unchanged. What changes is that `validate.yml` can no longer silently omit a check for a field the schema declares — there's no second hand-copied assert list left to drift from it. The win is drift-proofing the validate half, not reducing total edit count.
+
+## User Stories
+
+1. As a VPS operator, I want `roles/gateway/tasks/validate.yml` to validate every field declared in one schema table, so that adding a field to the schema is guaranteed to be enforced — there's no second hand-written assert list to forget.
+2. As a VPS operator, I want a validation failure to name the specific route, field, and constraint that was violated, so that I can fix a malformed `gateway_publish` contribution without reading the whole `gateway_routes` list to find it.
+3. As a future epic author adding a public-facing service, I want to add a new route field by writing one schema-table row, so that I don't have to also hand-write a new `assert` clause and hope it matches what `Caddyfile.j2` expects.
+4. As a security reviewer, I want the schema to be the single declared contract for what a route may say, so that a future field (like `basic_auth_user`/`basic_auth_hash`) can't ship with `Caddyfile.j2` rendering it while `validate.yml` never checks it exists correctly — the exact shape of bug that produced the missing-`matrix.`-prefix incident.
+5. As a maintainer, I want the `basic_auth_user`/`basic_auth_hash` mutual-presence rule to stay a small, explicit, one-off check, so that the schema vocabulary isn't stretched into a generic relational-constraint mini-language for a single instance.
+6. As a maintainer, I want `Caddyfile.j2`'s address-line and TLS-scheme rendering left untouched, so that this epic doesn't touch the parts of the gateway seam that haven't needed a fix since epic 3.
+7. As a maintainer, I want the render side (`import mfa_auth`, `basic_auth` block) to stay an explicit, readable `{% if %}` chain rather than a generic per-field template-inclusion mechanism, so that two live cases don't buy more Jinja indirection than they're worth.
+8. As a VPS operator, I want this deepening to introduce zero new plugin mechanisms (no custom Python filter plugins), so that the repo's existing pure-Ansible/YAML/Jinja test and lint story keeps covering everything without new gaps.
+9. As a reviewer, I want `roles/gateway/vars/route_schema.yml` placed in the gateway role's `vars/` (not `defaults/`), so that it reads as the role's internal contract rather than an operator-tunable default.
+10. As a maintainer, I want the 5 contributing roles' (`silverbullet`, `authelia`, `hermes`, `conduit`, `owntracks`) `*_gateway_publish` dicts left completely unchanged, so that this epic touches only the validate/schema half of the seam, not the assembly half that already works.
+11. As a test author, I want `tests/test_gateway_render.yml`'s existing byte-exact Caddyfile assertions to keep passing unchanged, so that this epic is verifiably a pure internal refactor of `validate.yml`, not a behavior change to the rendered output.
+12. As a test author, I want the four existing "malformed route fails fast" negative tests (missing upstream, non-boolean `mfa`, invalid `tls_mode`, non-integer `port`) to keep passing via the same `include_tasks` + `rescue` pattern, so that `validate.yml`'s external contract (fail fast, before any deploy-dir/file write) is unchanged even though its internals are rewritten.
+13. As a test author, I want new coverage asserting `route_schema.yml` declares all 7 currently-live fields (`host`, `upstream`, `mfa`, `tls_mode`, `port`, `basic_auth_user`, `basic_auth_hash`), so that a future accidental deletion of a schema entry is caught.
+14. As a test author, I want at least one test asserting a schema-violating route fails with a message naming the specific field, so that the per-field-message improvement (over today's one giant combined `fail_msg`) is verified, not just claimed.
+15. As a VPS operator, I want `roles/gateway/tasks/validate.yml` to still run as an explicit pre-flight step (not folded into template-render-time-only validation), so that a malformed route still fails before the Caddyfile deploy directory or file are touched at all.
+
+## Implementation Decisions
+
+- **New schema module**: `roles/gateway/vars/route_schema.yml` — a declarative YAML list, one entry per field, covering all 7 currently-live fields (`host`, `upstream`, `mfa`, `tls_mode`, `port`, `basic_auth_user`, `basic_auth_hash`). Each entry declares: field name, whether it's required, and a constraint (a type check such as boolean/integer, or an allowed-values enum list where applicable — e.g. `tls_mode` restricted to `internal`/`auto`). Placed in the gateway role's `vars/` (higher precedence than `defaults/`) because this is the role's internal contract, not an operator-tunable default — unlike `group_vars/all/gateway.yml`, whose existing job is route *assembly* (concatenating the 5 contributing roles' `*_gateway_publish` lists), not shape. Don't grow that file into a second concern.
+
+- **`validate.yml` becomes a generic engine**, not a rewrite of behavior: one Jinja loop iterates `route_schema.yml`'s fields against every entry in `gateway_routes`, generically enforcing required/type/allowed-values per field, with a per-field failure message naming the route's host, the field, the constraint, and the offending value. This replaces today's list of independently-authored `assert` clauses. `validate.yml` remains a distinct, explicit pre-flight task — it is not folded into template-render-time validation — preserving the "fail fast before any deploy-dir/file write" property and the isolation the test suite already relies on (`validate.yml`'s tasks are invoked directly via `include_tasks`, independent of the render step).
+
+- **`basic_auth_user`/`basic_auth_hash` mutual presence stays a one-off, explicit check**, appended after the generic per-field loop in `validate.yml` — not generalized into a `requires: <other_field>` constraint type in the schema vocabulary. It is the only *relational* constraint among the 7 fields (everything else is a per-field required/type/allowed-values check); one instance doesn't justify a generic relational-constraint mini-language. Revisit only if a second paired-field case actually appears.
+
+- **No custom Python filter plugin, anywhere.** This repo has zero existing `filter_plugins`/`library`/`module_utils` (verified — this would be the first of its kind), zero Python test tooling (no pytest, no `.py` test files, no `pyproject.toml`/`tox.ini`), and `tests/lint.sh` is entirely Python-blind (`ansible-lint`, `ansible-playbook --syntax-check`, and a battery of bash `check-*.sh` scripts — nothing lints arbitrary filter-plugin Python). A Python plugin was explicitly rejected: it would trade the hand-sync-drift risk this epic exists to close for a new, structurally uncovered risk (a plugin with no lint or test story of its own). Everything stays pure Ansible/YAML/Jinja2.
+
+- **`Caddyfile.j2` render-side scope is deliberately narrow.** The address line (`host.domain[:port] { ... }`), the port suffix, the `tls_mode`-driven https-scheme logic, and the `log` line are unchanged — this part of the template hasn't needed a fix since epic 3, and isn't part of the recurring hand-sync bug this epic addresses. Only the two live optional inner directives — `import mfa_auth` (when `route.mfa`) and the `basic_auth` block (when `route.basic_auth_user` is defined) — are in scope, and they stay an explicit, ordered `{% if %}` chain in `Caddyfile.j2`, not a schema-driven, named-partial-template-inclusion mechanism. Two live cases don't clear the bar for that generality, and it would cost more in Jinja-include indirection than the ~4-line chain it would replace.
+
+- **The 5 contributing roles' `gateway_publish` dicts are unchanged.** `silverbullet`, `authelia`, `hermes`, `conduit`, and `owntracks` each still declare their own `*_gateway_publish` list in their own `defaults/main.yml`, with the same literal field keys as today. This epic only touches the shape-validation half of the seam (`validate.yml` + the new schema), not the assembly half (`group_vars/all/gateway.yml`'s concatenation), which already works and is out of scope.
+
+## Testing Decisions
+
+- **What makes a good test**: test external behavior, not implementation details — a route dict in, a pass/fail (and for the negative cases, a fail-fast rescue) out. Don't test the internals of the Jinja loop; test what `validate.yml` accepts and rejects, and what `Caddyfile.j2` renders.
+
+- **Modules tested**:
+  - `roles/gateway/vars/route_schema.yml` → assert it declares all 7 currently-live fields (`host`, `upstream`, `mfa`, `tls_mode`, `port`, `basic_auth_user`, `basic_auth_hash`) — catches an accidental deletion of a schema entry.
+  - `roles/gateway/tasks/validate.yml` → the existing four negative tests (missing `upstream`, non-boolean `mfa`, invalid `tls_mode`, non-integer `port`) must keep passing unchanged via the same `include_tasks` + `rescue` pattern. Add at least one new assertion that a schema-violating route's failure message names the specific field it violated (spot-check, not all 7 fields exhaustively) — verifies the Q4 per-field-message improvement is real, not just claimed.
+  - `roles/gateway/tasks/validate.yml` → the `basic_auth_user`/`basic_auth_hash` pairing check must keep firing as a one-off (the existing "lone `basic_auth_user` without `basic_auth_hash` fails fast" negative test from the OwnTracks fix already covers this and must keep passing unchanged).
+  - `roles/gateway/templates/Caddyfile.j2` → `tests/test_gateway_render.yml`'s existing byte-exact assertions for every route (wiki, dash, auth, matrix, owntracks) must keep passing unchanged — this epic is a pure internal refactor of validation, not a rendering behavior change.
+
+- **Prior art**: mirror the existing structure of `tests/test_gateway_render.yml` (positive shape-validation pass, template render, byte-exact regex assertions, then four negative `include_tasks` + `rescue` blocks) and `tests/check-gateway-render.sh`. No new test files needed — extend the existing ones.
+
+## Out of Scope
+
+- **Caddyfile.j2's address-line/TLS-scheme rendering** — unchanged; hasn't needed a fix since epic 3, not part of the hand-sync bug this epic addresses.
+- **The 5 contributing roles' `*_gateway_publish` dicts** (`silverbullet`, `authelia`, `hermes`, `conduit`, `owntracks`) — unchanged; the assembly half of the seam already works.
+- **`group_vars/all/gateway.yml`'s route assembly/concatenation** — unchanged; stays a single-concern file (assembly, not shape).
+- **A generic `requires: <other_field>` relational-constraint type** — the `basic_auth_user`/`basic_auth_hash` pairing rule stays a one-off explicit check; generalizing it is deferred until a second paired-field case actually exists.
+- **Schema-driven rendering via named partial templates / `{% include %}`** — the render side stays an explicit `{% if %}` chain; not enough live cases to justify the mechanism.
+- **Any custom Python (filter plugins, modules, module_utils)** — this epic is pure Ansible/YAML/Jinja2, deliberately, given this repo's existing all-Ansible test/lint story.
+
+## Further Notes
+
+- This epic is a direct, immediate follow-up to epic 12: the `matrix.` prefix bug (ticket #00) and the `basic_auth_user`/`basic_auth_hash` fields (the OwnTracks HTTP-auth security fix, now merged to main) are both concrete instances of the hand-sync-drift problem this epic exists to close.
+- This is one of three deepening candidates surfaced by an architecture review of the same hot-spot area (gateway ingress churn + repeated per-role directory-bootstrap churn). The other two — a shared "container-owned directory" module for `wiki_volume`'s dependents, and machine-checked role ordering in `site.yml` — are tracked as separate epics (14 and 15), not part of this one's scope.
+- Open question the grilling session didn't explicitly settle: whether the per-field failure message format should be a single combined string (all violations for a route at once, like today) or fail on the *first* violation per route. Flagging rather than deciding — implementer should pick whichever is simpler to write correctly in Jinja and note the choice in the ticket; existing tests don't distinguish between the two since they only assert pass/fail, not exact message content.
