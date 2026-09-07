@@ -1,0 +1,41 @@
+---
+# Gateway route schema (epic 13, #01): the single source of truth for what a
+# gateway_routes entry may contain. Consumed by roles/gateway/tasks/validate.yml
+# (epic 13, #02) to drive generic per-field validation instead of hand-written
+# assert clauses per field — adding a field here is enough for validate.yml to
+# enforce it; there's no second hand-copied assert list left to drift from this.
+#
+# Each entry: `field` name, `required` (boolean), and exactly one constraint —
+# `type` (string/boolean/integer) or `allowed_values` (an enum list). The
+# `string` constraints on host/basic_auth_user/basic_auth_hash are a deliberate,
+# low-risk narrow addition beyond what validate.yml checked before this epic
+# (which never type-checked those three) — see epic 13 ticket #01's Notes.
+#
+# basic_auth_user/basic_auth_hash mutual presence is NOT expressed here — it's
+# the one relational constraint among these fields (not a per-field check) and
+# stays a small, explicit, one-off assert in validate.yml (epic 13 ticket #02).
+gateway_route_schema:
+  - field: host
+    required: true
+    type: string
+  - field: upstream
+    required: true
+    type: string
+    non_empty: true
+  - field: mfa
+    required: true
+    type: boolean
+  - field: tls_mode
+    required: false
+    allowed_values:
+      - internal
+      - auto
+  - field: port
+    required: false
+    type: integer
+  - field: basic_auth_user
+    required: false
+    type: string
+  - field: basic_auth_hash
+    required: false
+    type: string
