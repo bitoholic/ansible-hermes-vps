@@ -1,67 +1,34 @@
 #!/usr/bin/env bash
-# Live check: every Hermes skill pack entry from group_vars/all/hermes_skills.yml is
-# actually registered in the running hermes-agent. Requires the container on the VPS;
-# skipped in CI where docker/hermes isn't available. (epic 08)
+# Live check: every skill in the ACTIVE hermes_skills set is actually registered in the
+# running hermes-agent. The expected set is resolved through Ansible from
+# group_vars/all/hermes_skills.yml, so swapping packs (hermes_skills pointing at a
+# different pack, or concatenated packs) is picked up without editing this script.
+# Requires the container on the VPS; skipped in CI where docker/hermes isn't available.
+# (epic 08; reworked for the pack-split seam)
 set -uo pipefail
 
 if ! docker ps --format '{{.Names}}' 2>/dev/null | grep -q '^hermes-agent$'; then
   echo "SKIP: hermes-agent container not running (CI)"; exit 0
 fi
 
-EXPECTED=$(cat <<'LIST'
-brainstorming
-dispatching-parallel-agents
-executing-plans
-finishing-a-development-branch
-receiving-code-review
-requesting-code-review
-subagent-driven-development
-systematic-debugging
-test-driven-development
-using-git-worktrees
-using-superpowers
-verification-before-completion
-writing-plans
-writing-skills
-ask-matt
-code-review
-codebase-design
-diagnosing-bugs
-domain-modeling
-grill-with-docs
-implement
-improve-codebase-architecture
-prototype
-research
-resolving-merge-conflicts
-setup-matt-pocock-skills
-tdd
-to-spec
-to-tickets
-triage
-wayfinder
-wizard
-claude-handoff
-implement-spec
-loop-me
-retro
-setup-ts-deep-modules
-writing-beats
-writing-fragments
-writing-shape
-git-guardrails-claude-code
-migrate-to-shoehorn
-scaffold-exercises
-setup-pre-commit
-grill-me
-grilling
-handoff
-teach
-to-questionnaire
-wait-what
-writing-for-agents
-LIST
-)
+export ANSIBLE_BECOME=false
+EXPECTED="$(ansible localhost -c local -m debug -a 'var=hermes_skills' 2>/dev/null | python3 -c '
+import sys, json
+raw = sys.stdin.read()
+try:
+    data = json.loads(raw[raw.index("{"):])
+    skills = data["hermes_skills"]
+    if not isinstance(skills, list):
+        raise ValueError("hermes_skills did not resolve to a list")
+    print("\n".join(entry["name"] for entry in skills))
+except Exception as exc:
+    print(f"resolve error: {exc}", file=sys.stderr)
+    sys.exit(1)
+')" || { echo "FAIL: could not resolve hermes_skills from group_vars/all/hermes_skills.yml"; exit 1; }
+
+if [ -z "$EXPECTED" ]; then
+  echo "hermes skills OK: hermes_skills resolves to no packs (nothing to verify — swap packs in group_vars/all/hermes_skills.yml)"; exit 0
+fi
 
 installed="$(docker exec hermes-agent hermes skills list 2>/dev/null || true)"
 missing=0
