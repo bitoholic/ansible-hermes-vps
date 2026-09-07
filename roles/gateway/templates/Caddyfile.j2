@@ -2,7 +2,7 @@
   # ACME contact (epic 12 #05/#08): Let's Encrypt expiry/abuse notices.
   email {{ secrets.acme_email }}
   servers {
-    trusted_proxies static private_ranges [IP_ADDRESS]/8 [IP_ADDRESS]/12 [IP_ADDRESS]/16 ::1/128 fc00::/7
+    trusted_proxies static private_ranges
   }
 }
 

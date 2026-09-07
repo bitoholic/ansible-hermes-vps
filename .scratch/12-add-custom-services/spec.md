@@ -100,7 +100,7 @@ Conduit becomes a standard route entry with `host: matrix`, `port: 8448`, and th
   - Port: 8080 (container), on `gateway` network only — no host port binding
   - Volume: named `owntracks_data` → `/store` (SQLite storage)
   - Env:
-    - `OTR_HOST=[IP_ADDRESS]` (bind all interfaces)
+    - `OTR_HTTPHOST=0.0.0.0` (bind all interfaces)
     - `OTR_PORT=8080`
     - `OTR_AUTH_FILE=/store/htpasswd` (basic auth)
     - `OTR_STORAGE=/store` (SQLite database path)

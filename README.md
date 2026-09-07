@@ -33,7 +33,7 @@ All Docker services are managed by a **single** `docker-compose.yml` at `/opt/he
 
 - **`caddy`** — Reverse proxy on the `gateway` network; terminates TLS, proxies to backends, and runs Authelia forward-auth for public routes.
 - **`authelia`** — MFA provider on the `gateway` network; challenges non-Tailscale clients.
-- **`silverbullet`** — Markdown wiki on the `gateway` network, bound to `[IP_ADDRESS]`.
+- **`silverbullet`** — Markdown wiki on the `gateway` network, published on port 3000.
 - **`conduit`** — Personal Matrix homeserver on the `internal` network; reachable by Hermes over the shared internal network.
 - **`signal-cli`** — Standalone Signal REST API on the `internal` network (no published port).
 - **`hermes-agent`** — The single agent container on the `internal` network, depends on `signal-cli`.

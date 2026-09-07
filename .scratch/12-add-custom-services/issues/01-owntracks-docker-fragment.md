@@ -14,7 +14,7 @@ Create the OwnTracks recorder Docker service fragment for the consolidated compo
    - Volume: named `owntracks_data` → `/store` (SQLite storage)
    - Bind-mount: htpasswd file from host → `/store/htpasswd:ro`
    - Env:
-     - `OTR_HOST=[IP_ADDRESS]` (bind all interfaces inside container)
+     - `OTR_HTTPHOST=0.0.0.0` (bind all interfaces inside container)
      - `OTR_PORT=8080`
      - `OTR_AUTH_FILE=/store/htpasswd` (basic auth file)
      - `OTR_STORAGE=/store` (SQLite database path)

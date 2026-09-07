@@ -4,6 +4,17 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
+# Placeholder-garbage guard: the literal placeholder string (the all-caps IP word)
+# must never re-enter the repo. It leaked into the deployed Caddyfile (trusted_proxies
+# rendered verbatim into production config); the variable was renamed to
+# docker_bind_address and every mention scrubbed. tests/lint.sh is excluded because
+# this message describes the pattern. This fails the build if the string comes back.
+if git grep -n 'IP_ADDR''ESS' -- . ':(exclude)tests/lint.sh' >/dev/null 2>&1; then
+  echo "FAIL: placeholder IP_ADDR""ESS string found (scrub it; use docker_bind_address):" >&2
+  git grep -n 'IP_ADDR''ESS' -- . ':(exclude)tests/lint.sh' >&2
+  exit 1
+fi
+
 if ! command -v ansible-lint >/dev/null 2>&1; then
   echo "ansible-lint is not installed" >&2
   exit 1

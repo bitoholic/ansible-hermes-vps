@@ -16,7 +16,7 @@ End-to-end behavior delivered:
 - Authelia and SilverBullet run in the consolidated project via the gateway network.
 - Caddy can reach both services on the `gateway` network (previously broken
   due to separate compose networks).
-- Silverbullet's public port `[IP_ADDRESS]:3000` is preserved.
+- Silverbullet's public port 3000 is preserved.
 - The silverbullet role's `tasks/main.yml` no longer renders its own compose file;
   it still provides the config and data volumes.
 

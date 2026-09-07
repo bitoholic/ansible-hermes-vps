@@ -7,7 +7,7 @@ owntracks:
     # this stack. The HTTP server is OTR_HTTPPORT binding OTR_HTTPHOST; it must
     # bind all interfaces so Caddy on the gateway network can reach it.
     - OTR_PORT=0
-    - OTR_HTTPHOST={{ IP_ADDRESS }}
+    - OTR_HTTPHOST={{ docker_bind_address }}
     - OTR_HTTPPORT=8083
     - OTR_AUTH_FILE=/store/htpasswd
     - OTR_STORAGE=/store
