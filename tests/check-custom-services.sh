@@ -59,11 +59,15 @@ fi
 echo "recorder-auth regression guard OK"
 
 # 2c: owntracks role must run before gateway (htpasswd must exist before Caddy's
-# basic_auth block is rendered from it).
-if ! awk '/role: owntracks/{o=NR} /role: gateway/{g=NR} END{exit !(o && g && o < g)}' site.yml; then
-  echo "FAIL: site.yml must run the owntracks role before the gateway role"; exit 1
+# basic_auth block is rendered from it). Epic 15 ticket #01 replaced the original
+# list-position check here with a real roles/gateway/meta/main.yml dependency — see
+# tests/check-role-ordering.sh for the full structural proof (dependency exists,
+# compiled task order, and no duplicate execution). This just pins that the
+# dependency declaration itself hasn't quietly regressed.
+if ! grep -q "role: owntracks" roles/gateway/meta/main.yml 2>/dev/null; then
+  echo "FAIL: roles/gateway/meta/main.yml must declare owntracks as a dependency"; exit 1
 fi
-echo "owntracks-before-gateway ordering OK"
+echo "owntracks-before-gateway ordering OK (via gateway's meta dependency — see check-role-ordering.sh)"
 
 # 3: firewall contract — 8448 in the rate-limit loop.
 if ! grep -A 12 'Rate-limit SSH, HTTP, HTTPS, and OwnTracks HTTPS' roles/tailscale/tasks/main.yml | grep -q '8448'; then
@@ -120,9 +124,12 @@ if ! grep -q '^docker_published_restricted_ports:' group_vars/all/main.yml || \
 fi
 echo "docker-user contract OK"
 
-# 3c: owntracks deployment wiring (epic 12 #08 Part B).
-if ! grep -q 'role: owntracks' site.yml; then
-  echo "FAIL: owntracks role not wired into site.yml"; exit 1
+# 3c: owntracks deployment wiring (epic 12 #08 Part B). Since epic 15 ticket #01,
+# owntracks is wired in via gateway's meta/main.yml dependency rather than its own
+# explicit site.yml entry (keeping both would run it twice — see
+# tests/check-role-ordering.sh) — accept either form.
+if ! grep -q 'role: owntracks' site.yml && ! grep -rq 'role: owntracks' roles/*/meta/main.yml; then
+  echo "FAIL: owntracks role not wired into site.yml (directly, or via another role's meta dependency)"; exit 1
 fi
 if ! grep -q 'owntracks' tests/lint.sh; then
   echo "FAIL: owntracks missing from the skip-tags guard role list"; exit 1

@@ -92,6 +92,11 @@ python3 scripts/generate-env.py --check
 # run of the role is operator-validated on the VPS (guarded/skipped when llm_wiki is absent).
 ./tests/check-wiki-volume.sh
 
+# Machine-checked role ordering (epic 15 ticket #01): gateway depends on owntracks via a
+# real meta/main.yml dependency, not site.yml list position — and site.yml must not list
+# owntracks explicitly too, or it runs twice per playbook execution.
+./tests/check-role-ordering.sh
+
 # Role skip-tags guard (epic 10): every role in site.yml carries a tags entry matching its name,
 # and the protected roles (secrets, users, ssh_hardening, common) are guarded by a pre-flight assert
 # in site.yml so they cannot be skipped via --skip-tags.

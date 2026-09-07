@@ -1,0 +1,10 @@
+---
+# gateway depends on owntracks (epic 15, #01): the Caddyfile render reads htpasswd
+# credentials owntracks's tasks generate as facts (basic_auth_user/basic_auth_hash).
+# Declared as a real Ansible dependency, not just site.yml list position, so a future
+# reorder can't silently reintroduce the broken configuration this once shipped by
+# accident (the OwnTracks HTTP-auth security fix needed a manual site.yml reorder to
+# fix, with nothing structural stopping it from happening again).
+dependencies:
+  - role: owntracks
+    tags: [owntracks]

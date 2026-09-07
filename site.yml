@@ -99,9 +99,15 @@
     - role: tailscale
       tags:
         - tailscale
-    - role: owntracks
-      tags:
-        - owntracks
+    # owntracks is not listed here as its own entry (epic 15, #01): gateway's
+    # meta/main.yml declares it as a real dependency, which Ansible does NOT
+    # deduplicate against an explicit sibling roles: entry for the same role (only
+    # against another role's dependency on it) — listing both here would run
+    # owntracks (and its wiki_volume/users chain) twice per playbook run, verified
+    # empirically via `ansible-playbook site.yml --list-tasks`. The dependency alone
+    # preserves today's effective order (owntracks immediately before gateway,
+    # still before docker) and keeps --skip-tags owntracks working (the dependency
+    # carries its own tags: [owntracks]).
     - role: gateway
       tags:
         - gateway
