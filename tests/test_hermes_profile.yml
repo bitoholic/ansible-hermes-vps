@@ -6,6 +6,7 @@
   # `profiles.*` exercises the per-profile secret scoping asserted below.
   vars:
     secrets:
+      silverbullet_domain: test.example.com
       hermes_default_openrouter_api_key: d-or
       hermes_default_nous_portal_api_key: d-nous
       hermes_default_github_token: d-gh

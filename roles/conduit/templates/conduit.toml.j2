@@ -1,6 +1,7 @@
 [global]
 # Personal homeserver identity. Clients reach it over the internal Docker network as
-# http://conduit:{{ conduit_port }} and over Tailscale via the VPS's Tailscale address.
+# http://conduit:{{ conduit_port }}, and externally at https://{{ conduit_server_name }}:8448
+# where Caddy terminates TLS with a real ACME cert (ADR-0003).
 server_name = "{{ conduit_server_name }}"
 address = "0.0.0.0"
 port = {{ conduit_port }}
@@ -17,5 +18,5 @@ allow_federation = false
 allow_encryption = true
 trusted_servers = []
 
-# No public TLS termination here: Conduit is reached only over the internal Docker network
-# / Tailscale, so it serves plain HTTP on the bridge. Do not expose this port publicly.
+# Plain HTTP on the bridge only: TLS is terminated by Caddy in front (ADR-0003). This
+# container port must stay unpublished — the only ingress is the gateway network.

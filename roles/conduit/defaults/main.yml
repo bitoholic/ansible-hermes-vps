@@ -1,8 +1,12 @@
 ---
 # Conduit's ingress contribution (epic 03, #02): the matrix homeserver.
+# tls_mode "auto" (ADR-0003): Matrix clients refuse Caddy's internal CA, so the
+# client API on 8448 serves a real Let's Encrypt cert. The server is
+# non-federated, so 8448 carries no federation traffic — it is only the
+# historical client port, SNI-shared with owntracks.
 conduit_gateway_publish:
   - host: matrix
     upstream: conduit:{{ conduit_port }}
     mfa: false
-    tls_mode: "internal"
+    tls_mode: "auto"
     port: 8448

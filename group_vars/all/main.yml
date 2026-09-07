@@ -31,7 +31,11 @@ conduit_compose_dir: /opt/conduit
 conduit_data_dir: /opt/conduit/data
 conduit_image: matrixconduit/matrix-conduit:v0.10.13
 conduit_port: 8008
-conduit_server_name: "{{ inventory_hostname }}"
+# Matrix server_name (ADR-0003): user IDs are @user:matrix.<domain>. Set
+# explicitly (was inventory_hostname, i.e. "hermes") BEFORE the first account
+# registration — user IDs are permanent; changing server_name later orphans
+# existing accounts and requires wiping Conduit's data directory.
+conduit_server_name: "matrix.{{ secrets.silverbullet_domain }}"
 # URL Hermes uses to reach the Conduit homeserver from inside the shared Docker
 # network (epic 06 #03: Matrix transport, default profile only).
 conduit_internal_url: "http://conduit:{{ conduit_port }}"

@@ -64,16 +64,19 @@
           - "rendered is search('wiki.test.example.com \\{')"
           - "rendered is search('dash.test.example.com \\{')"
           - "rendered is search('auth.test.example.com \\{')"
-          - "rendered is search('matrix.test.example.com:8448 \\{')"
+          - "rendered is search('https://matrix.test.example.com:8448 \\{')"
           - "rendered is search('https://owntracks.test.example.com:8448 \\{')"
+          # Matrix: tls_mode auto (ADR-0003) — real ACME cert; no tls directive.
+          - "rendered is search('https://matrix\\.test\\.example\\.com:8448 \\{\\n  log\\n  reverse_proxy conduit:8008\\n\\}')"
           # OwnTracks: tls_mode auto renders the https:// scheme (automatic HTTPS →
           # real ACME cert) and NO tls directive — a bare `tls` line is a Caddyfile
           # parse error that prevents Caddy from starting. mfa false omits import mfa_auth.
           - "rendered is search('https://owntracks\\.test\\.example\\.com:8448 \\{\\n  log\\n  reverse_proxy owntracks:8083\\n\\}')"
           - "(rendered | regex_findall('import mfa_auth')) | length == (gateway_routes | selectattr('mfa') | list | length)"
           # Regression guard (epic 12): routes without tls_mode render `tls internal`
-          # (pre-epic-12 behavior) — wiki, dash, auth, matrix.
-          - "(rendered | regex_findall('tls internal')) | length == 4"
+          # (pre-epic-12 behavior) — wiki, dash, auth. Matrix and owntracks use
+          # tls_mode auto (real ACME certs, ADR-0003).
+          - "(rendered | regex_findall('tls internal')) | length == 3"
           - "rendered is search('auth\\.test\\.example\\.com \\{\\n  log\\n  tls internal\\n  reverse_proxy authelia:9091\\n\\}')"
           - "'forward_auth @not_tailscale authelia:9091' in rendered"
           - "rendered is search('not remote_ip')"

@@ -47,7 +47,7 @@ echo "hermes Matrix env OK"
 
 # 4: gateway surface (epic 12 #00): Matrix is published through the gateway loop via
 # conduit_gateway_publish — not hardcoded in the Caddyfile. The rendered block itself
-# (matrix.<domain>:8448, tls internal, port SNI-shared with owntracks) is asserted by
+# (https://matrix.<domain>:8448, ACME cert per ADR-0003, SNI-shared with owntracks) is asserted by
 # tests/test_gateway_render.yml; here we pin the seam wiring.
 if ! grep -q 'conduit_gateway_publish' roles/conduit/defaults/main.yml; then
   echo "FAIL: conduit role does not contribute conduit_gateway_publish"; exit 1
