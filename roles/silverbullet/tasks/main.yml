@@ -1,12 +1,12 @@
 ---
 - name: Create SilverBullet deployment directory
   tags: [silverbullet]
-  ansible.builtin.file:
-    path: "{{ silverbullet_compose_dir }}"
-    state: directory
-    owner: llm_wiki
-    group: llm_wiki
-    mode: '0775'
+  ansible.builtin.include_role:
+    name: wiki_volume
+    tasks_from: ensure_directory
+  vars:
+    wiki_volume_directory_path: "{{ silverbullet_compose_dir }}"
+    wiki_volume_directory_mode: '0775'
 
 - name: Start consolidated docker compose
   tags: [silverbullet]

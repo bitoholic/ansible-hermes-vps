@@ -19,22 +19,22 @@
 
 - name: Ensure persistent Hermes data root exists for admin user
   tags: [hermes]
-  ansible.builtin.file:
-    path: "{{ hermes_home }}"
-    state: directory
-    owner: llm_wiki
-    group: llm_wiki
-    mode: '0700'
-    recurse: true
+  ansible.builtin.include_role:
+    name: wiki_volume
+    tasks_from: ensure_directory
+  vars:
+    wiki_volume_directory_path: "{{ hermes_home }}"
+    wiki_volume_directory_mode: '0700'
+    wiki_volume_directory_recurse: true
 
 - name: Ensure Hermes Signal data directory exists
   tags: [hermes]
-  ansible.builtin.file:
-    path: "{{ hermes_home }}/signal-data"
-    state: directory
-    owner: llm_wiki
-    group: llm_wiki
-    mode: '0775'
+  ansible.builtin.include_role:
+    name: wiki_volume
+    tasks_from: ensure_directory
+  vars:
+    wiki_volume_directory_path: "{{ hermes_home }}/signal-data"
+    wiki_volume_directory_mode: '0775'
 
 # Single profile-driven render loop. Every entry in `hermes_profiles` (including the
 # `default` Robot profile) is deployed the same way; `target_dir` selects where
@@ -42,12 +42,12 @@
 # paths default to per-profile files under roles/hermes/{templates,files}/profiles/<name>/.
 - name: Ensure Hermes subagent profile directories exist
   tags: [hermes]
-  ansible.builtin.file:
-    path: "{{ hermes_home }}/profiles/{{ item.name }}"
-    state: directory
-    owner: llm_wiki
-    group: llm_wiki
-    mode: '0700'
+  ansible.builtin.include_role:
+    name: wiki_volume
+    tasks_from: ensure_directory
+  vars:
+    wiki_volume_directory_path: "{{ hermes_home }}/profiles/{{ item.name }}"
+    wiki_volume_directory_mode: '0700'
   loop: "{{ hermes_profiles }}"
   when: item.target_dir is not defined
 

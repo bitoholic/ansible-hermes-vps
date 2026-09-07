@@ -57,6 +57,33 @@ if grep -rn "key: llm_wiki" "$ROLES" | grep -v "roles/wiki_volume/"; then
   echo "FAIL: 'key: llm_wiki' found outside the wiki_volume role"; exit 1
 fi
 
+# 4. Epic 14, #02: no role outside wiki_volume may hand-roll its own llm_wiki-owned
+#    directory task — every such task must go through the ensure_directory.yml
+#    entrypoint instead (called by reference), so an ownership/mode bug fix lands
+#    once. Scans every task file in every role except wiki_volume itself for a
+#    `file`+`state: directory` block whose owner/group references llm_wiki, either
+#    the literal username or the resolved wiki_volume_uid/wiki_volume_gid facts.
+offenders=()
+while IFS= read -r f; do
+  if awk '
+    /^[[:space:]]*- name:/ { if (mod=="file" && st && (own || grp)) found=1; mod=""; st=0; own=0; grp=0; next }
+    /^[[:space:]]*(ansible\.builtin\.)?file:/ { mod="file"; next }
+    /^[[:space:]]*state:[[:space:]]*directory/ { if (mod=="file") st=1; next }
+    /^[[:space:]]*owner:.*llm_wiki/ { if (mod=="file") own=1; next }
+    /^[[:space:]]*owner:.*wiki_volume_uid/ { if (mod=="file") own=1; next }
+    /^[[:space:]]*group:.*llm_wiki/ { if (mod=="file") grp=1; next }
+    /^[[:space:]]*group:.*wiki_volume_gid/ { if (mod=="file") grp=1; next }
+    END { if (mod=="file" && st && (own || grp)) found=1; if (found) print "X" }
+  ' "$f" | grep -q X; then
+    offenders+=("$f")
+  fi
+done < <(find "$ROLES" -path '*/tasks/*.yml' | grep -v '^'"$ROLES"'/wiki_volume/')
+if [[ -n "${offenders[*]:-}" ]]; then
+  echo "FAIL: hand-rolled llm_wiki-owned directory task(s) found outside wiki_volume: ${offenders[*]}"
+  echo "      route these through wiki_volume's ensure_directory.yml entrypoint instead"
+  exit 1
+fi
+
 echo "wiki_volume consumer-contract OK"
 
 # 4. Best-effort live run: only when the llm_wiki user exists AND an operator opts in

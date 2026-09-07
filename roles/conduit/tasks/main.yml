@@ -14,23 +14,23 @@
 
 - name: Ensure Conduit deployment directory exists
   tags: [conduit]
-  ansible.builtin.file:
-    path: "{{ conduit_compose_dir }}"
-    state: directory
-    owner: llm_wiki
-    group: llm_wiki
-    mode: '0755'
+  ansible.builtin.include_role:
+    name: wiki_volume
+    tasks_from: ensure_directory
+  vars:
+    wiki_volume_directory_path: "{{ conduit_compose_dir }}"
+    wiki_volume_directory_mode: '0755'
 
 # The matrixconduit/matrix-conduit runner executes as the `llm_wiki` user (UID/GID 10000),
 # so the bind-mounted data dir must be owned by that UID or the container can't write its DB.
 - name: Ensure Conduit data directory exists
   tags: [conduit]
-  ansible.builtin.file:
-    path: "{{ conduit_data_dir }}"
-    state: directory
-    owner: llm_wiki
-    group: llm_wiki
-    mode: '0700'
+  ansible.builtin.include_role:
+    name: wiki_volume
+    tasks_from: ensure_directory
+  vars:
+    wiki_volume_directory_path: "{{ conduit_data_dir }}"
+    wiki_volume_directory_mode: '0700'
 
 - name: Deploy Conduit configuration
   tags: [conduit]

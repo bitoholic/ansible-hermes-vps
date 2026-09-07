@@ -129,33 +129,38 @@
     msg: "Consolidated docker-compose.yml failed validation: {{ docker_compose_config.stderr }}"
   when: docker_compose_config is failed
 
+# Epic 14, #02: docker keeps its own call site (needs these directories before its
+# own compose-stack build/start), duplicated with the hermes role's — that role-
+# ordering constraint is epic 15's to resolve, not this ticket's. What changes here
+# is that both roles now call the same shared implementation instead of each
+# hand-writing its own file task.
 - name: Ensure Hermes home directory exists for image build context
   tags: [docker]
-  ansible.builtin.file:
-    path: "{{ hermes_home }}"
-    state: directory
-    owner: llm_wiki
-    group: llm_wiki
-    mode: '0700'
-    recurse: true
+  ansible.builtin.include_role:
+    name: wiki_volume
+    tasks_from: ensure_directory
+  vars:
+    wiki_volume_directory_path: "{{ hermes_home }}"
+    wiki_volume_directory_mode: '0700'
+    wiki_volume_directory_recurse: true
 
 - name: Ensure Hermes Signal data directory exists
   tags: [docker]
-  ansible.builtin.file:
-    path: "{{ hermes_home }}/signal-data"
-    state: directory
-    owner: llm_wiki
-    group: llm_wiki
-    mode: '0775'
+  ansible.builtin.include_role:
+    name: wiki_volume
+    tasks_from: ensure_directory
+  vars:
+    wiki_volume_directory_path: "{{ hermes_home }}/signal-data"
+    wiki_volume_directory_mode: '0775'
 
 - name: Ensure Hermes profile directories exist
   tags: [docker]
-  ansible.builtin.file:
-    path: "{{ hermes_home }}/profiles/{{ item.name }}"
-    state: directory
-    owner: llm_wiki
-    group: llm_wiki
-    mode: '0700'
+  ansible.builtin.include_role:
+    name: wiki_volume
+    tasks_from: ensure_directory
+  vars:
+    wiki_volume_directory_path: "{{ hermes_home }}/profiles/{{ item.name }}"
+    wiki_volume_directory_mode: '0700'
   loop: "{{ hermes_profiles }}"
   when: item.target_dir is not defined
 

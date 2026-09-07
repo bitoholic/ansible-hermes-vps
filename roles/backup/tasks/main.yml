@@ -7,12 +7,12 @@
 
 - name: Ensure SilverBullet bin directory exists
   tags: [backup]
-  ansible.builtin.file:
-    path: "{{ silverbullet_compose_dir }}/bin"
-    state: directory
-    owner: llm_wiki
-    group: llm_wiki
-    mode: '0755'
+  ansible.builtin.include_role:
+    name: wiki_volume
+    tasks_from: ensure_directory
+  vars:
+    wiki_volume_directory_path: "{{ silverbullet_compose_dir }}/bin"
+    wiki_volume_directory_mode: '0755'
 
 - name: Deploy git credential helper (reads GITHUB_TOKEN from env, no token stored)
   tags: [backup]

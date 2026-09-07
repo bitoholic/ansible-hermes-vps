@@ -10,12 +10,12 @@
 
 - name: Ensure Authelia configuration and data directories exist
   tags: [authelia]
-  ansible.builtin.file:
-    path: "{{ item }}"
-    state: directory
-    owner: llm_wiki
-    group: llm_wiki
-    mode: '0750'
+  ansible.builtin.include_role:
+    name: wiki_volume
+    tasks_from: ensure_directory
+  vars:
+    wiki_volume_directory_path: "{{ item }}"
+    wiki_volume_directory_mode: '0750'
   loop:
     - "{{ authelia_config_dir }}"
     - "{{ authelia_data_dir }}"
