@@ -9,6 +9,19 @@
     group: "{{ wiki_volume_gid }}"
     mode: '0755'
 
+# Recorder storage bind-mounted at /store by the compose fragment. Must exist
+# with the container uid's ownership BEFORE first run: the named volume it
+# replaces was initialized root-owned and the recorder failed with
+# "Cannot mkdir /store/ghash: Permission denied".
+- name: Ensure owntracks recorder storage directory exists
+  tags: [owntracks]
+  ansible.builtin.file:
+    path: "{{ owntracks_data_dir }}"
+    state: directory
+    owner: "{{ wiki_volume_uid }}"
+    group: "{{ wiki_volume_gid }}"
+    mode: '0755'
+
 - name: Install passlib (required by the htpasswd module on the target host)
   tags: [owntracks]
   ansible.builtin.apt:

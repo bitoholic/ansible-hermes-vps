@@ -18,7 +18,6 @@ docker_networks:
 docker_volumes:
   - caddy_data
   - caddy_config
-  - owntracks_data
   - syncplay_data
 
 # Services to enable. Each service must have a corresponding fragment in

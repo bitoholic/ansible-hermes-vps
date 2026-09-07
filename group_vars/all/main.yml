@@ -39,6 +39,12 @@ conduit_internal_url: "http://conduit:{{ conduit_port }}"
 # are missing; switch to "optional" if the agent image lacks mautrix[encryption].
 conduit_e2ee_mode: "required"
 
+# OwnTracks recorder storage (epic 12): host bind-mount directory, owned by
+# wiki_volume_uid/gid (the uid the container runs as). A named volume would be
+# initialized root-owned by Docker, and the non-root recorder could not mkdir
+# /store/ghash. Lives under the owntracks tree the role already manages.
+owntracks_data_dir: "{{ docker_compose_dir }}/owntracks/store"
+
 # Tailscale private-access overlay (epic 07). The host firewall (tailscale role) and the
 # gateway Caddy MFA bypass (epic 07 #02) both reference these, so a subnet/interface change
 # is a single edit (user story #12).

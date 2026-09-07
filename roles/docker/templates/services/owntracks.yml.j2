@@ -12,7 +12,10 @@ owntracks:
     - OTR_AUTH_FILE=/store/htpasswd
     - OTR_STORAGE=/store
   volumes:
-    - owntracks_data:/store
+    # Host bind-mount (owned by the container uid, see owntracks_data_dir) — a
+    # named volume initializes root-owned and the non-root recorder cannot
+    # create its storage subdirectories.
+    - "{{ owntracks_data_dir }}:/store"
     - "{{ docker_compose_dir }}/owntracks/htpasswd:/store/htpasswd:ro"
   networks:
     - gateway

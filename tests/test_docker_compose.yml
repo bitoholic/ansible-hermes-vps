@@ -26,8 +26,8 @@
     docker_volumes:
       - caddy_data
       - caddy_config
-      - owntracks_data
       - syncplay_data
+    owntracks_data_dir: "{{ docker_compose_dir }}/owntracks/store"
     silverbullet_compose_dir: /opt/silverbullet
     silverbullet_data_dir: /opt/hermes/wiki
     silverbullet_image: ghcr.io/silverbulletmd/silverbullet:latest
@@ -107,6 +107,11 @@
           # Syncplay publishes exactly its 1:1 host port for DOCKER-USER IP filtering.
           - compose.services.syncplay.ports == ['8999:8999']
           - compose.services.owntracks.networks == ['gateway']
+          # Recorder storage is a host bind-mount owned by the container uid, not a
+          # named volume (a named volume initializes root-owned → mkdir /store/ghash
+          # fails for the non-root recorder).
+          - compose.services.owntracks.volumes ==
+            [owntracks_data_dir ~ ':/store', docker_compose_dir ~ '/owntracks/htpasswd:/store/htpasswd:ro']
           - compose.services.syncplay.volumes == ['syncplay_data:/data']
         fail_msg: >-
           owntracks must not publish a host port (Caddy proxies it) and syncplay must
@@ -129,6 +134,6 @@
           - "'internal:' in (rendered_compose.content | b64decode)"
           - "'caddy_data:' in (rendered_compose.content | b64decode)"
           - "'caddy_config:' in (rendered_compose.content | b64decode)"
-          - "'owntracks_data:' in (rendered_compose.content | b64decode)"
+          - "'owntracks_data:' not in (rendered_compose.content | b64decode)"
           - "'syncplay_data:' in (rendered_compose.content | b64decode)"
         fail_msg: "Rendered docker-compose.yml is missing expected services or configuration."
