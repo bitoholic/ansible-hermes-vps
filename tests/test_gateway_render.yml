@@ -14,6 +14,11 @@
     secrets:
       silverbullet_domain: test.example.com
       acme_email: admin@test.example.com
+    # Stand in for the facts the owntracks role's htpasswd-parsing tasks set in a real
+    # run (roles/owntracks/tasks/main.yml) — this playbook only include_vars the role's
+    # defaults, it doesn't execute its tasks.
+    owntracks_basic_auth_user: owntracks_admin
+    owntracks_basic_auth_hash: stubbcrypthashvalue
   pre_tasks:
     # Assemble the real gateway_routes the way the gateway role does (per-role contributions).
     - ansible.builtin.include_vars:
@@ -70,9 +75,12 @@
           - "rendered is search('https://matrix\\.test\\.example\\.com:8448 \\{\\n  log\\n  reverse_proxy conduit:8008\\n\\}')"
           # OwnTracks: tls_mode auto renders the https:// scheme (automatic HTTPS →
           # real ACME cert) and NO tls directive — a bare `tls` line is a Caddyfile
-          # parse error that prevents Caddy from starting. mfa false omits import mfa_auth.
-          - "rendered is search('https://owntracks\\.test\\.example\\.com:8448 \\{\\n  log\\n  reverse_proxy owntracks:8083\\n\\}')"
+          # parse error that prevents Caddy from starting. mfa false omits import
+          # mfa_auth; basic_auth is the actual enforcement (the recorder has none
+          # of its own — see roles/owntracks/tasks/main.yml).
+          - "rendered is search('https://owntracks\\.test\\.example\\.com:8448 \\{\\n  log\\n  basic_auth \\{\\n    owntracks_admin stubbcrypthashvalue\\n  \\}\\n  reverse_proxy owntracks:8083\\n\\}')"
           - "(rendered | regex_findall('import mfa_auth')) | length == (gateway_routes | selectattr('mfa') | list | length)"
+          - "(rendered | regex_findall('basic_auth \\{')) | length == (gateway_routes | selectattr('basic_auth_user', 'defined') | list | length)"
           # Regression guard (epic 12): routes without tls_mode render `tls internal`
           # (pre-epic-12 behavior) — wiki, dash, auth. Matrix and owntracks use
           # tls_mode auto (real ACME certs, ADR-0003).
@@ -157,3 +165,22 @@
             that:
               - noninteger_port_failed_fast | default(false)
             fail_msg: "gateway did NOT fail fast on a non-integer port"
+
+    - name: Malformed route (basic_auth_user without basic_auth_hash) must fail fast
+      block:
+        - ansible.builtin.include_tasks:
+            file: "{{ playbook_dir }}/../roles/gateway/tasks/validate.yml"
+          vars:
+            gateway_routes:
+              - host: wiki
+                upstream: silverbullet:3000
+                mfa: true
+                basic_auth_user: someone
+      rescue:
+        - ansible.builtin.set_fact:
+            lone_basic_auth_user_failed_fast: true
+      always:
+        - ansible.builtin.assert:
+            that:
+              - lone_basic_auth_user_failed_fast | default(false)
+            fail_msg: "gateway did NOT fail fast on basic_auth_user without a matching hash"

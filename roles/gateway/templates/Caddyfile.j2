@@ -30,6 +30,9 @@
 {% if not auto_tls %}  tls internal
 {% endif %}
 {% if route.mfa %}  import mfa_auth
+{% endif %}{% if route.basic_auth_user is defined %}  basic_auth {
+    {{ route.basic_auth_user }} {{ route.basic_auth_hash }}
+  }
 {% endif %}  reverse_proxy {{ route.upstream }}
 }
 {% endfor %}

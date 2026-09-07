@@ -41,3 +41,21 @@
     hash_scheme: bcrypt
     mode: '0644'
   register: owntracks_htpasswd_result
+
+# The recorder itself has NO HTTP authentication of any kind — OTR_AUTH_FILE is
+# not a real config key (verified against upstream misc.c / doc/SECURITY.md,
+# which says a reverse proxy must supply auth). Caddy's basic_auth directive is
+# the actual enforcement point, so it needs this file's contents, not the
+# recorder. Parse the just-generated line rather than re-hash the password so
+# there is exactly one source of truth for the credential.
+- name: Read generated htpasswd for Caddy's basic_auth directive
+  tags: [owntracks]
+  ansible.builtin.slurp:
+    src: "{{ owntracks_htpasswd_path }}"
+  register: owntracks_htpasswd_slurp
+
+- name: Expose parsed htpasswd credentials for the gateway_publish contribution
+  tags: [owntracks]
+  ansible.builtin.set_fact:
+    owntracks_basic_auth_user: "{{ (owntracks_htpasswd_slurp.content | b64decode | trim).split(':')[0] }}"
+    owntracks_basic_auth_hash: "{{ (owntracks_htpasswd_slurp.content | b64decode | trim).split(':')[1] }}"

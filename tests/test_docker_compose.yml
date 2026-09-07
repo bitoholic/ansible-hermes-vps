@@ -109,9 +109,10 @@
           - compose.services.owntracks.networks == ['gateway']
           # Recorder storage is a host bind-mount owned by the container uid, not a
           # named volume (a named volume initializes root-owned → mkdir /store/ghash
-          # fails for the non-root recorder).
-          - compose.services.owntracks.volumes ==
-            [owntracks_data_dir ~ ':/store', docker_compose_dir ~ '/owntracks/htpasswd:/store/htpasswd:ro']
+          # fails for the non-root recorder). No htpasswd bind-mount: the recorder
+          # has no HTTP auth of its own (OTR_AUTH_FILE isn't a real config key) —
+          # Caddy's basic_auth reads the host-side file directly, not the container.
+          - compose.services.owntracks.volumes == [owntracks_data_dir ~ ':/store']
           - compose.services.syncplay.volumes == ['syncplay_data:/data']
         fail_msg: >-
           owntracks must not publish a host port (Caddy proxies it) and syncplay must

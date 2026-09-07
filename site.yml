@@ -99,12 +99,12 @@
     - role: tailscale
       tags:
         - tailscale
-    - role: gateway
-      tags:
-        - gateway
     - role: owntracks
       tags:
         - owntracks
+    - role: gateway
+      tags:
+        - gateway
     - role: docker
       tags:
         - docker

@@ -17,8 +17,14 @@
       - (gateway_routes | selectattr('tls_mode', 'defined') | rejectattr('tls_mode', 'in', ['internal', 'auto']) | list | length == 0)
       # port: if defined, must be an integer
       - (gateway_routes | selectattr('port', 'defined') | rejectattr('port', 'integer') | list | length == 0)
+      # basic_auth_user/basic_auth_hash: must be defined together or not at all — a lone
+      # one renders either a broken `basic_auth {  }` block (no creds, Caddy refuses to
+      # start) or silently skips auth entirely.
+      - (gateway_routes | selectattr('basic_auth_user', 'defined') | rejectattr('basic_auth_hash', 'defined') | list | length == 0)
+      - (gateway_routes | selectattr('basic_auth_hash', 'defined') | rejectattr('basic_auth_user', 'defined') | list | length == 0)
     fail_msg: >-
       Each entry in gateway_routes must declare `host`, a non-empty `upstream`, and a
-      boolean `mfa`. Optional `tls_mode` must be "internal" or "auto", and optional
-      `port` must be an integer. A malformed entry means a broken Caddyfile (silent 502).
+      boolean `mfa`. Optional `tls_mode` must be "internal" or "auto", optional `port`
+      must be an integer, and optional `basic_auth_user`/`basic_auth_hash` must both be
+      present or both absent. A malformed entry means a broken Caddyfile (silent 502).
       Fix the offending role's `gateway_publish` contribution.

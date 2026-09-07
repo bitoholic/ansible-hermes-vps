@@ -5,10 +5,14 @@ owntracks_htpasswd_path: "{{ docker_compose_dir }}/owntracks/htpasswd"
 # Owntracks' ingress contribution (epic 12, #03): public HTTPS with basic auth.
 # Port 8448 is shared with matrix.* via Caddy SNI-based routing. tls_mode: auto
 # issues a real ACME cert (mobile apps can't trust the internal CA); mfa: false
-# because mobile apps can't handle forward-auth — auth is the htpasswd file.
+# because mobile apps can't handle forward-auth. Auth is basic_auth_user/hash
+# (below), enforced by Caddy — the recorder has no HTTP auth of its own, so the
+# gateway is the only thing standing between this route and the open internet.
 owntracks_gateway_publish:
   - host: owntracks
     upstream: owntracks:8083
     mfa: false
     tls_mode: "auto"
     port: 8448
+    basic_auth_user: "{{ owntracks_basic_auth_user }}"
+    basic_auth_hash: "{{ owntracks_basic_auth_hash }}"

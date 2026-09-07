@@ -9,14 +9,15 @@ owntracks:
     - OTR_PORT=0
     - OTR_HTTPHOST={{ docker_bind_address }}
     - OTR_HTTPPORT=8083
-    - OTR_AUTH_FILE=/store/htpasswd
-    - OTR_STORAGE=/store
+    - OTR_STORAGEDIR=/store
+    # No auth env var here on purpose: the recorder has no built-in HTTP auth
+    # (see doc/SECURITY.md upstream). Caddy's basic_auth directive is the real
+    # enforcement point (roles/gateway/templates/Caddyfile.j2).
   volumes:
     # Host bind-mount (owned by the container uid, see owntracks_data_dir) — a
     # named volume initializes root-owned and the non-root recorder cannot
     # create its storage subdirectories.
     - "{{ owntracks_data_dir }}:/store"
-    - "{{ docker_compose_dir }}/owntracks/htpasswd:/store/htpasswd:ro"
   networks:
     - gateway
   restart: unless-stopped

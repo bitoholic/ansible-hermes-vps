@@ -5,8 +5,9 @@
 #      `docker compose config` when docker is available).
 #   2. Caddyfile renders the owntracks HTTPS block (SNI-shared 8448,
 #      https:// scheme = ACME automatic HTTPS, no tls directive, no import
-#      mfa_auth) and the matrix prefix regression guard (matrix.<domain>:8448,
-#      not bare domain).
+#      mfa_auth, basic_auth present — the recorder has no HTTP auth of its own)
+#      and the matrix prefix regression guard (matrix.<domain>:8448, not bare
+#      domain).
 #   3. Firewall contract: 8448 in the rate-limit loop; syncplay 8999 granted
 #      per-IP via limit-from rules (allow + flood guard) driven by
 #      syncplay_allowed_ips. NOTE: published ports bypass UFW INPUT — the
@@ -39,6 +40,30 @@ fi
 # 2: Caddyfile external-behavior assertions (owntracks/matrix blocks).
 ansible-playbook tests/test_gateway_render.yml
 echo "gateway render (custom services) OK"
+
+# 2b: recorder-auth regression guard — OTR_AUTH_FILE/OTR_AUTH/OTR_STORAGE are not
+# real recorder config keys (verified against upstream misc.c / doc/SECURITY.md);
+# their presence means someone re-introduced the "auth is on" illusion this
+# fixed. The htpasswd bind-mount into the container is dead weight for the same
+# reason — Caddy reads the host-side file directly.
+OWNTRACKS_FRAGMENT=roles/docker/templates/services/owntracks.yml.j2
+if grep -qE 'OTR_AUTH_FILE|OTR_AUTH=|OTR_STORAGE=' "$OWNTRACKS_FRAGMENT"; then
+  echo "FAIL: $OWNTRACKS_FRAGMENT references a non-existent recorder env var (OTR_AUTH_FILE/OTR_AUTH/OTR_STORAGE) — the recorder has no built-in HTTP auth, see doc/SECURITY.md upstream"; exit 1
+fi
+if grep -q 'htpasswd:/store/htpasswd' "$OWNTRACKS_FRAGMENT"; then
+  echo "FAIL: $OWNTRACKS_FRAGMENT still bind-mounts htpasswd into the container — the recorder never reads it"; exit 1
+fi
+if ! grep -q 'OTR_STORAGEDIR=/store' "$OWNTRACKS_FRAGMENT"; then
+  echo "FAIL: $OWNTRACKS_FRAGMENT missing OTR_STORAGEDIR (the real recorder storage-path var)"; exit 1
+fi
+echo "recorder-auth regression guard OK"
+
+# 2c: owntracks role must run before gateway (htpasswd must exist before Caddy's
+# basic_auth block is rendered from it).
+if ! awk '/role: owntracks/{o=NR} /role: gateway/{g=NR} END{exit !(o && g && o < g)}' site.yml; then
+  echo "FAIL: site.yml must run the owntracks role before the gateway role"; exit 1
+fi
+echo "owntracks-before-gateway ordering OK"
 
 # 3: firewall contract — 8448 in the rate-limit loop.
 if ! grep -A 12 'Rate-limit SSH, HTTP, HTTPS, and OwnTracks HTTPS' roles/tailscale/tasks/main.yml | grep -q '8448'; then
