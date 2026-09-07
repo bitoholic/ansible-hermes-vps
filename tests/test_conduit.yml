@@ -9,7 +9,7 @@
       matrix_bot_password: "test-bot-pass"
     conduit_compose_dir: /tmp/conduit_test
     conduit_data_dir: /tmp/conduit_test/data
-    conduit_image: matrixconduit/matrix-conduit:v0.10.13
+    conduit_image: matrixconduit/matrix-conduit:latest
     conduit_port: 8008
     conduit_server_name: test-server
   pre_tasks:

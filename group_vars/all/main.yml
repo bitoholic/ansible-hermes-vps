@@ -29,7 +29,7 @@ hermes_signal_http_url: "http://signal-cli:8080"
 # over the internal Docker network / Tailscale. No public Matrix port is published.
 conduit_compose_dir: /opt/conduit
 conduit_data_dir: /opt/conduit/data
-conduit_image: matrixconduit/matrix-conduit:v0.10.13
+conduit_image: matrixconduit/matrix-conduit:latest
 conduit_port: 8008
 # Matrix server_name (ADR-0003): user IDs are @user:matrix.<domain>. Set
 # explicitly (was inventory_hostname, i.e. "hermes") BEFORE the first account
