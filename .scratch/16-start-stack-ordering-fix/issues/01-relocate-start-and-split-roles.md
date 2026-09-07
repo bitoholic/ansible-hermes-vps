@@ -13,7 +13,7 @@ This is deliberately one ticket, not several: relocating `docker`'s start step, 
 
 3. **Split `hermes`'s tasks the same way**: directory/profile-file/Dockerfile-copy tasks stay in the default sequence at the current position; the skill-install and gateway-restart tasks move into their own task file.
 
-4. **Add an explicit step sequence to the end of the relevant play in `site.yml`**, after the existing role list completes: the relocated `docker` start step, then `conduit`'s provisioning phase, then `hermes`'s provisioning phase — invoked directly (not through the `roles:` shorthand) so their position isn't tied to where their owning role sits in the list.
+4. **Add an explicit step sequence to the end of the relevant play in `site.yml`**, after the existing role list completes: the relocated `docker` start step, then `conduit`'s provisioning phase, then `hermes`'s provisioning phase — each invoked via `ansible.builtin.import_role` (or `include_role`) with `tasks_from:` pointing at the extracted file, **not** a bare `ansible.builtin.include_tasks`. This matters specifically for the `docker` start step: if epic 15 has landed, `roles/docker/meta/main.yml` declares a dependency on `gateway` *for this exact task* — `meta/main.yml` dependencies only fire when a role is invoked as a role, not via a bare `include_tasks` pointing at a file inside the role directory. Get this wrong and epic 15's `docker`→`gateway` protection silently stops covering the one task it exists to protect.
 
 5. **Delete `silverbullet`'s redundant second `docker compose up` call** entirely — fully subsumed by the single, correctly-positioned start step.
 
@@ -22,6 +22,7 @@ This is deliberately one ticket, not several: relocating `docker`'s start step, 
 ## Acceptance criteria
 
 - `docker`'s compose-stack start happens after every role that renders a bind-mounted config file (`conduit`, `hermes`, `authelia`) has done so — verified by task-order assertion, not just code inspection
+- `docker`'s compose-stack start also runs after `gateway`'s Caddyfile render, and is invoked via `import_role`/`include_role` (not a bare `include_tasks`) so that `roles/docker/meta/main.yml`'s dependency on `gateway` (epic 15) still fires for the relocated task — regression test asserts both the order and the invocation mechanism
 - `conduit`'s bot-registration and wait-for-connection tasks run only after the relocated start step, not at `conduit`'s normal `site.yml` position
 - `hermes`'s skill-install and gateway-restart tasks run only after the relocated start step, not at `hermes`'s normal `site.yml` position
 - `silverbullet`'s task file contains no `docker_compose_v2`/`docker compose up` invocation
@@ -32,6 +33,7 @@ This is deliberately one ticket, not several: relocating `docker`'s start step, 
 
 ## Notes
 
+- **If epic 15 hasn't landed yet when this ticket is picked up**, implement the `import_role`/`include_role` invocation for the `docker` start step anyway (not a bare `include_tasks`) — it costs nothing extra now and avoids a footgun for whoever lands epic 15 afterward. If epic 15 *has* landed, this is not optional: get the mechanism wrong and its `docker`→`gateway` dependency silently stops protecting this task (see spec.md's Further Notes for the full interaction).
 - The relocated start step now runs after `backup` (the last role in today's list) rather than interleaved mid-list, since it's appended after the whole role list runs rather than threaded in at a specific point. `backup`'s tasks have no docker/container interaction (verified — no `docker`/`container` references anywhere in that role), so this is inert. Documented here as a deliberate, understood side effect, not something to "fix" further.
 - Empirically confirming the exact pre-fix Docker Compose failure mode (hard failure vs. phantom-directory creation vs. silent no-op) is not required — the fix closes the gap regardless of which one it was.
 - Open question, left to the implementer: whether the new end-of-play sequence lives inline in `site.yml` as a `tasks:` block or gets extracted to its own small include file. Either is fine; pick whichever keeps `site.yml` most readable top-to-bottom.

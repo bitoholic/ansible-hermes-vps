@@ -9,7 +9,7 @@ Migrate every role currently hand-rolling an `llm_wiki`-owned directory task to 
 
 1. **Migrate seven roles** — `backup`, `conduit`, `authelia`, `hermes`, `docker`, `owntracks`, `silverbullet` — each replacing its hand-written directory `file` task(s) with a call to the entrypoint from #01. Same resulting paths, owners, and modes as today; only the mechanism changes. `hermes` and `docker` both keep their own call sites (each still creates the Hermes home/signal-data/per-profile directories) — that duplication is a role-ordering constraint, not this ticket's to resolve (see epic 15) — but both now call the same shared implementation instead of two independently hand-written tasks.
 
-2. **No new `meta/main.yml` dependencies needed**: all seven roles already declare `- role: wiki_volume` (verified directly against each role's `meta/main.yml`) — this ticket only changes what their tasks do, not their dependency graph.
+2. **No new `meta/main.yml` dependencies needed**: `authelia`, `backup`, `docker`, `hermes`, `owntracks`, and `silverbullet` each already declare `- role: wiki_volume` directly; `conduit` declares only `- role: docker` (which itself depends on `wiki_volume`), so `conduit` gets the resolved uid/gid facts transitively — the ordering guarantee holds either way. This ticket only changes what tasks do, not any role's dependency graph.
 
 3. **Extend the existing `wiki_volume` consumer-contract guard** (the one that already restricts `getent`/`key: llm_wiki` to the `wiki_volume` role alone) to also assert: no role outside `wiki_volume` contains a `file`-module task with `state: directory` and an owner/group referencing `llm_wiki` (literal or via the resolved facts). Every such task must now live inside the entrypoint, called by reference.
 
