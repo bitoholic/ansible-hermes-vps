@@ -86,7 +86,7 @@ fi
 
 echo "wiki_volume consumer-contract OK"
 
-# 4. Best-effort live run: only when the llm_wiki user exists AND an operator opts in
+# 5. Best-effort live run: only when the llm_wiki user exists AND an operator opts in
 #    (the role depends on `users`, which needs become + secrets on the VPS). Otherwise skip —
 #    this mirrors the git-crypt-init guard in check-backup-sync.sh.
 if [[ "${WIKI_VOLUME_LIVE:-}" == "1" ]] && command -v ansible-playbook >/dev/null 2>&1 && id llm_wiki >/dev/null 2>&1; then
