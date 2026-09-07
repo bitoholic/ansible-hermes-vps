@@ -17,11 +17,17 @@
   }
 }
 
+{# TLS rendering per route (verified with `caddy adapt`/`caddy run`, v2.11):
+   - tls_mode "auto" → https:// scheme prefix, NO tls directive: automatic HTTPS
+     issues a real ACME cert, including on custom ports like :8448 (a bare `tls`
+     line is a Caddyfile parse error and prevents Caddy from starting).
+   - tls_mode "internal" or unset → bare address + `tls internal` (locally
+     trusted CA — the pre-epic-12 behavior for all routes). #}
 {% for route in gateway_routes %}
-{{ route.host }}.{{ secrets.silverbullet_domain }}{% if route.port is defined %}:{{ route.port }}{% endif %} {
+{% set auto_tls = route.tls_mode is defined and route.tls_mode == 'auto' %}
+{% if auto_tls %}https://{% endif %}{{ route.host }}.{{ secrets.silverbullet_domain }}{% if route.port is defined %}:{{ route.port }}{% endif %} {
   log
-{% if route.tls_mode is defined %}
-  {{ 'tls' if route.tls_mode == 'auto' else 'tls internal' }}
+{% if not auto_tls %}  tls internal
 {% endif %}
 {% if route.mfa %}  import mfa_auth
 {% endif %}  reverse_proxy {{ route.upstream }}

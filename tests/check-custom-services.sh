@@ -3,9 +3,10 @@
 # CI-safe checks (always run):
 #   1. Rendered docker-compose.yml includes both services (and passes
 #      `docker compose config` when docker is available).
-#   2. Caddyfile renders the owntracks HTTPS block (SNI-shared 8448, bare
-#      `tls` = ACME auto, no import mfa_auth) and the matrix prefix regression
-#      guard (matrix.<domain>:8448, not bare domain).
+#   2. Caddyfile renders the owntracks HTTPS block (SNI-shared 8448,
+#      https:// scheme = ACME automatic HTTPS, no tls directive, no import
+#      mfa_auth) and the matrix prefix regression guard (matrix.<domain>:8448,
+#      not bare domain).
 #   3. Firewall contract: 8448 in the rate-limit loop; syncplay 8999 granted
 #      per-IP via limit-from rules (allow + flood guard) driven by
 #      syncplay_allowed_ips. NOTE: published ports bypass UFW INPUT — the
