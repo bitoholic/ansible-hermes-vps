@@ -13,24 +13,38 @@ ROLES="$REPO_ROOT/roles"
 
 echo "== wiki_volume consumer-contract guard =="
 
-# 1. Exactly one role may have a `file` task targeting silverbullet_data_dir — wiki_volume.
-#    Block-scoped: a `file` module task with both `path: "{{ silverbullet_data_dir }}"` and
-#    `state: directory`. (Matches only the directory creation, not git_config `path:` usage.)
+# 1. Exactly one role may own silverbullet_data_dir's creation — wiki_volume. Since
+#    epic 14 #01, wiki_volume itself routes this through its own directory-bootstrap
+#    entrypoint (ensure_directory.yml) rather than a literal inline `file` task, so
+#    this checks for either shape: a direct `file`+`state: directory` task on
+#    silverbullet_data_dir, or an `include_tasks`/`include_role` call passing
+#    silverbullet_data_dir as wiki_volume_directory_path.
 owners=()
 while IFS= read -r f; do
   if awk '
-    /^[[:space:]]*- name:/ { if (mod=="file" && path && state) found=1; mod=""; path=0; state=0; next }
+    /^[[:space:]]*- name:/ { if ((mod=="file" && path && state) || pathvar) found=1; mod=""; path=0; state=0; pathvar=0; next }
     /^[[:space:]]*(ansible\.builtin\.)?file:/ { mod="file"; next }
     /^[[:space:]]*path:[[:space:]]*"\{\{ silverbullet_data_dir/ { if (mod=="file") path=1; next }
     /^[[:space:]]*state:[[:space:]]*directory/ { if (mod=="file") state=1; next }
-    END { if (mod=="file" && path && state) found=1; if (found) print "X" }
+    /^[[:space:]]*wiki_volume_directory_path:[[:space:]]*"\{\{ silverbullet_data_dir/ { pathvar=1; next }
+    END { if ((mod=="file" && path && state) || pathvar) found=1; if (found) print "X" }
   ' "$f" | grep -q X; then
     owners+=("$(basename "$(dirname "$(dirname "$f")")")")
   fi
 done < <(find "$ROLES" -path '*/tasks/main.yml')
 if [[ "${owners[*]:-}" != "wiki_volume" ]]; then
-  echo "FAIL: roles with a file task on silverbullet_data_dir = [${owners[*]:-none}] (expected only wiki_volume)"
+  echo "FAIL: roles owning silverbullet_data_dir's creation = [${owners[*]:-none}] (expected only wiki_volume)"
   exit 1
+fi
+
+# 1b. The entrypoint file itself must exist and use the resolved uid/gid facts, not
+#     the literal llm_wiki username string (the facts are the module's interface).
+ENTRYPOINT="$ROLES/wiki_volume/tasks/ensure_directory.yml"
+if [[ ! -f "$ENTRYPOINT" ]]; then
+  echo "FAIL: wiki_volume directory-bootstrap entrypoint missing ($ENTRYPOINT)"; exit 1
+fi
+if ! grep -q 'owner:.*wiki_volume_uid' "$ENTRYPOINT" || ! grep -q 'group:.*wiki_volume_gid' "$ENTRYPOINT"; then
+  echo "FAIL: $ENTRYPOINT must own directories via wiki_volume_uid/wiki_volume_gid facts"; exit 1
 fi
 
 # 2. getent for llm_wiki must live only in wiki_volume — no other role re-resolves the user.
@@ -71,6 +85,35 @@ YML
   else
     echo "FAIL: wiki_volume not idempotent on second run"; rm -rf "$TMP"; exit 1
   fi
+
+  # Epic 14, #01: call the directory-bootstrap entrypoint directly with its own test
+  # path/mode, per the ticket's acceptance criteria. A real dependent role (ticket
+  # #02) already has wiki_volume as a meta/main.yml dependency, so its uid/gid facts
+  # are resolved before the dependent calls tasks_from: ensure_directory — mirror
+  # that here with an ordinary full-role include first, then the entrypoint alone.
+  PB2="$TMP/wiki_vol_entrypoint_test.yml"
+  cat > "$PB2" <<YML
+---
+- hosts: localhost
+  gather_facts: false
+  vars:
+    silverbullet_data_dir: "$TMP/wiki-for-entrypoint-test"
+  tasks:
+    - ansible.builtin.include_role:
+        name: wiki_volume
+    - ansible.builtin.include_role:
+        name: wiki_volume
+        tasks_from: ensure_directory
+      vars:
+        wiki_volume_directory_path: "$TMP/entrypoint-target"
+        wiki_volume_directory_mode: '0750'
+YML
+  ansible-playbook "$PB2" >/dev/null 2>&1 || { echo "FAIL: wiki_volume entrypoint failed"; rm -rf "$TMP"; exit 1; }
+  st2="$(stat -c '%U:%G %a' "$TMP/entrypoint-target")"
+  if [[ "$st2" != "llm_wiki:llm_wiki 750" ]]; then
+    echo "FAIL: entrypoint dir owner/mode = $st2 (expected llm_wiki:llm_wiki 750)"; rm -rf "$TMP"; exit 1
+  fi
+  echo "wiki_volume directory-bootstrap entrypoint OK (owner 750, called directly)"
   rm -rf "$TMP"
 else
   echo "SKIP live wiki_volume run (llm_wiki absent or WIKI_VOLUME_LIVE!=1; operator-validate on VPS)"

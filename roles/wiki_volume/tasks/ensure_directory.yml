@@ -1,0 +1,21 @@
+---
+# wiki_volume directory-bootstrap entrypoint (epic 14, #01). Dependents call this via
+# `ansible.builtin.include_role: name: wiki_volume, tasks_from: ensure_directory` (not
+# a raw include_tasks file path) — every consumer already has wiki_volume as a
+# meta/main.yml dependency (directly or, for conduit, transitively via docker), so the
+# uid/gid facts below are already resolved by the time this runs.
+#
+# Interface: wiki_volume_directory_path (required), wiki_volume_directory_mode
+# (required), wiki_volume_directory_recurse (optional, default false — only the
+# Hermes home directory needs it; everyone else omits it).
+#
+# Ownership comes from wiki_volume_uid/wiki_volume_gid — the module's declared
+# interface — not the literal `llm_wiki` username string.
+- name: "Ensure directory exists, owned by llm_wiki: {{ wiki_volume_directory_path }}"
+  ansible.builtin.file:
+    path: "{{ wiki_volume_directory_path }}"
+    state: directory
+    owner: "{{ wiki_volume_uid }}"
+    group: "{{ wiki_volume_gid }}"
+    mode: "{{ wiki_volume_directory_mode }}"
+    recurse: "{{ wiki_volume_directory_recurse | default(false) }}"

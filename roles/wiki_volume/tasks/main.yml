@@ -21,10 +21,10 @@
     wiki_volume_uid: "{{ wiki_volume_llm_user.ansible_facts.getent_passwd.llm_wiki[1] }}"
     wiki_volume_gid: "{{ wiki_volume_llm_user.ansible_facts.getent_passwd.llm_wiki[2] }}"
 
+# Dogfoods the module's own directory-bootstrap entrypoint (epic 14, #01) — no
+# special-cased inline file task alongside the reusable one offered to everyone else.
 - name: Ensure wiki data directory exists and is owned by llm_wiki
-  ansible.builtin.file:
-    path: "{{ silverbullet_data_dir }}"
-    state: directory
-    owner: llm_wiki
-    group: llm_wiki
-    mode: '0775'
+  ansible.builtin.include_tasks: ensure_directory.yml
+  vars:
+    wiki_volume_directory_path: "{{ silverbullet_data_dir }}"
+    wiki_volume_directory_mode: '0775'
