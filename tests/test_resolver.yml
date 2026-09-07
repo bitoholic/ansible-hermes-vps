@@ -16,6 +16,7 @@
           - secrets.hermes_default_nous_portal_api_key == 'NOUS_KEY'
           - secrets.hermes_default_github_token == 'GH_TOKEN'
           - secrets.silverbullet_domain == 'wiki.example.com'
+          - secrets.acme_email == 'admin@wiki.example.com'
           - secrets.hermes_default_resend_api_key == ''
           - '"coder_openrouter_api_key" not in secrets'
         fail_msg: >-

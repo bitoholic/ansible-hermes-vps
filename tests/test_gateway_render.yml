@@ -13,6 +13,7 @@
     gateway_caddyfile_group: "{{ ansible_user }}"
     secrets:
       silverbullet_domain: test.example.com
+      acme_email: admin@test.example.com
   pre_tasks:
     # Assemble the real gateway_routes the way the gateway role does (per-role contributions).
     - ansible.builtin.include_vars:
@@ -71,6 +72,7 @@
           - "rendered is search('auth\\.test\\.example\\.com \\{\\n  log\\n  reverse_proxy authelia:9091\\n\\}')"
           - "'forward_auth @not_tailscale authelia:9091' in rendered"
           - "rendered is search('not remote_ip')"
+          - "rendered is search('email admin@test\\.example\\.com')"
         fail_msg: "Gateway Caddyfile shape mismatch: {{ rendered }}"
       vars:
         rendered: "{{ lookup('file', '/tmp/gateway_test_render/Caddyfile') }}"

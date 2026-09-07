@@ -62,9 +62,15 @@ echo "tailscale ufw rules OK"
 echo "tailscale access guard OK"
 
 # Live idempotency run — operator-validated on the VPS only.
+# The DOCKER-USER chain is declaratively rebuilt each run (flush + re-add), so
+# tasks report changed every run by design. Idempotency is therefore asserted on
+# the END STATE: `iptables -S DOCKER-USER` must be identical across runs.
+# The temp playbook lives at the repo root so root group_vars (port classes,
+# subnet constants, allowlist) resolve — a /tmp playbook runs without them.
 if [[ "${TAILSCALE_LIVE:-}" == "1" ]] && command -v ansible-playbook >/dev/null 2>&1; then
   TMP="$(mktemp -d)"
-  PB="$TMP/tailscale_live.yml"
+  PB="$REPO_ROOT/.tailscale_live_tmp.yml"
+  cleanup() { rm -rf "$TMP" "$PB"; }
   cat > "$PB" <<YML
 ---
 - hosts: localhost
@@ -76,13 +82,22 @@ if [[ "${TAILSCALE_LIVE:-}" == "1" ]] && command -v ansible-playbook >/dev/null 
     - ansible.builtin.include_role:
         name: tailscale
 YML
-  ansible-playbook "$PB" >/dev/null 2>&1 || { echo "FAIL: tailscale role failed on live run"; rm -rf "$TMP"; exit 1; }
-  if ansible-playbook "$PB" 2>&1 | grep -q "changed=0"; then
-    echo "tailscale live run OK (fully idempotent)"
+  ansible-playbook "$PB" >/dev/null 2>&1 || { echo "FAIL: tailscale role failed on live run"; cleanup; exit 1; }
+  V4_RUN1="$(iptables -S DOCKER-USER 2>&1)"
+  V6_RUN1="$(ip6tables -S DOCKER-USER 2>&1)"
+  ansible-playbook "$PB" >/dev/null 2>&1 || { echo "FAIL: tailscale role failed on second live run"; cleanup; exit 1; }
+  V4_RUN2="$(iptables -S DOCKER-USER 2>&1)"
+  V6_RUN2="$(ip6tables -S DOCKER-USER 2>&1)"
+  if [[ "$V4_RUN1" == "$V4_RUN2" && "$V6_RUN1" == "$V6_RUN2" ]]; then
+    echo "tailscale live run OK (DOCKER-USER ruleset identical across runs)"
   else
-    echo "FAIL: tailscale role not idempotent on second live run"; rm -rf "$TMP"; exit 1
+    echo "FAIL: DOCKER-USER ruleset drifted between live runs"
+    diff <(echo "$V4_RUN1") <(echo "$V4_RUN2") || true
+    diff <(echo "$V6_RUN1") <(echo "$V6_RUN2") || true
+    cleanup
+    exit 1
   fi
-  rm -rf "$TMP"
+  cleanup
 else
   echo "SKIP live tailscale run (TAILSCALE_LIVE!=1; operator-validate on VPS)"
 fi

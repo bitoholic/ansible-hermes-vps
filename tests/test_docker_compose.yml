@@ -41,6 +41,16 @@
     conduit_image: matrixconduit/matrix-conduit:v0.10.13
     conduit_port: 8008
     hermes_home: /opt/hermes
+    # Firewall port classes (mirrors group_vars/all/main.yml — keep in sync).
+    docker_published_public_ports:
+      - 80
+      - 443
+      - 8448
+    docker_published_restricted_ports:
+      - 3000
+      - 8008
+      - 8642
+      - 9119
     secrets:
       silverbullet_admin_username: admin
       silverbullet_admin_password: P4ssw04d
@@ -66,6 +76,29 @@
       ansible.builtin.slurp:
         path: "{{ docker_compose_dir }}/docker-compose.yml"
       register: rendered_compose
+
+    - name: Assert every published host port belongs to a declared firewall class
+      # Closes the open-by-default gap (epic 12 #08 review): a future fragment
+      # adding ports: ["X:X"] without classifying X would be silently
+      # internet-reachable via Docker's DOCKER-USER bypass of UFW. The classes
+      # mirror group_vars/all/main.yml (single source of truth for the firewall).
+      ansible.builtin.assert:
+        that:
+          - published_ports | difference(classified_ports) | length == 0
+        fail_msg: >-
+          Published host ports {{ published_ports | difference(classified_ports) }}
+          are not in any firewall class (public={{ docker_published_public_ports }},
+          restricted={{ docker_published_restricted_ports }}, syncplay=8999).
+          Classify them or drop the publication.
+      vars:
+        compose: "{{ rendered_compose.content | b64decode | from_yaml }}"
+        published_ports: >-
+          {{ compose.services.values() | selectattr('ports', 'defined')
+             | map(attribute='ports') | flatten
+             | map('regex_replace', ':.*$', '') | map('int') | unique | sort }}
+        classified_ports: >-
+          {{ (docker_published_public_ports + docker_published_restricted_ports + [8999])
+             | map('int') | unique | sort }}
 
     - name: Assert owntracks publishes no host port (structural, not substring)
       ansible.builtin.assert:
