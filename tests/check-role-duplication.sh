@@ -28,12 +28,11 @@ WIKI_VOLUME_COUNT="$(echo "$LIST_OUTPUT" | grep -c "wiki_volume : Lookup llm_wik
 DOCKER_COUNT="$(echo "$LIST_OUTPUT" | grep -c "docker : Validate Docker role prerequisites" || true)"
 
 # Known, accepted ceiling — NOT "exactly once". See the comment above and the epic
-# 17 spec for why full elimination isn't achieved by this epic. Ticket #01 (this
-# commit) only removes the redundant sibling wiki_volume dependencies, so docker's
-# bound stays at its pre-existing baseline here; ticket #02 tightens both once it
-# also removes docker's explicit site.yml entry.
-WIKI_VOLUME_MAX=8
-DOCKER_MAX=5
+# 17 spec for why full elimination isn't achieved by this epic. Tightened here
+# (epic 17, #02) from ticket #01's intermediate 8/5 now that docker's explicit
+# site.yml entry is also removed.
+WIKI_VOLUME_MAX=7
+DOCKER_MAX=4
 
 if (( WIKI_VOLUME_COUNT > WIKI_VOLUME_MAX )); then
   echo "FAIL: wiki_volume's tasks run $WIKI_VOLUME_COUNT times (expected <= $WIKI_VOLUME_MAX) - duplication regressed"
@@ -46,5 +45,30 @@ if (( DOCKER_COUNT > DOCKER_MAX )); then
   exit 1
 fi
 echo "docker execution count OK ($DOCKER_COUNT <= $DOCKER_MAX)"
+
+# Ordering safety (epic 17, #02): docker is now dependency-only, no longer an
+# explicit site.yml entry. Its effective execution position shifted to wherever
+# its first remaining dependent (conduit) sits — prove this is still early enough:
+# before conduit's/hermes's/authelia's/silverbullet's own config-phase tasks, and
+# before epic 16's end-of-play "Start consolidated docker compose stack" step.
+DOCKER_FIRST_LINE="$(echo "$LIST_OUTPUT" | grep -n "docker : Validate Docker role prerequisites" | head -1 | cut -d: -f1)"
+CONDUIT_CONFIG_LINE="$(echo "$LIST_OUTPUT" | grep -n "conduit : Deploy Conduit configuration" | head -1 | cut -d: -f1)"
+HERMES_CONFIG_LINE="$(echo "$LIST_OUTPUT" | grep -n "hermes : Copy Hermes Dockerfile to hermes home" | head -1 | cut -d: -f1)"
+AUTHELIA_CONFIG_LINE="$(echo "$LIST_OUTPUT" | grep -n "Render Authelia configuration" | head -1 | cut -d: -f1)"
+SILVERBULLET_CONFIG_LINE="$(echo "$LIST_OUTPUT" | grep -n "Create SilverBullet deployment directory" | head -1 | cut -d: -f1)"
+STACK_START_LINE="$(echo "$LIST_OUTPUT" | grep -n "docker : Start consolidated docker compose stack" | head -1 | cut -d: -f1)"
+
+for pair in "CONDUIT_CONFIG_LINE:conduit config" "HERMES_CONFIG_LINE:hermes config" "AUTHELIA_CONFIG_LINE:authelia config" "SILVERBULLET_CONFIG_LINE:silverbullet config" "STACK_START_LINE:the end-of-play stack-start step"; do
+  name="${pair##*:}"; var="${pair%%:*}"
+  val="${!var}"
+  if [[ -z "$DOCKER_FIRST_LINE" || -z "$val" ]]; then
+    echo "FAIL: expected task names not found in --list-tasks output"; exit 1
+  fi
+  if (( DOCKER_FIRST_LINE >= val )); then
+    echo "FAIL: docker's (now dependency-only) tasks do not run before $name (docker=$DOCKER_FIRST_LINE, $name=$val)"
+    exit 1
+  fi
+done
+echo "docker (dependency-only) still runs before every config-deploying role and the stack-start step OK"
 
 echo "role-execution duplication guard OK"

@@ -145,9 +145,13 @@
     - role: gateway
       tags:
         - gateway
-    - role: docker
-      tags:
-        - docker
+    # docker is not listed here as its own entry (epic 17, #02): every role below
+    # that needs it (conduit, hermes, authelia, silverbullet) already declares it
+    # as a meta/main.yml dependency, which places it here anyway — right where
+    # this explicit entry used to sit, since conduit was already the next role
+    # listed. Keeping both an explicit entry and dependencies on the same role
+    # duplicates its execution (the same finding that already removed owntracks's
+    # explicit entry above); see tests/check-role-duplication.sh.
     - role: conduit
       tags:
         - conduit
