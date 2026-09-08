@@ -153,4 +153,46 @@ if ! grep -q '^syncplay_allowed_ips:' group_vars/all/main.yml; then
 fi
 echo "syncplay_allowed_ips defined OK"
 
+# 5: owntracks htpasswd parsing survives a multi-line file (regression guard). Found
+# live on the VPS: the operator manages family members' OwnTracks logins by hand,
+# directly on the server, beyond the one Ansible-managed admin credential — the
+# htpasswd file has more than one line in production. A prior version of the parsing
+# here treated the whole file as one blob and split on every ':' in it, corrupting
+# the parsed hash (and therefore Caddy's basic_auth block) the moment a second line
+# existed. Invokes the real parse_htpasswd.yml task file directly (it needs nothing
+# from the directory-creation tasks, so this doesn't need real system users) against
+# a fixture with the admin line deliberately NOT first, surrounded by other users'
+# lines, and asserts the resulting facts are correct and untainted by them.
+TMP="$(mktemp -d)"
+cat > "$TMP/htpasswd" <<'HTP'
+someone_else:$2y$05$notTheAdminHashXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+admin:$2y$12$a7thxdwfGc.VYa/fNZb4P.URPZ0TRADf1iAo4n3yxfN0OAjVMmtdu
+another_family_member:$2y$05$alsoNotTheAdminHashXXXXXXXXXXXXXXXXXXXXXXXXXX
+HTP
+PB="$TMP/owntracks_htpasswd_test.yml"
+cat > "$PB" <<YML
+---
+- hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    owntracks_htpasswd_path: "$TMP/htpasswd"
+    secrets:
+      owntracks_admin_username: admin
+  tasks:
+    - ansible.builtin.include_tasks: "$REPO_ROOT/roles/owntracks/tasks/parse_htpasswd.yml"
+
+    - ansible.builtin.assert:
+        that:
+          - owntracks_basic_auth_user == "admin"
+          - owntracks_basic_auth_hash == "\$2y\$12\$a7thxdwfGc.VYa/fNZb4P.URPZ0TRADf1iAo4n3yxfN0OAjVMmtdu"
+          - "'\n' not in owntracks_basic_auth_hash"
+        fail_msg: >-
+          owntracks htpasswd parsing corrupted by the other lines in the file:
+          user=[{{ owntracks_basic_auth_user }}] hash=[{{ owntracks_basic_auth_hash }}]
+YML
+ansible-playbook "$PB" >/dev/null 2>&1 || { echo "FAIL: owntracks htpasswd multi-line parsing test failed"; rm -rf "$TMP"; exit 1; }
+rm -rf "$TMP"
+echo "owntracks multi-line htpasswd parsing OK"
+
 echo "custom services guard OK"
