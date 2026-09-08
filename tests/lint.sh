@@ -97,6 +97,12 @@ python3 scripts/generate-env.py --check
 # owntracks explicitly too, or it runs twice per playbook execution.
 ./tests/check-role-ordering.sh
 
+# docker-starts-before-config ordering fix (epic 16 ticket #01): docker's compose-stack
+# start moved to the end of the play, after every config-deploying role; conduit/hermes
+# provisioning moved out of their default sequence the same way; silverbullet's redundant
+# second "up" call is gone.
+./tests/check-stack-start-ordering.sh
+
 # Role skip-tags guard (epic 10): every role in site.yml carries a tags entry matching its name,
 # and the protected roles (secrets, users, ssh_hardening, common) are guarded by a pre-flight assert
 # in site.yml so they cannot be skipped via --skip-tags.

@@ -8,15 +8,9 @@
     wiki_volume_directory_path: "{{ silverbullet_compose_dir }}"
     wiki_volume_directory_mode: '0775'
 
-- name: Start consolidated docker compose
-  tags: [silverbullet]
-  community.docker.docker_compose_v2:
-    project_src: "{{ docker_compose_dir }}"
-    project_name: "{{ docker_project_name }}"
-    services:
-      - caddy
-      - authelia
-      - silverbullet
-    state: present
-    pull: missing
-  ignore_errors: "{{ ansible_check_mode }}"
+# The redundant second "docker compose up" call (scoped to caddy/authelia/
+# silverbullet) that used to live here is deleted (epic 16, #01) — it was an
+# incomplete workaround for the same config-timing bug epic 16 fixes properly by
+# relocating docker's single compose-stack start to the end of the play, after every
+# config-deploying role (including this one) has run. That single, correctly-
+# positioned start now covers these three services too.

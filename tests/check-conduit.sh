@@ -28,10 +28,13 @@ ansible-playbook tests/test_conduit.yml
 echo "conduit render OK"
 
 # 5 (by-contract): the registration task must be probe-guarded and declare changed_when.
-if ! grep -q 'when: (conduit_hermes_available.status | default(0)) == 200' roles/conduit/tasks/main.yml; then
+# Lives in tasks/provision.yml since epic 16, #01 (bot provisioning needs the Conduit
+# container already running, so it's invoked separately from site.yml's end-of-play
+# tasks rather than as part of this role's default config-phase sequence).
+if ! grep -q 'when: (conduit_hermes_available.status | default(0)) == 200' roles/conduit/tasks/provision.yml; then
   echo "FAIL: bot registration task is not guarded by the availability probe (not idempotent)"; exit 1
 fi
-if ! grep -q 'changed_when: (conduit_hermes_available.status | default(0)) == 200' roles/conduit/tasks/main.yml; then
+if ! grep -q 'changed_when: (conduit_hermes_available.status | default(0)) == 200' roles/conduit/tasks/provision.yml; then
   echo "FAIL: bot registration task missing changed_when (idempotency not declared)"; exit 1
 fi
 echo "bot idempotency contract OK"
@@ -81,6 +84,13 @@ if [[ "${CONDUIT_LIVE:-}" == "1" ]] && command -v ansible-playbook >/dev/null 2>
   tasks:
     - ansible.builtin.include_role:
         name: conduit
+    # Epic 16, #01: bot provisioning moved out of the role's default sequence
+    # (needs the container already running) — include it explicitly so this live
+    # idempotency run still covers the full role's behavior, not just the config
+    # phase.
+    - ansible.builtin.include_role:
+        name: conduit
+        tasks_from: provision
 YML
   ansible-playbook "$PB" >/dev/null 2>&1 || { echo "FAIL: conduit role failed on live run"; rm -rf "$TMP"; exit 1; }
   if ansible-playbook "$PB" 2>&1 | grep -q "changed=0"; then

@@ -1,0 +1,24 @@
+---
+# Epic 16, #01: the actual "docker compose up" step, extracted out of this role's
+# default task sequence. docker's own position in site.yml runs too early for this —
+# it starts every enabled service, including conduit/authelia/hermes-agent, before
+# the conduit/hermes/authelia roles (listed after docker) ever render the host-side
+# config files those containers bind-mount. On a fresh bootstrap this can start a
+# container before the file it depends on exists (the same bug class already fixed
+# twice for other services in this repo: OwnTracks storage permissions, a stale
+# Caddyfile directory).
+#
+# Invoked from site.yml's end-of-play tasks via import_role/tasks_from — NOT a bare
+# include_tasks — so this role's own meta/main.yml dependencies still fire for it,
+# the same way they do for any other role invocation.
+- name: Start consolidated docker compose stack
+  tags: [docker]
+  community.docker.docker_compose_v2:
+    project_src: "{{ docker_compose_dir }}"
+    project_name: "{{ docker_project_name }}"
+    files:
+      - docker-compose.yml
+    services: "{{ docker_enabled_services }}"
+    state: present
+    pull: missing
+  ignore_errors: "{{ ansible_check_mode }}"

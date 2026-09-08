@@ -41,68 +41,8 @@
     group: llm_wiki
     mode: '0644'
 
-# --- Bot provisioning (@hermes) -------------------------------------------------
-# Hermes logs in with MATRIX_USER_ID + MATRIX_PASSWORD (no access token shared across
-# roles), so the bot account is created here once via Conduit's registration endpoint
-# using the shared registration token. Idempotent: skipped once the user exists.
-- name: Resolve Conduit container IP on the gateway/internal network
-  tags: [conduit]
-  community.docker.docker_container_info:
-    name: conduit
-  register: conduit_container_info
-  ignore_errors: "{{ ansible_check_mode }}"
-
-# Conduit IP fact: prefer the `internal` network (consolidated compose), fall back to
-# `hermes_net` (legacy compose) so the fact stays valid during the transition window.
-- name: Compute Conduit container IP fact
-  tags: [conduit]
-  ansible.builtin.set_fact:
-    conduit_ip: >-
-      {%- set info = conduit_container_info.container | default({}) -%}
-      {%- set nets = info.NetworkSettings.Networks | default({}) -%}
-      {%- set primary = nets.internal.IPAddress | default('') if nets.internal is defined else nets.hermes_net.IPAddress | default('') -%}
-      {{ primary }}
-
-- name: Compute Conduit API base URL (host IP for Tailscale access)
-  tags: [conduit]
-  ansible.builtin.set_fact:
-    conduit_api_base: "http://{{ inventory_hostname }}:{{ conduit_port }}"
-
-- name: Wait for Conduit to accept connections
-  tags: [conduit]
-  ansible.builtin.wait_for:
-    host: "{{ inventory_hostname }}"
-    port: "{{ conduit_port }}"
-    state: started
-    timeout: 60
-  ignore_errors: "{{ ansible_check_mode }}"
-
-- name: Check whether the @hermes user is already registered
-  tags: [conduit]
-  ansible.builtin.uri:
-    url: "{{ conduit_api_base }}/_matrix/client/v3/register/available?username=hermes"
-    method: GET
-    status_code: [200, 400]
-  register: conduit_hermes_available
-  when: conduit_ip | length > 0
-  ignore_errors: "{{ ansible_check_mode }}"
-
-- name: Register the @hermes bot account via the Conduit registration token
-  tags: [conduit]
-  ansible.builtin.uri:
-    url: "{{ conduit_api_base }}/_matrix/client/v3/register"
-    method: POST
-    headers:
-      Content-Type: "application/json"
-    body_format: json
-    body:
-      auth:
-        type: "m.login.registration_token"
-        token: "{{ secrets.conduit_registration_secret }}"
-      username: hermes
-      password: "{{ secrets.matrix_bot_password }}"
-      inhibit_login: true
-    status_code: [200, 201]
-  when: (conduit_hermes_available.status | default(0)) == 200
-  changed_when: (conduit_hermes_available.status | default(0)) == 200
-  ignore_errors: "{{ ansible_check_mode }}"
+# Bot provisioning (@hermes registration) moved to tasks/provision.yml (epic 16, #01)
+# — it needs the Conduit container actually running, which now happens later in the
+# play (docker's compose-stack start is relocated to the end of the play). No longer
+# runs automatically as part of this role's default sequence; invoked explicitly from
+# site.yml's end-of-play tasks, after the compose stack starts.

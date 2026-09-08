@@ -173,14 +173,8 @@
     group: llm_wiki
     mode: '0640'
 
-- name: Start consolidated docker compose stack
-  tags: [docker]
-  community.docker.docker_compose_v2:
-    project_src: "{{ docker_compose_dir }}"
-    project_name: "{{ docker_project_name }}"
-    files:
-      - docker-compose.yml
-    services: "{{ docker_enabled_services }}"
-    state: present
-    pull: missing
-  ignore_errors: "{{ ansible_check_mode }}"
+# "Start consolidated docker compose stack" moved to tasks/start.yml (epic 16, #01) —
+# no longer runs automatically as part of this role's default sequence. It's invoked
+# explicitly at the end of site.yml's play, after every role that deploys a
+# bind-mounted config file (conduit, hermes, authelia, gateway) has done so. See
+# tasks/start.yml for why.

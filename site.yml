@@ -83,6 +83,40 @@
           - ansible_user == secrets.admin_username
         fail_msg: "Play 2 must run as {{ secrets.admin_username }} on Debian/Ubuntu hosts."
 
+    # Epic 16, #01: docker's compose-stack start, and the provisioning tasks that
+    # need it already running, execute here — Ansible always runs a play's `tasks:`
+    # after its `roles:`, regardless of where each is positioned in this file, so
+    # listing these here (textually before `roles:`) still means they run after
+    # every role below that deploys a bind-mounted config file (conduit, hermes,
+    # authelia, gateway). This intentionally runs after `backup` too (inert — backup
+    # has no docker/container interaction) rather than threaded in at a specific
+    # mid-list point.
+    #
+    # docker's start step uses import_role/tasks_from (not a bare include_tasks) so
+    # docker's own meta/main.yml dependencies still fire for it, the same as any
+    # other role invocation — matters if a future ticket adds docker -> gateway
+    # there. conduit's and hermes's provision steps use a bare include_tasks
+    # instead: import_role/tasks_from was tried first and re-triggered conduit's/
+    # hermes's meta dependency on docker, re-running docker's ENTIRE role (apt
+    # installs, network setup, compose render) a second time right here — found via
+    # `--list-tasks` while implementing this. Neither provision file needs its
+    # role's meta dependencies to fire (both only need facts/state already
+    # established during the config phase, earlier in this same play), so a bare
+    # include_tasks is correct here, not just expedient.
+    - name: Start consolidated docker compose stack
+      ansible.builtin.import_role:
+        name: docker
+        tasks_from: start
+      tags: [docker]
+
+    - name: Conduit bot provisioning
+      ansible.builtin.include_tasks: roles/conduit/tasks/provision.yml
+      tags: [conduit]
+
+    - name: Hermes skill-pack provisioning
+      ansible.builtin.include_tasks: roles/hermes/tasks/provision.yml
+      tags: [hermes]
+
   roles:
     - role: secrets
       tags:
