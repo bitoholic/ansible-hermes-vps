@@ -9,7 +9,9 @@
 # restarted so the new skills load. spec-kit is intentionally excluded (Hermes
 # <=0.20.6 does not register `specify`-generated skills).
 #
-# Invoked from site.yml's end-of-play tasks via import_role/tasks_from, after the
+# Invoked from site.yml's end-of-play tasks via a bare include_tasks (not
+# import_role/tasks_from — that re-triggers this role's meta dependency on docker,
+# rerunning docker's entire role a second time; see site.yml's comment), after the
 # relocated docker compose-stack start.
 - name: Pause for Hermes gateway to become ready before installing skills
   tags: [hermes]
