@@ -5,10 +5,13 @@
 # Extracted so the render test can invoke just the validation (without the
 # deploy-dir/file step).
 #
-# Walks roles/gateway/vars/route_schema.yml generically (via validate_route.yml)
+# Walks gateway_route_schema (defined in roles/gateway/vars/main.yml, auto-loaded by
+# Ansible whenever this role is invoked for real) generically via validate_route.yml
 # instead of one hand-written assert per field — adding a field to the schema is
 # enough for this to enforce it; there's no second hand-copied assert list left to
-# drift from it.
+# drift from it. Test playbooks that include_tasks this file directly (bypassing
+# real role invocation) must explicitly include_vars roles/gateway/vars/main.yml
+# themselves first — see tests/test_gateway_render.yml.
 - name: Assert gateway_routes is a non-empty list
   ansible.builtin.assert:
     that:

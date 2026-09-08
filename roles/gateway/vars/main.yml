@@ -5,6 +5,14 @@
 # assert clauses per field — adding a field here is enough for validate.yml to
 # enforce it; there's no second hand-copied assert list left to drift from this.
 #
+# Named vars/main.yml (not vars/route_schema.yml, as originally written) so
+# Ansible's own role-compilation auto-loads it whenever the gateway role is
+# invoked for real (roles:/include_role/import_role) — a differently-named file
+# under vars/ is never auto-loaded, only vars/main.yml is. Caught by a live
+# --check run against the VPS: the original filename worked in every local test
+# only because each test explicitly include_vars'd it itself as a workaround,
+# masking that the real gateway role never actually loaded it.
+#
 # Each entry: `field` name, `required` (boolean), and one or more constraints —
 # `type` (string/boolean/integer), `allowed_values` (an enum list), and/or
 # `non_empty` (rejects an empty string; only meaningful alongside `type: string`,

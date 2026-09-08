@@ -34,7 +34,7 @@
     - ansible.builtin.include_vars:
         file: "{{ playbook_dir }}/../group_vars/all/main.yml"
     - ansible.builtin.include_vars:
-        file: "{{ playbook_dir }}/../roles/gateway/vars/route_schema.yml"
+        file: "{{ playbook_dir }}/../roles/gateway/vars/main.yml"
 
   tasks:
     - name: Ensure temp render dir exists
@@ -51,7 +51,7 @@
           - (gateway_route_schema | map(attribute='field') | list | sort) ==
             (['basic_auth_hash', 'basic_auth_user', 'host', 'mfa', 'port', 'tls_mode', 'upstream'] | sort)
           - gateway_route_schema | selectattr('required', 'undefined') | list | length == 0
-        fail_msg: "route_schema.yml fields mismatch: {{ gateway_route_schema | map(attribute='field') | list }}"
+        fail_msg: "gateway route schema (vars/main.yml) fields mismatch: {{ gateway_route_schema | map(attribute='field') | list }}"
 
     # Positive guard: the real assembled gateway_routes must pass shape validation. Unlike the
     # negative tests below, this is intentionally NOT rescued — a malformed production route must
