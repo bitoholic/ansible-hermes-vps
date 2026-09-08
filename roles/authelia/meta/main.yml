@@ -1,4 +1,8 @@
 ---
+# wiki_volume is deliberately not listed directly (epic 17, #01): docker already
+# depends on it, and resolved facts persist as global host facts for the rest of
+# the play regardless of which dependency path resolved them first. Declaring both
+# was redundant and, per Ansible's tag-inheritance-defeats-role-dedup behavior
+# (see tests/check-role-duplication.sh), caused an extra wiki_volume execution.
 dependencies:
-  - role: wiki_volume
   - role: docker

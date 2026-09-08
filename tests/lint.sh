@@ -97,6 +97,12 @@ python3 scripts/generate-env.py --check
 # owntracks explicitly too, or it runs twice per playbook execution.
 ./tests/check-role-ordering.sh
 
+# Bounded role-execution duplication (epic 17): docker's and wiki_volume's own tasks
+# run more than once per site.yml execution (Ansible's role dedup defeated by tag
+# inheritance, pre-existing and not fully eliminated) — this bounds the duplication
+# at the level epic 17 delivers, so it can't silently regress further.
+./tests/check-role-duplication.sh
+
 # docker-starts-before-config ordering fix (epic 16 ticket #01): docker's compose-stack
 # start moved to the end of the play, after every config-deploying role; conduit/hermes
 # provisioning moved out of their default sequence the same way; silverbullet's redundant
