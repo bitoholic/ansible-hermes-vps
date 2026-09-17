@@ -10,6 +10,8 @@
 - [ ] A new role stands up the hub and agent as two containers in the consolidated compose stack, with the hub's persistent data on durable storage that survives container restarts
 - [ ] The agent connects to the hub via a local, non-networked mechanism (no published port for the agent, no Docker-socket mount)
 - [ ] The hub's dashboard is published via a tailnet-only gateway route (no MFA, no public path)
+- [ ] The hub's raw container port is also published directly and added to the firewall's Tailscale-only restricted-port class — an independent enforcement layer from the Caddy-level route, so a raw-port connection is blocked the same way a Caddy-routed one is
+- [ ] The hub's port is recorded in the port-class comment block alongside the other Tailscale-only-restricted ports, so a future addition doesn't collide with it
 - [ ] The new role's tasks are tagged and included in the skip-tags guard, and the role is wired in as a dependency of the gateway role rather than a fresh top-level entry
 - [ ] The secrets manifest has entries for the agent's hub-issued pairing credential, with the manual retrieval/population step documented clearly enough that an operator can follow it without reading the role's source
 - [ ] Consolidated docker-compose render passes with the new services enabled

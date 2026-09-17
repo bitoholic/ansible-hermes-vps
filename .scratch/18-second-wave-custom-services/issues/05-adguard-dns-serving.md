@@ -16,3 +16,5 @@
 ## Notes
 
 See epic 18 spec, section "AdGuard Home", and the Further Notes flag that this is the highest-risk step in the epic (a host-level DNS config change with a real failure mode if sequenced wrong). Verify the sequencing against a real deploy, not just a `--check` dry run, per this repo's established practice for this class of change (epics 13, 15, 16, 17 all caught sequencing bugs only visible on a live run).
+
+When documenting the manual Tailscale-console step, be explicit that the correct setting is the tailnet-wide **global override nameserver**, not split-DNS — split-DNS solves a different problem (routing specific domains elsewhere) and is not the mechanism this ticket needs. Recording this distinction here saves a future revisit from re-investigating the wrong Tailscale feature.

@@ -10,6 +10,12 @@ Issues and specs for this repo live as markdown files in `.scratch/`.
 - Triage state is recorded as a `Status:` line near the top of each issue file (see `triage-labels.md` for the role strings)
 - Comments and conversation history append to the bottom of the file under a `## Comments` heading
 
+## Ticket body template
+
+Epics 12–17's tickets use a free-form shape: `# Ticket #NN: <Title>`, a `## Description` with numbered, file-path-specific steps, and a `## Acceptance criteria` heading with prose bullets.
+
+Epic 18 onward, tickets published via `/mattpocock-skills:to-tickets` use that skill's own fixed template instead: `# NN: <Title>`, a bolded **What to build:** paragraph (behavior-level, no file paths — they go stale fast), a **Status:** line, bare `- [ ]` checkbox acceptance criteria, and a `## Notes` section pointing back at the originating spec for implementation detail. This is a deliberate divergence, not an inconsistency to fix — don't back-port epics 12–17's tickets to match, and don't hand-write epic 18+-style tickets outside the skill's own workflow.
+
 ## When a skill says "publish to the issue tracker"
 
 Create a new file under `.scratch/<feature-slug>/` (creating the directory if needed).

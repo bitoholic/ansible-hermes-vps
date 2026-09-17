@@ -2,7 +2,7 @@
 
 **What to build:** Full-stack regression coverage proving the epic's three services and the new route type integrate correctly without disturbing anything that existed before it.
 
-**Blocked by:** #02, #03, #05
+**Blocked by:** #02, #03, #04, #05
 **Blocks:** None
 
 **Status:** ready-for-agent
