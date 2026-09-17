@@ -128,9 +128,14 @@
     - name: Assert owntracks-frontend has no published port and reaches the recorder internally
       ansible.builtin.assert:
         that:
+          - compose.services['owntracks-frontend'].image == 'owntracks/frontend:latest'
           - compose.services['owntracks-frontend'].ports is not defined
           - compose.services['owntracks-frontend'].networks == ['gateway']
           - "'SERVER_HOST=owntracks' in compose.services['owntracks-frontend'].environment"
+          # SERVER_PORT must match the recorder's actual OTR_HTTPPORT (owntracks.yml.j2)
+          # — a drift here would silently break the frontend's API calls without any
+          # render-time error, since nothing else cross-checks the two fragments.
+          - "'SERVER_PORT=8083' in compose.services['owntracks-frontend'].environment"
           - compose.services['owntracks-frontend'].volumes is not defined
         fail_msg: >-
           owntracks-frontend must not publish a host port and must point at the

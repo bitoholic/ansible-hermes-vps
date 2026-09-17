@@ -120,9 +120,11 @@
 
     # Epic 18 ticket #01: a route with tailnet_only: true renders a hard 404 block for
     # non-Tailscale sources instead of the MFA-bypass challenge — genuinely no public
-    # path, not merely gated. Rendered against a synthetic route (none of today's real
-    # routes use this field yet) into a separate file so the real-route assertions above
-    # stay untouched.
+    # path, not merely gated. Rendered against a synthetic route into a separate file
+    # so the real-route assertions above stay untouched. (Epic 18 ticket #02 later
+    # added a real tailnet_only route, owntracks-ui, asserted above alongside the
+    # other real routes — this synthetic one stays for the isolated positive/negative
+    # schema coverage below, independent of any specific service's real field values.)
     - name: Render a synthetic tailnet_only route
       ansible.builtin.template:
         src: "{{ playbook_dir }}/../roles/gateway/templates/Caddyfile.j2"

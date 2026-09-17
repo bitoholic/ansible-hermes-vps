@@ -16,3 +16,10 @@
 ## Notes
 
 See epic 18 spec, section "OwnTracks frontend". No new role, no new secrets — this extends the existing `owntracks` role. The frontend image proxies only its own API/websocket calls to the recorder; it never touches the recorder's mobile-ingest path, which is why the two can stay on separate routes with separate access models.
+
+## Implementation notes
+
+Code review found no correctness issues (it independently verified the `owntracks/frontend` image's env vars against the real Docker image). A follow-up review caught one stale comment and one test-coverage gap, both fixed:
+
+- A comment on ticket #01's synthetic `tailnet_only` test route said "none of today's real routes use this field yet" — no longer true once this ticket's `owntracks-ui` route landed. Reworded to note the synthetic route stays for isolated schema coverage independent of any specific service's field values.
+- The compose test asserted `SERVER_HOST` but not `SERVER_PORT` or the image — narrower than the spec's Testing Decisions wording. Added both; `SERVER_PORT` in particular guards against silent drift from the recorder's actual `OTR_HTTPPORT` (`owntracks.yml.j2`), since nothing else cross-checks the two fragments against each other.
