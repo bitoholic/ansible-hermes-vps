@@ -215,6 +215,14 @@
 # than teaching the existing one a protocol parameter: two protocols is not
 # enough live cases to justify a generic per-protocol mechanism (same reasoning
 # epic 13 already applied to the gateway route schema).
+#
+# `| default([])` here (unlike the established TCP list above, which has never
+# had one): docker_published_restricted_udp_ports is a brand-new variable, so
+# any isolated invocation of this role that doesn't load group_vars/all/main.yml
+# (a bespoke test playbook, a future refactor) would otherwise hard-fail on an
+# undefined var the moment this ticket merged — not a pre-existing, already-
+# accepted constraint the way the TCP list's lack of a default is. Caught in
+# review; don't "fix" this back into matching the TCP list's style.
 - name: DOCKER-USER v4 - restricted UDP ports from Tailscale subnet
   tags: [tailscale]
   ansible.builtin.iptables:

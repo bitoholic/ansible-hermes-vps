@@ -103,19 +103,46 @@
     # role's meta dependencies to fire (both only need facts/state already
     # established during the config phase, earlier in this same play), so a bare
     # include_tasks is correct here, not just expedient.
+    # Epic 18, #05: must run immediately BEFORE the stack starts, not after —
+    # see roles/adguard/tasks/free_host_dns_port.yml's own header for why
+    # (AdGuard's container physically cannot bind port 53 while systemd-resolved's
+    # stub listener still holds it; freeing it after the stack-start attempt is
+    # too late, since that attempt would already have failed). A bare
+    # include_tasks: this needs no meta-dependency re-trigger, only the docker
+    # role's own pre-pull step (roles/docker/tasks/main.yml) having already run
+    # during the earlier config-deploying phase.
+    #
+    # Guarded on docker_enabled_services (caught in review): this mutates the
+    # HOST's own DNS resolution unconditionally otherwise — an operator who
+    # customizes docker_enabled_services to exclude adguard (a supported
+    # customization point; a plain group_var list) without also passing
+    # --skip-tags adguard would still get systemd-resolved's stub listener
+    # disabled and /etc/resolv.conf repointed at 127.0.0.1, with no AdGuard
+    # container ever going to listen there — permanently broken host DNS, since
+    # nothing reverts the change.
+    - name: "AdGuard DNS: free host port 53 before the stack starts"
+      ansible.builtin.include_tasks: roles/adguard/tasks/free_host_dns_port.yml
+      when: "'adguard' in docker_enabled_services"
+      tags: [adguard]
+
     - name: Start consolidated docker compose stack
       ansible.builtin.import_role:
         name: docker
         tasks_from: start
       tags: [docker]
 
-    # Epic 18, #05: must run immediately after the stack starts, not during the
-    # earlier config-deploying phase — see roles/adguard/tasks/free_host_dns_port.yml's
-    # own header for why. A bare include_tasks, same reasoning as conduit's/hermes's
-    # provisioning below (this needs no meta-dependency re-trigger, only the
-    # running container the stack-start step immediately above just created).
-    - name: "AdGuard DNS: free host port 53 for the container"
-      ansible.builtin.include_tasks: roles/adguard/tasks/free_host_dns_port.yml
+    # Fail-fast confirmation, not sequencing safety: if AdGuard didn't actually
+    # come up (bad config, image pull issue despite the pre-pull, etc.), the host
+    # is left with no working DNS (resolved's stub is down, DNS=127.0.0.1 has
+    # nothing listening) — better to fail loudly here than let the rest of the
+    # play run blind on a broken resolver. Same docker_enabled_services guard as
+    # above — nothing to verify if AdGuard was never supposed to run.
+    - name: "AdGuard DNS: verify the container bound port 53"
+      ansible.builtin.wait_for:
+        host: 127.0.0.1
+        port: 53
+        timeout: 30
+      when: "not ansible_check_mode and 'adguard' in docker_enabled_services"
       tags: [adguard]
 
     - name: Conduit bot provisioning

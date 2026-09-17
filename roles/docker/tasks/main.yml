@@ -129,6 +129,28 @@
     msg: "Consolidated docker-compose.yml failed validation: {{ docker_compose_config.stderr }}"
   when: docker_compose_config is failed
 
+# Epic 18, #05: pull every enabled service's image now, while the host's own DNS
+# resolution is still fully intact — AdGuard's own DNS handover
+# (roles/adguard/tasks/free_host_dns_port.yml) runs immediately before the stack
+# actually starts (tasks/start.yml) and deliberately disables systemd-resolved's
+# stub listener to free port 53 for AdGuard, breaking host DNS for a brief
+# window. By the time that handover runs, "docker compose up" must not need ANY
+# network access — found via code review: a fresh VPS bootstrap needs to pull
+# every image in one "up" invocation, and if that invocation needs DNS while
+# host DNS is down, the ENTIRE stack-start fails (aborting the whole play right
+# there, since tasks/start.yml only ignores errors in --check mode). Pull-only:
+# never touches running containers or bind-mounted config files, so it's safe
+# to run this early — unlike the actual "up" (start.yml), which epic 16 already
+# established must NOT run this early (containers would start before their
+# bind-mounted config files exist). Services with `build:` instead of `image:`
+# (hermes-agent) are skipped by `docker compose pull` automatically.
+- name: Pre-pull all enabled service images before host DNS is ever touched
+  tags: [docker]
+  ansible.builtin.command:
+    cmd: "docker compose -f {{ docker_compose_dir }}/docker-compose.yml pull"
+  changed_when: true
+  ignore_errors: "{{ ansible_check_mode }}"
+
 # Epic 14, #02: docker keeps its own call site (needs these directories before its
 # own compose-stack build/start), duplicated with the hermes role's — that role-
 # ordering constraint is epic 15's to resolve, not this ticket's. What changes here

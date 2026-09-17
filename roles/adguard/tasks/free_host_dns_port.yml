@@ -1,34 +1,42 @@
 ---
 # AdGuard DNS host-port handover (epic 18, #05) — the highest-risk step in this
-# epic: a host-level DNS config change with a real failure mode (host loses DNS
-# resolution) if sequenced wrong.
+# epic: a host-level DNS config change with a real failure mode if sequenced
+# wrong. This underwent TWO real corrections during implementation, both found
+# by tracing actual Docker/systemd mechanics rather than assumption — recorded
+# here so a future reader doesn't reintroduce either bug.
 #
-# Deliberately NOT part of this role's own tasks/main.yml (which runs during the
-# early config-deploying phase, well before the docker compose stack is actually
-# started — epic 16's "Start consolidated docker compose stack" step runs at the
-# very end of site.yml's play). Disabling the host's own DNS listener before
-# AdGuard's container is even running would leave the host with no working DNS
-# resolution for the rest of the play — exactly the failure mode this file's
-# sequencing exists to prevent. Invoked from site.yml as a late, end-of-play
-# task via a bare include_tasks (mirroring conduit's/hermes's own end-of-play
-# provisioning pattern), immediately after that stack-start step.
+# Correction #1 (this file's position in site.yml): AdGuard's container cannot
+# bind host port 53 while systemd-resolved's stub listener still holds
+# 127.0.0.53:53 — Docker's docker-proxy binding 0.0.0.0:53 conflicts with ANY
+# existing bind on port 53, stub listener included. This is the single most
+# commonly documented Docker+DNS conflict on Debian/Ubuntu. So "AdGuard already
+# bound before the host listener goes down" is not physically achievable for a
+# single port — one side must vacate before the other can bind it. This file
+# therefore runs BEFORE "Start consolidated docker compose stack" in site.yml
+# (not after, as an earlier version of this ticket had it — that ordering made
+# the stack-start step itself fail immediately, since resolved was still
+# holding the port, aborting the whole play there). The goal is not a literal
+# zero-gap handover (impossible for one port) but the shortest achievable gap:
+# free the port here, then immediately continue to the compose-stack start
+# that follows this file's inclusion — the window with no working host DNS is
+# bounded to however long that immediate next step takes to bring AdGuard's
+# listener up, not stretched across the rest of the play's remaining roles.
 #
-# Verified sequence (Pi-hole's own documented order — the most common real-world
-# instance of this exact systemd-resolved-vs-Docker-DNS conflict): write the
-# drop-in, repoint /etc/resolv.conf, THEN restart. Repointing before the restart
-# (not after) avoids a window where /etc/resolv.conf still points at the now-dead
-# stub symlink (/run/systemd/resolve/stub-resolv.conf, 127.0.0.53) — DNS= in the
-# drop-in is only honored through the non-stub file
+# Correction #2 (roles/docker/tasks/main.yml's new pre-pull step): once host
+# DNS is down, "docker compose up" pulling a not-yet-cached image would itself
+# need DNS it no longer has — a second chicken-and-egg on top of the first,
+# affecting every enabled service's image on a fresh VPS bootstrap, not just
+# AdGuard's. Fixed by pulling every image while DNS still works, earlier in the
+# same play (docker's own tasks/main.yml) — see that file's comment.
+#
+# Verified sequence for the resolved-side change itself (Pi-hole's own
+# documented order — the most common real-world instance of this exact
+# conflict): write the drop-in, repoint /etc/resolv.conf, THEN restart.
+# Repointing before the restart avoids a window where /etc/resolv.conf still
+# points at the now-dead stub symlink (/run/systemd/resolve/stub-resolv.conf,
+# 127.0.0.53) — DNS= in the drop-in is only honored through the non-stub file
 # (/run/systemd/resolve/resolv.conf), never through the stub path, in any
 # systemd-resolved version.
-
-- name: Wait for AdGuard to bind port 53 before touching the host's own resolver
-  tags: [adguard]
-  ansible.builtin.wait_for:
-    host: 127.0.0.1
-    port: 53
-    timeout: 30
-  when: not ansible_check_mode
 
 - name: Ensure systemd-resolved drop-in directory exists
   tags: [adguard]
@@ -57,7 +65,7 @@
     force: true
   register: adguard_resolv_conf_repoint
 
-- name: Restart systemd-resolved to apply the new resolver config
+- name: Restart systemd-resolved to free port 53 for AdGuard
   tags: [adguard]
   ansible.builtin.systemd:
     name: systemd-resolved
