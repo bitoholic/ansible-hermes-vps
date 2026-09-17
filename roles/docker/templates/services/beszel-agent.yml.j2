@@ -18,6 +18,11 @@ beszel-agent:
     # the hub's directly-published port. TOKEN/KEY are the hub-generated
     # pairing credential (see group_vars/all/secrets.yml) — obtained from the
     # hub's web UI after its first boot, not something Ansible can originate.
+    # They're optional in the secrets manifest (not required: true) precisely
+    # because they can't exist before a first deploy already stood up the hub —
+    # until the operator completes that one-time pairing step, these render
+    # empty and the agent simply fails to authenticate; that's a self-contained
+    # failure of this one container, not a block on the rest of the deploy.
     - LISTEN=/beszel_socket/beszel.sock
     - HUB_URL=http://localhost:8090
     - TOKEN={{ secrets.beszel_agent_token }}

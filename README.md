@@ -96,7 +96,7 @@ ansible-playbook -i "${TARGET_HOST}," site.yml
 ```
 
 Protected roles that **cannot** be skipped: `secrets`, `users`, `ssh_hardening`, `common`.
-Skippable roles: `tailscale`, `docker`, `conduit`, `hermes`, `authelia`, `gateway`, `silverbullet`, `backup`.
+Skippable roles: `tailscale`, `docker`, `conduit`, `hermes`, `authelia`, `gateway`, `silverbullet`, `owntracks`, `backup`, `beszel`.
 
 ## 🧪 Local Testing
 
