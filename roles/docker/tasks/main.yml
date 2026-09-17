@@ -143,11 +143,16 @@
 # to run this early — unlike the actual "up" (start.yml), which epic 16 already
 # established must NOT run this early (containers would start before their
 # bind-mounted config files exist). Services with `build:` instead of `image:`
-# (hermes-agent) are skipped by `docker compose pull` automatically.
+# (hermes-agent) need --ignore-buildable: caught in review, verified against
+# docker/compose#8805/#10134 and this host's own `docker compose pull --help` —
+# without the flag, `docker compose pull` does NOT skip build-only services
+# automatically as an earlier version of this comment assumed; it tries to pull
+# one anyway and fails non-zero, which would abort this task (and therefore the
+# whole play, outside --check mode) on every single run, unconditionally.
 - name: Pre-pull all enabled service images before host DNS is ever touched
   tags: [docker]
   ansible.builtin.command:
-    cmd: "docker compose -f {{ docker_compose_dir }}/docker-compose.yml pull"
+    cmd: "docker compose -f {{ docker_compose_dir }}/docker-compose.yml pull --ignore-buildable"
   changed_when: true
   ignore_errors: "{{ ansible_check_mode }}"
 

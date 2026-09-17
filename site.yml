@@ -72,6 +72,12 @@
   gather_facts: true
   vars:
     ansible_user: "{{ secrets.admin_username }}"
+    # Epic 18, #05: computed once, referenced by both the DNS handover and its
+    # post-start verification below — they can't share a single block: (the
+    # docker compose stack-start task, which must run unconditionally, sits
+    # between them by design), so this avoids repeating the same condition
+    # string twice (caught in review).
+    adguard_dns_enabled: "{{ 'adguard' in docker_enabled_services }}"
   become: true
   tasks:
     - name: Assert provisioning user and platform expectations
@@ -122,7 +128,7 @@
     # nothing reverts the change.
     - name: "AdGuard DNS: free host port 53 before the stack starts"
       ansible.builtin.include_tasks: roles/adguard/tasks/free_host_dns_port.yml
-      when: "'adguard' in docker_enabled_services"
+      when: adguard_dns_enabled
       tags: [adguard]
 
     - name: Start consolidated docker compose stack
@@ -142,7 +148,7 @@
         host: 127.0.0.1
         port: 53
         timeout: 30
-      when: "not ansible_check_mode and 'adguard' in docker_enabled_services"
+      when: adguard_dns_enabled and not ansible_check_mode
       tags: [adguard]
 
     - name: Conduit bot provisioning

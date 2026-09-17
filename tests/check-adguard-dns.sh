@@ -29,6 +29,12 @@ check_in() { grep -qE "$2" "$1" || { echo "FAIL: $1 missing: $3"; exit 1; }; }
 # line_of <file> <pattern> — first matching line number, or empty.
 line_of() { grep -nE "$2" "$1" 2>/dev/null | head -1 | cut -d: -f1; }
 
+# list_has <file> <list_header_pattern> <item_pattern> <description> — the
+# other recurring idiom in this script (does list X contain item Y), generously
+# bounded to 10 following lines so it works for lists of varying length without
+# a separate context-size argument per call.
+list_has() { grep -A10 -E "$2" "$1" | grep -qE "$3" || { echo "FAIL: $4"; exit 1; }; }
+
 # 1: correction #1 (found in code review) — AdGuard's container physically
 # cannot bind host port 53 while systemd-resolved's stub listener still holds
 # it, so the DNS handover must run BEFORE the stack starts, not after. A
@@ -64,12 +70,18 @@ echo "site.yml sequencing OK (DNS handover before stack-start, verification afte
 # actually being enabled (caught in review) — otherwise an operator who
 # excludes adguard from docker_enabled_services without also using
 # --skip-tags adguard gets the host's DNS torn down for a container that will
-# never exist to take over port 53.
-if ! grep -q "adguard.*in docker_enabled_services" <<<"$HANDOVER_BLOCK"; then
-  echo "FAIL: the DNS handover task is not guarded on 'adguard' in docker_enabled_services"; exit 1
+# never exist to take over port 53. The condition is computed once (a play-level
+# var, adguard_dns_enabled) and referenced by name in both places — not repeated
+# as a literal string twice (caught in review; the two tasks can't share a
+# single block: since the unconditional stack-start task sits between them).
+if ! grep -qE "adguard_dns_enabled:.*'adguard' in docker_enabled_services" site.yml; then
+  echo "FAIL: adguard_dns_enabled is not defined as 'adguard' in docker_enabled_services"; exit 1
 fi
-if ! grep -q "adguard.*in docker_enabled_services" <<<"$VERIFY_BLOCK"; then
-  echo "FAIL: the port-53 verification task is not guarded on 'adguard' in docker_enabled_services"; exit 1
+if ! grep -q 'when: adguard_dns_enabled' <<<"$HANDOVER_BLOCK"; then
+  echo "FAIL: the DNS handover task is not guarded on adguard_dns_enabled"; exit 1
+fi
+if ! grep -q 'when: adguard_dns_enabled' <<<"$VERIFY_BLOCK"; then
+  echo "FAIL: the port-53 verification task is not guarded on adguard_dns_enabled"; exit 1
 fi
 echo "docker_enabled_services guard OK (handover and verification both skip cleanly when adguard is disabled)"
 
@@ -104,7 +116,12 @@ RENDER_LINE="$(line_of "$DOCKER_MAIN" 'Render consolidated docker-compose\.yml')
 if (( PREPULL_LINE <= RENDER_LINE )); then
   echo "FAIL: the pre-pull step must come after docker-compose.yml is rendered (needs the file to exist)"; exit 1
 fi
-echo "image pre-pull step OK (present, after compose render, before host DNS is ever touched)"
+# --ignore-buildable is not optional (caught in review, verified against
+# docker/compose#8805/#10134): without it, `docker compose pull` does not skip
+# build-only services (hermes-agent) automatically — it tries to pull one
+# anyway and fails, aborting this task and the whole play on every real run.
+check_in "$DOCKER_MAIN" 'docker compose .* pull.*--ignore-buildable' "the pre-pull command missing --ignore-buildable (hermes-agent is build-only and would fail the pull otherwise)"
+echo "image pre-pull step OK (present, after compose render, --ignore-buildable set, before host DNS is ever touched)"
 
 # 4: this sequencing-critical logic must NOT live in the role's own early-phase
 # tasks/main.yml — that runs during the config-deploying phase, well before the
@@ -119,10 +136,8 @@ echo "early-phase/late-phase separation OK"
 # 5: firewall — a UDP restricted-port class exists and is wired into
 # DOCKER-USER (v4 and v6), mirroring the existing TCP restricted-port rules.
 check_in group_vars/all/main.yml '^docker_published_restricted_udp_ports:' "docker_published_restricted_udp_ports defined"
-grep -A3 '^docker_published_restricted_udp_ports:' group_vars/all/main.yml | grep -q '  - 53' \
-  || { echo "FAIL: docker_published_restricted_udp_ports does not include 53"; exit 1; }
-grep -A8 '^docker_published_restricted_ports:' group_vars/all/main.yml | grep -q '  - 53' \
-  || { echo "FAIL: docker_published_restricted_ports (TCP) does not also include 53 (DNS TCP fallback)"; exit 1; }
+list_has group_vars/all/main.yml '^docker_published_restricted_udp_ports:' '  - 53' "docker_published_restricted_udp_ports does not include 53"
+list_has group_vars/all/main.yml '^docker_published_restricted_ports:' '  - 53' "docker_published_restricted_ports (TCP) does not also include 53 (DNS TCP fallback)"
 for rule in "DOCKER-USER v4 - restricted UDP ports from Tailscale subnet" \
             "DOCKER-USER v4 - restricted UDP ports denied for everyone else" \
             "DOCKER-USER v6 - restricted UDP ports from Tailscale ULA" \
@@ -143,8 +158,8 @@ echo "compose fragment DNS publish OK"
 # own instruction — a future revisit should not re-investigate the wrong
 # Tailscale feature).
 check_in README.md 'Manual Post-Deploy Steps' "the Manual Post-Deploy Steps section"
-grep -qi "global override nameserver" README.md || { echo "FAIL: README.md does not document the global override nameserver setting"; exit 1; }
-grep -qi "split DNS" README.md || { echo "FAIL: README.md does not distinguish global override from split-DNS"; exit 1; }
+check_in README.md 'global override nameserver' "the global override nameserver setting (case-insensitive check)"
+check_in README.md 'split DNS' "a distinction from split-DNS (case-insensitive check)"
 echo "manual DNS-override documentation OK"
 
 echo "AdGuard DNS-serving guard OK"
