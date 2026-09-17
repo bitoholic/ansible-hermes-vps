@@ -5,6 +5,17 @@
 # reorder can't silently reintroduce the broken configuration this once shipped by
 # accident (the OwnTracks HTTP-auth security fix needed a manual site.yml reorder to
 # fix, with nothing structural stopping it from happening again).
+#
+# gateway depends on beszel (epic 18, #03) for a different reason: beszel's
+# gateway_publish is fully static (no computed facts, unlike owntracks's), so
+# there's no render-ordering concern here. This dependency exists purely so
+# beszel's own tasks (its directory-bootstrap for the hub/agent/socket dirs) get
+# invoked at all — tasks/main.yml's include_vars loop below only reads a role's
+# defaults FILE by path, it never runs that role's tasks. Without this
+# dependency (and with no explicit site.yml entry, per the epic-15 precedent),
+# beszel's tasks would simply never execute.
 dependencies:
   - role: owntracks
     tags: [owntracks]
+  - role: beszel
+    tags: [beszel]

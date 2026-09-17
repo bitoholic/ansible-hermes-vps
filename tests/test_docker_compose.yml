@@ -18,6 +18,8 @@
       - hermes-agent
       - owntracks
       - owntracks-frontend
+      - beszel-hub
+      - beszel-agent
       - syncplay
     docker_networks:
       - name: gateway
@@ -52,12 +54,19 @@
       - 8008
       - 8642
       - 9119
+      - 8090
+    beszel_hub_data_dir: "{{ docker_compose_dir }}/beszel/hub"
+    beszel_socket_dir: "{{ docker_compose_dir }}/beszel/socket"
+    beszel_agent_data_dir: "{{ docker_compose_dir }}/beszel/agent"
     secrets:
+      silverbullet_domain: test.example.com
       silverbullet_admin_username: admin
       silverbullet_admin_password: P4ssw04d
       hermes_signal_account: "+15551234567"
       hermes_default_github_token: fake-github-token
       syncplay_password: fake-syncplay-pass
+      beszel_agent_key: fake-beszel-key
+      beszel_agent_token: fake-beszel-token
 
   pre_tasks:
     - name: Ensure temp render dir exists
@@ -144,6 +153,43 @@
       vars:
         compose: "{{ rendered_compose.content | b64decode | from_yaml }}"
 
+    # Epic 18 ticket #03: the hub is dual-reachable (Caddy tailnet_only route +
+    # a directly-published, firewall-restricted raw port — the same
+    # belt-and-suspenders posture SilverBullet's 3000 already has), while the
+    # agent has NO published port and NO docker.sock mount (host-level stats
+    # only, per the grilled minimal-privilege decision) — it connects to the hub
+    # purely via the shared local socket file, verified against Beszel's own
+    # official same-system docker-compose example.
+    - name: Assert beszel-hub is dual-reachable and beszel-agent has no network/docker exposure
+      ansible.builtin.assert:
+        that:
+          - compose.services['beszel-hub'].image == 'henrygd/beszel:latest'
+          # APP_URL is not cosmetic — Beszel embeds it in outbound alert-notification
+          # links (Shoutrrr/Discord/Mattermost etc.); it must point at the real
+          # tailnet_only route, not localhost, or every such link is dead off-VPS.
+          - "'APP_URL=https://monitor.test.example.com' in compose.services['beszel-hub'].environment"
+          - compose.services['beszel-hub'].ports == ['8090:8090']
+          - compose.services['beszel-hub'].networks == ['gateway']
+          - compose.services['beszel-hub'].volumes | sort == ([beszel_hub_data_dir ~ ':/beszel_data', beszel_socket_dir ~ ':/beszel_socket'] | sort)
+          - compose.services['beszel-agent'].image == 'henrygd/beszel-agent:latest'
+          - compose.services['beszel-agent'].ports is not defined
+          # network_mode: host is required (not a bridge network) for accurate
+          # host-level network-interface stats — verified against upstream's own
+          # example, not an oversight; the agent has no networks: key as a result
+          # (network_mode: host and networks: are mutually exclusive in compose).
+          - compose.services['beszel-agent'].network_mode == 'host'
+          - compose.services['beszel-agent'].networks is not defined
+          - compose.services['beszel-agent'].volumes | select('search', 'docker.sock') | list | length == 0
+          - "'LISTEN=/beszel_socket/beszel.sock' in compose.services['beszel-agent'].environment"
+          - "'HUB_URL=http://localhost:8090' in compose.services['beszel-agent'].environment"
+          - "'TOKEN=fake-beszel-token' in compose.services['beszel-agent'].environment"
+          - "'KEY=fake-beszel-key' in compose.services['beszel-agent'].environment"
+        fail_msg: >-
+          beszel-hub/beszel-agent do not match the expected shape. Rendered:
+          {{ [compose.services['beszel-hub'] | default('MISSING'), compose.services['beszel-agent'] | default('MISSING')] }}
+      vars:
+        compose: "{{ rendered_compose.content | b64decode | from_yaml }}"
+
     - name: Assert all enabled services are present in rendered docker-compose.yml
       ansible.builtin.assert:
         that:
@@ -155,6 +201,8 @@
           - "'hermes-agent:' in (rendered_compose.content | b64decode)"
           - "'owntracks:' in (rendered_compose.content | b64decode)"
           - "'owntracks-frontend:' in (rendered_compose.content | b64decode)"
+          - "'beszel-hub:' in (rendered_compose.content | b64decode)"
+          - "'beszel-agent:' in (rendered_compose.content | b64decode)"
           - "'syncplay:' in (rendered_compose.content | b64decode)"
           - "'gateway:' in (rendered_compose.content | b64decode)"
           - "'internal:' in (rendered_compose.content | b64decode)"

@@ -1,0 +1,28 @@
+beszel-agent:
+  image: henrygd/beszel-agent:latest
+  container_name: beszel-agent
+  # network_mode: host (not a custom bridge network) is required for accurate
+  # host-level network-interface stats — verified against Beszel's own official
+  # same-system docker-compose example, not an oversight. This is orthogonal to
+  # the hub<->agent link itself, which goes over the shared socket file below,
+  # not the network. No docker.sock mount: host-level stats only, by design
+  # (epic 18 spec's grilled minimal-privilege decision) — container-level stats
+  # are out of scope.
+  network_mode: host
+  depends_on:
+    - beszel-hub
+  environment:
+    # LISTEN is a filesystem path (the shared local socket), not a network
+    # address. HUB_URL uses localhost because the agent shares the host's
+    # network namespace (network_mode: host above), so localhost:8090 reaches
+    # the hub's directly-published port. TOKEN/KEY are the hub-generated
+    # pairing credential (see group_vars/all/secrets.yml) — obtained from the
+    # hub's web UI after its first boot, not something Ansible can originate.
+    - LISTEN=/beszel_socket/beszel.sock
+    - HUB_URL=http://localhost:8090
+    - TOKEN={{ secrets.beszel_agent_token }}
+    - KEY={{ secrets.beszel_agent_key }}
+  volumes:
+    - "{{ beszel_agent_data_dir }}:/var/lib/beszel-agent"
+    - "{{ beszel_socket_dir }}:/beszel_socket"
+  restart: unless-stopped

@@ -49,6 +49,14 @@ conduit_e2ee_mode: "required"
 # /store/ghash. Lives under the owntracks tree the role already manages.
 owntracks_data_dir: "{{ docker_compose_dir }}/owntracks/store"
 
+# Beszel monitoring storage (epic 18, #03): host bind-mount directories, owned by
+# wiki_volume_uid/gid, following the owntracks precedent above. beszel_socket_dir
+# is shared between the hub and agent containers for their local Unix-socket
+# connection — same-VPS monitoring needs no network hop and no published agent port.
+beszel_hub_data_dir: "{{ docker_compose_dir }}/beszel/hub"
+beszel_socket_dir: "{{ docker_compose_dir }}/beszel/socket"
+beszel_agent_data_dir: "{{ docker_compose_dir }}/beszel/agent"
+
 # Tailscale private-access overlay (epic 07). The host firewall (tailscale role) and the
 # gateway Caddy MFA bypass (epic 07 #02) both reference these, so a subnet/interface change
 # is a single edit (user story #12).
@@ -64,6 +72,9 @@ tailscale_subnet_v6: "fd7a:115c:a1e0::/48"
 #   public:     reachable from anywhere (Caddy ingress; cert/HTTP challenge ports)
 #   restricted: Tailscale clients only (services with no public ingress)
 #   8999:       syncplay - special-cased: allow from syncplay_allowed_ips, drop rest
+#   8090:       beszel hub dashboard (epic 18, #03) - also reachable via its own
+#               tailnet_only Caddy route; this is the raw-port belt-and-suspenders
+#               layer, independent of Caddy
 # NOTE: only 1:1 host:container port mappings are supported (post-DNAT dport matching).
 docker_published_public_ports:
   - 80
@@ -74,6 +85,7 @@ docker_published_restricted_ports:
   - "{{ conduit_port }}"
   - 8642
   - 9119
+  - 8090
 
 # The single Hermes agent, expressed as a data entry and consumed by the render loop in
 # the hermes role. The `default` entry is the main "second brain" agent, deployed to

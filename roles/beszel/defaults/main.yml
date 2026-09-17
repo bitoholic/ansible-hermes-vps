@@ -1,0 +1,13 @@
+---
+# Beszel's ingress contribution (epic 18, #03): the hub's monitoring dashboard.
+# tailnet_only (epic 18, #01) — no public path, no MFA; Tailscale membership
+# alone is trusted, the same posture as the OwnTracks frontend. The hub's raw
+# container port (8090) is ALSO published directly and firewall-restricted
+# (group_vars/all/main.yml's docker_published_restricted_ports) as an
+# independent enforcement layer from this Caddy route — a raw-port connection
+# never touches Caddy at all, so it needs its own gate.
+beszel_gateway_publish:
+  - host: monitor
+    upstream: beszel-hub:8090
+    mfa: false
+    tailnet_only: true

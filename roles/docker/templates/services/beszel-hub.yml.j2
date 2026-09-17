@@ -1,0 +1,18 @@
+beszel-hub:
+  image: henrygd/beszel:latest
+  container_name: beszel-hub
+  environment:
+    # APP_URL is not cosmetic: Beszel embeds it in links inside outbound alert
+    # notifications (Shoutrrr/Discord/Mattermost etc.) — left at localhost, every
+    # such link would be dead outside the VPS itself. Points at the actual
+    # tailnet_only route (roles/beszel/defaults/main.yml's beszel_gateway_publish
+    # "monitor" host) so alert links resolve for whoever's on the tailnet.
+    - APP_URL=https://monitor.{{ secrets.silverbullet_domain }}
+  ports:
+    - "8090:8090"
+  volumes:
+    - "{{ beszel_hub_data_dir }}:/beszel_data"
+    - "{{ beszel_socket_dir }}:/beszel_socket"
+  networks:
+    - gateway
+  restart: unless-stopped

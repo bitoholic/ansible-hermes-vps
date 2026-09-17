@@ -31,4 +31,6 @@ docker_enabled_services:
   - hermes-agent
   - owntracks
   - owntracks-frontend
+  - beszel-hub
+  - beszel-agent
   - syncplay

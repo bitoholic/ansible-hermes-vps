@@ -15,6 +15,7 @@
     - hermes
     - conduit
     - owntracks
+    - beszel
 
 - name: Validate gateway_routes shape
   tags: [gateway]

@@ -1,0 +1,39 @@
+---
+# Beszel directory bootstrap (epic 18, #03): hub data, the hub<->agent shared
+# local-socket directory, and agent data — all host bind-mounts owned by
+# llm_wiki, following the owntracks precedent (a Docker-initialized named
+# volume would be root-owned, and a non-root container can't necessarily write
+# into that — see roles/owntracks/tasks/main.yml's own history of this exact
+# failure). Neither the beszel hub nor agent image documents a PUID/GID-style
+# override (checked against beszel.dev/guide/environment-variables), so unlike
+# owntracks this ownership isn't verified to be load-bearing for container
+# write access — but it's harmless if the container runs as root (the likely
+# default for a single-binary Go image with no documented non-root user) and
+# keeps this role consistent with every other service's directory-bootstrap
+# convention either way.
+- name: Ensure beszel hub data directory exists
+  tags: [beszel]
+  ansible.builtin.include_role:
+    name: wiki_volume
+    tasks_from: ensure_directory
+  vars:
+    wiki_volume_directory_path: "{{ beszel_hub_data_dir }}"
+    wiki_volume_directory_mode: '0755'
+
+- name: Ensure beszel hub<->agent socket directory exists
+  tags: [beszel]
+  ansible.builtin.include_role:
+    name: wiki_volume
+    tasks_from: ensure_directory
+  vars:
+    wiki_volume_directory_path: "{{ beszel_socket_dir }}"
+    wiki_volume_directory_mode: '0755'
+
+- name: Ensure beszel agent data directory exists
+  tags: [beszel]
+  ansible.builtin.include_role:
+    name: wiki_volume
+    tasks_from: ensure_directory
+  vars:
+    wiki_volume_directory_path: "{{ beszel_agent_data_dir }}"
+    wiki_volume_directory_mode: '0755'

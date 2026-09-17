@@ -5,17 +5,25 @@
 **Blocked by:** #01
 **Blocks:** #06
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] A new role stands up the hub and agent as two containers in the consolidated compose stack, with the hub's persistent data on durable storage that survives container restarts
-- [ ] The agent connects to the hub via a local, non-networked mechanism (no published port for the agent, no Docker-socket mount)
-- [ ] The hub's dashboard is published via a tailnet-only gateway route (no MFA, no public path)
-- [ ] The hub's raw container port is also published directly and added to the firewall's Tailscale-only restricted-port class — an independent enforcement layer from the Caddy-level route, so a raw-port connection is blocked the same way a Caddy-routed one is
-- [ ] The hub's port is recorded in the port-class comment block alongside the other Tailscale-only-restricted ports, so a future addition doesn't collide with it
-- [ ] The new role's tasks are tagged and included in the skip-tags guard, and the role is wired in as a dependency of the gateway role rather than a fresh top-level entry
-- [ ] The secrets manifest has entries for the agent's hub-issued pairing credential, with the manual retrieval/population step documented clearly enough that an operator can follow it without reading the role's source
-- [ ] Consolidated docker-compose render passes with the new services enabled
+- [x] A new role stands up the hub and agent as two containers in the consolidated compose stack, with the hub's persistent data on durable storage that survives container restarts
+- [x] The agent connects to the hub via a local, non-networked mechanism (no published port for the agent, no Docker-socket mount) — verified against Beszel's own official same-system docker-compose example (shared socket file, `LISTEN`/`HUB_URL`/`TOKEN`/`KEY` env vars)
+- [x] The hub's dashboard is published via a tailnet-only gateway route (no MFA, no public path)
+- [x] The hub's raw container port is also published directly and added to the firewall's Tailscale-only restricted-port class
+- [x] The hub's port is recorded in the port-class comment block alongside the other Tailscale-only-restricted ports
+- [x] The new role's tasks are tagged and included in the skip-tags guard, and the role is wired in as a dependency of the gateway role rather than a fresh top-level entry
+- [x] The secrets manifest has entries for the agent's hub-issued pairing credential, with the manual retrieval/population step documented clearly enough that an operator can follow it without reading the role's source
+- [x] Consolidated docker-compose render passes with the new services enabled
 
 ## Notes
 
 See epic 18 spec, section "Beszel" — including the explicit call-out that the hub's own admin-account bootstrap mechanism is unverified and must be confirmed during implementation (it may also require a documented manual first-boot step, the same shape as the agent pairing). Do not attempt to script or pre-seed the agent's key/token — it's hub-generated after first boot, not something Ansible can originate, structurally identical to how `TAILSCALE_AUTHKEY` already works in this repo.
+
+## Implementation notes
+
+- **Verified against primary sources before writing any compose config** (not memory/inference): fetched Beszel's actual official same-system `docker-compose.yml` (`raw.githubusercontent.com/henrygd/beszel/main/supplemental/docker/same-system/docker-compose.yml`) and its environment-variables doc page. Confirmed image tags (`henrygd/beszel:latest`, `henrygd/beszel-agent:latest`), the hub's port (8090), the local-socket env vars (`LISTEN`, `HUB_URL`, `TOKEN`, `KEY`), and — importantly — that the agent uses `network_mode: host`, not a bridge network, even in same-system mode (needed for accurate host-level network-interface stats; unrelated to the hub link itself, which goes over the socket file). `docker.sock` is confirmed optional ("container stats only" per upstream's own comment) and omitted here.
+- **Hub admin-account bootstrap remains genuinely unverified**, as the spec flagged. A `beszel superuser upsert` CLI command exists (official docs) but the same page states the superuser identity is distinct from the regular dashboard login — it's unconfirmed whether that CLI command actually unlocks the monitoring dashboard itself or only PocketBase's internal admin panel. A third-party (non-official, AI-generated) source claimed `USER_EMAIL`/`USER_PASSWORD` env vars pre-seed the dashboard account, but this is contradicted by the official environment-variables page, which doesn't list them — not implemented here as unreliable. First hub dashboard login is therefore left as a manual, first-visit step, same shape as the agent's key/token pairing.
+- **No `user:` UID override set on either container** (unlike owntracks's recorder) — neither image documents a PUID/GID-style override, and the official example itself doesn't set one either. Forcing an unverified UID against an image with no documented support for it seemed more likely to break the container than to help; the bind-mount directories are still bootstrapped and owned by `llm_wiki` for consistency with every other service's directory convention, but that ownership isn't verified to be load-bearing here the way it is for owntracks.
+- **Epic 17's role-duplication regression test needed its bound raised** (`wiki_volume` execution count 7 → 8): `beszel` is a second `wiki_volume`-dependent role pulled in via `gateway`'s meta dependency (same shape as `owntracks`), and epic 17's own spec explicitly anticipated and scoped its test to tolerate exactly this kind of shift — not a regression, but the test's hard-coded ceiling still needed updating to match, verified against a real `--list-tasks` count rather than assumed.
+- **Code review caught a real gap after the "primary-source verified" pass above**: `APP_URL` was left at the official example's own default (`http://localhost:8090`), which is fine for testing locally but is not cosmetic in production — Beszel embeds it in outbound alert-notification links (Shoutrrr/Discord/Mattermost etc.), so every such link would be dead outside the VPS itself. Fixed to point at the hub's actual tailnet_only route (`https://monitor.<domain>`); confirmed this doesn't affect login/dashboard access itself, only outbound notification content. Added a render assertion for it — the earlier compose-test pass had asserted the agent's env vars but never the hub's own, missing this.
