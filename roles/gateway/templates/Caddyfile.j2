@@ -17,6 +17,18 @@
   }
 }
 
+(tailnet_only) {
+  # Hard-block private routes (epic 18, #01): unlike mfa_auth above, this is not a
+  # challenge — non-Tailscale sources get a flat 404, no forward_auth involved, so
+  # the route has no public path at all. Same tailscale_subnet constant as mfa_auth.
+  # Matcher deliberately named @not_tailscale_hard, distinct from mfa_auth's own
+  # @not_tailscale — a route importing both snippets (schema allows mfa: true and
+  # tailnet_only: true together) must not redefine the same matcher name twice in
+  # one server block.
+  @not_tailscale_hard not remote_ip {{ tailscale_subnet }}
+  respond @not_tailscale_hard 404
+}
+
 {# TLS rendering per route (verified with `caddy adapt`/`caddy run`, v2.11):
    - tls_mode "auto" → https:// scheme prefix, NO tls directive: automatic HTTPS
      issues a real ACME cert, including on custom ports like :8448 (a bare `tls`
@@ -29,7 +41,8 @@
   log
 {% if not auto_tls %}  tls internal
 {% endif %}
-{% if route.mfa %}  import mfa_auth
+{% if route.tailnet_only is defined and route.tailnet_only %}  import tailnet_only
+{% endif %}{% if route.mfa %}  import mfa_auth
 {% endif %}{% if route.basic_auth_user is defined %}  basic_auth {
     {{ route.basic_auth_user }} {{ route.basic_auth_hash }}
   }

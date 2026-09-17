@@ -25,6 +25,17 @@
 # basic_auth_user/basic_auth_hash mutual presence is NOT expressed here — it's
 # the one relational constraint among these fields (not a per-field check) and
 # stays a small, explicit, one-off assert in validate.yml (epic 13 ticket #02).
+#
+# tailnet_only (epic 18, #01): a second, stricter private-route model alongside
+# `mfa`. `mfa: true` is public-with-Authelia-challenge-unless-Tailscale (ADR-0001)
+# — still reachable from the public internet. `tailnet_only: true` renders a hard
+# 404 for any non-Tailscale source in Caddyfile.j2 (no forward_auth involved) —
+# genuinely no public path. The two are independent booleans, not a shared enum:
+# a route can in principle set both, and it's safe by construction — the
+# tailnet_only snippet uses its own uniquely-named matcher (@not_tailscale_hard),
+# not mfa_auth's @not_tailscale, so importing both into one server block can't
+# redefine the same matcher name twice. Not worth a mutual-exclusivity constraint
+# for a combination that's already harmless rather than merely assumed to be.
 gateway_route_schema:
   - field: host
     required: true
@@ -50,3 +61,6 @@ gateway_route_schema:
   - field: basic_auth_hash
     required: false
     type: string
+  - field: tailnet_only
+    required: false
+    type: boolean

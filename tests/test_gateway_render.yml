@@ -45,11 +45,11 @@
 
     # Epic 13 ticket #01: catches an accidental deletion of a schema entry — the schema
     # is the single source of truth ticket #02's validate.yml engine walks generically.
-    - name: Gateway route schema declares exactly the 7 currently-live fields
+    - name: Gateway route schema declares exactly the 8 currently-live fields
       ansible.builtin.assert:
         that:
           - (gateway_route_schema | map(attribute='field') | list | sort) ==
-            (['basic_auth_hash', 'basic_auth_user', 'host', 'mfa', 'port', 'tls_mode', 'upstream'] | sort)
+            (['basic_auth_hash', 'basic_auth_user', 'host', 'mfa', 'port', 'tailnet_only', 'tls_mode', 'upstream'] | sort)
           - gateway_route_schema | selectattr('required', 'undefined') | list | length == 0
         fail_msg: "gateway route schema (vars/main.yml) fields mismatch: {{ gateway_route_schema | map(attribute='field') | list }}"
 
@@ -105,6 +105,83 @@
       vars:
         rendered: "{{ lookup('file', '/tmp/gateway_test_render/Caddyfile') }}"
         gateway_routes: "{{ silverbullet_gateway_publish + hermes_gateway_publish + authelia_gateway_publish + conduit_gateway_publish + owntracks_gateway_publish }}"
+
+    # Epic 18 ticket #01: a route with tailnet_only: true renders a hard 404 block for
+    # non-Tailscale sources instead of the MFA-bypass challenge — genuinely no public
+    # path, not merely gated. Rendered against a synthetic route (none of today's real
+    # routes use this field yet) into a separate file so the real-route assertions above
+    # stay untouched.
+    - name: Render a synthetic tailnet_only route
+      ansible.builtin.template:
+        src: "{{ playbook_dir }}/../roles/gateway/templates/Caddyfile.j2"
+        dest: /tmp/gateway_test_render/Caddyfile.tailnet_only
+      vars:
+        gateway_routes:
+          - host: monitor
+            upstream: beszel-hub:8090
+            mfa: false
+            tailnet_only: true
+
+    - name: Assert the tailnet_only route hard-blocks non-Tailscale sources with no MFA/basic_auth
+      ansible.builtin.assert:
+        that:
+          - "'(tailnet_only) {' in rendered_tailnet_only"
+          - "rendered_tailnet_only is search('respond @not_tailscale_hard 404')"
+          # Exact-match on the whole rendered block (log line through closing brace)
+          # — this alone already proves no import mfa_auth / basic_auth line snuck
+          # in, since any extra line would break the match.
+          - "rendered_tailnet_only is search('monitor\\.test\\.example\\.com \\{\\n  log\\n  tls internal\\n  import tailnet_only\\n  reverse_proxy beszel-hub:8090\\n\\}')"
+        fail_msg: "tailnet_only route did not render the expected hard-block shape: {{ rendered_tailnet_only }}"
+      vars:
+        rendered_tailnet_only: "{{ lookup('file', '/tmp/gateway_test_render/Caddyfile.tailnet_only') }}"
+
+    # A route could in principle set both mfa: true and tailnet_only: true (the
+    # schema comment calls this safe by construction — distinct matcher names,
+    # not a shared @not_tailscale). Render it to prove that in practice, not just
+    # in the comment: both imports appear, and the tailnet_only snippet's matcher
+    # name never collides with mfa_auth's.
+    - name: Render a synthetic route with both mfa and tailnet_only set
+      ansible.builtin.template:
+        src: "{{ playbook_dir }}/../roles/gateway/templates/Caddyfile.j2"
+        dest: /tmp/gateway_test_render/Caddyfile.both_flags
+      vars:
+        gateway_routes:
+          - host: monitor
+            upstream: beszel-hub:8090
+            mfa: true
+            tailnet_only: true
+
+    - name: Assert a route with both flags imports both snippets with no matcher-name collision
+      ansible.builtin.assert:
+        that:
+          - "rendered_both_flags is search('monitor\\.test\\.example\\.com \\{\\n  log\\n  tls internal\\n  import tailnet_only\\n  import mfa_auth\\n  reverse_proxy beszel-hub:8090\\n\\}')"
+          # Each snippet defines its matcher under a distinct name — matching on the
+          # full definition line (not just the `@name`) so this can't accidentally
+          # match either snippet's own explanatory comment text.
+          - "'@not_tailscale not remote_ip' in rendered_both_flags"
+          - "'@not_tailscale_hard not remote_ip' in rendered_both_flags"
+        fail_msg: "route with mfa+tailnet_only both set did not render safely: {{ rendered_both_flags }}"
+      vars:
+        rendered_both_flags: "{{ lookup('file', '/tmp/gateway_test_render/Caddyfile.both_flags') }}"
+
+    - name: Malformed route (non-boolean tailnet_only) must fail fast
+      block:
+        - ansible.builtin.include_tasks:
+            file: "{{ playbook_dir }}/../roles/gateway/tasks/validate.yml"
+          vars:
+            gateway_routes:
+              - host: wiki
+                upstream: silverbullet:3000
+                mfa: false
+                tailnet_only: "yes"
+      rescue:
+        - ansible.builtin.set_fact:
+            nonboolean_tailnet_only_failed_fast: true
+      always:
+        - ansible.builtin.assert:
+            that:
+              - nonboolean_tailnet_only_failed_fast | default(false)
+            fail_msg: "gateway did NOT fail fast on a non-boolean tailnet_only"
 
     - name: Malformed route (missing upstream) must fail fast
       block:
