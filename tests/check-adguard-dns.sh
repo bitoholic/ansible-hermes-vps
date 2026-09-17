@@ -24,7 +24,10 @@ ADGUARD_FRAGMENT=roles/docker/templates/services/adguard.yml.j2
 # check_in <file> <pattern> <description> — mirrors check-tailscale.sh's
 # single-file check() helper, generalized to take the target file as an
 # argument since this script spans several files, not just one.
-check_in() { grep -qE "$2" "$1" || { echo "FAIL: $1 missing: $3"; exit 1; }; }
+# Case-insensitive (-i): the two README prose checks below need it (matching a
+# heading/phrase regardless of capitalization), and none of this script's other
+# patterns are specific enough that case-folding could cause a false match.
+check_in() { grep -qEi "$2" "$1" || { echo "FAIL: $1 missing: $3"; exit 1; }; }
 
 # line_of <file> <pattern> — first matching line number, or empty.
 line_of() { grep -nE "$2" "$1" 2>/dev/null | head -1 | cut -d: -f1; }
@@ -33,7 +36,7 @@ line_of() { grep -nE "$2" "$1" 2>/dev/null | head -1 | cut -d: -f1; }
 # other recurring idiom in this script (does list X contain item Y), generously
 # bounded to 10 following lines so it works for lists of varying length without
 # a separate context-size argument per call.
-list_has() { grep -A10 -E "$2" "$1" | grep -qE "$3" || { echo "FAIL: $4"; exit 1; }; }
+list_has() { grep -A10 -E "$2" "$1" | grep -qE "$3" || { echo "FAIL: $1 missing: $4"; exit 1; }; }
 
 # 1: correction #1 (found in code review) — AdGuard's container physically
 # cannot bind host port 53 while systemd-resolved's stub listener still holds
@@ -74,9 +77,7 @@ echo "site.yml sequencing OK (DNS handover before stack-start, verification afte
 # var, adguard_dns_enabled) and referenced by name in both places — not repeated
 # as a literal string twice (caught in review; the two tasks can't share a
 # single block: since the unconditional stack-start task sits between them).
-if ! grep -qE "adguard_dns_enabled:.*'adguard' in docker_enabled_services" site.yml; then
-  echo "FAIL: adguard_dns_enabled is not defined as 'adguard' in docker_enabled_services"; exit 1
-fi
+check_in site.yml "adguard_dns_enabled:.*'adguard' in docker_enabled_services" "adguard_dns_enabled defined as 'adguard' in docker_enabled_services"
 if ! grep -q 'when: adguard_dns_enabled' <<<"$HANDOVER_BLOCK"; then
   echo "FAIL: the DNS handover task is not guarded on adguard_dns_enabled"; exit 1
 fi
@@ -136,8 +137,8 @@ echo "early-phase/late-phase separation OK"
 # 5: firewall — a UDP restricted-port class exists and is wired into
 # DOCKER-USER (v4 and v6), mirroring the existing TCP restricted-port rules.
 check_in group_vars/all/main.yml '^docker_published_restricted_udp_ports:' "docker_published_restricted_udp_ports defined"
-list_has group_vars/all/main.yml '^docker_published_restricted_udp_ports:' '  - 53' "docker_published_restricted_udp_ports does not include 53"
-list_has group_vars/all/main.yml '^docker_published_restricted_ports:' '  - 53' "docker_published_restricted_ports (TCP) does not also include 53 (DNS TCP fallback)"
+list_has group_vars/all/main.yml '^docker_published_restricted_udp_ports:' '  - 53' "53 in docker_published_restricted_udp_ports"
+list_has group_vars/all/main.yml '^docker_published_restricted_ports:' '  - 53' "53 in docker_published_restricted_ports (TCP, for DNS's TCP fallback)"
 for rule in "DOCKER-USER v4 - restricted UDP ports from Tailscale subnet" \
             "DOCKER-USER v4 - restricted UDP ports denied for everyone else" \
             "DOCKER-USER v6 - restricted UDP ports from Tailscale ULA" \
@@ -158,8 +159,8 @@ echo "compose fragment DNS publish OK"
 # own instruction — a future revisit should not re-investigate the wrong
 # Tailscale feature).
 check_in README.md 'Manual Post-Deploy Steps' "the Manual Post-Deploy Steps section"
-check_in README.md 'global override nameserver' "the global override nameserver setting (case-insensitive check)"
-check_in README.md 'split DNS' "a distinction from split-DNS (case-insensitive check)"
+check_in README.md 'global override nameserver' "the global override nameserver setting"
+check_in README.md 'split DNS' "a distinction from split-DNS"
 echo "manual DNS-override documentation OK"
 
 echo "AdGuard DNS-serving guard OK"
