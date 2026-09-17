@@ -6,8 +6,16 @@ adguard:
   # sets http.address to 0.0.0.0:3000) — Caddy's gateway route (roles/adguard/
   # defaults/main.yml) reaches it container-to-container on that actual port,
   # unaffected by this host-side remap.
+  #
+  # 53:53 (epic 18, #05): DNS for the tailnet, both protocols — AdGuardHome.yaml's
+  # dns.bind_hosts/port (set in ticket #04, in anticipation of this) is what the
+  # container listens on internally; this just publishes it to the host. Restricted
+  # to Tailscale sources at the firewall (roles/tailscale/tasks/main.yml), not
+  # public — see docker_published_restricted_ports/_udp_ports.
   ports:
     - "3001:3000"
+    - "53:53/tcp"
+    - "53:53/udp"
   volumes:
     - "{{ adguard_conf_dir }}:/opt/adguardhome/conf"
     - "{{ adguard_work_dir }}:/opt/adguardhome/work"

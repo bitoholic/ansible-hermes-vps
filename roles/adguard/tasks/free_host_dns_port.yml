@@ -1,0 +1,72 @@
+---
+# AdGuard DNS host-port handover (epic 18, #05) — the highest-risk step in this
+# epic: a host-level DNS config change with a real failure mode (host loses DNS
+# resolution) if sequenced wrong.
+#
+# Deliberately NOT part of this role's own tasks/main.yml (which runs during the
+# early config-deploying phase, well before the docker compose stack is actually
+# started — epic 16's "Start consolidated docker compose stack" step runs at the
+# very end of site.yml's play). Disabling the host's own DNS listener before
+# AdGuard's container is even running would leave the host with no working DNS
+# resolution for the rest of the play — exactly the failure mode this file's
+# sequencing exists to prevent. Invoked from site.yml as a late, end-of-play
+# task via a bare include_tasks (mirroring conduit's/hermes's own end-of-play
+# provisioning pattern), immediately after that stack-start step.
+#
+# Verified sequence (Pi-hole's own documented order — the most common real-world
+# instance of this exact systemd-resolved-vs-Docker-DNS conflict): write the
+# drop-in, repoint /etc/resolv.conf, THEN restart. Repointing before the restart
+# (not after) avoids a window where /etc/resolv.conf still points at the now-dead
+# stub symlink (/run/systemd/resolve/stub-resolv.conf, 127.0.0.53) — DNS= in the
+# drop-in is only honored through the non-stub file
+# (/run/systemd/resolve/resolv.conf), never through the stub path, in any
+# systemd-resolved version.
+
+- name: Wait for AdGuard to bind port 53 before touching the host's own resolver
+  tags: [adguard]
+  ansible.builtin.wait_for:
+    host: 127.0.0.1
+    port: 53
+    timeout: 30
+  when: not ansible_check_mode
+
+- name: Ensure systemd-resolved drop-in directory exists
+  tags: [adguard]
+  ansible.builtin.file:
+    path: /etc/systemd/resolved.conf.d
+    state: directory
+    mode: '0755'
+
+- name: Disable systemd-resolved's stub listener so AdGuard can bind port 53
+  tags: [adguard]
+  ansible.builtin.copy:
+    dest: /etc/systemd/resolved.conf.d/adguardhome.conf
+    content: |
+      [Resolve]
+      DNS=127.0.0.1
+      DNSStubListener=no
+    mode: '0644'
+  register: adguard_resolved_dropin
+
+- name: Repoint /etc/resolv.conf at systemd-resolved's non-stub file
+  tags: [adguard]
+  ansible.builtin.file:
+    src: /run/systemd/resolve/resolv.conf
+    dest: /etc/resolv.conf
+    state: link
+    force: true
+  register: adguard_resolv_conf_repoint
+
+- name: Restart systemd-resolved to apply the new resolver config
+  tags: [adguard]
+  ansible.builtin.systemd:
+    name: systemd-resolved
+    state: restarted
+  when: adguard_resolved_dropin is changed or adguard_resolv_conf_repoint is changed
+
+# Manual, external-console step (not Ansible-automatable): point the tailnet's
+# devices at AdGuard via Tailscale's admin console "override DNS servers"
+# setting — a GLOBAL OVERRIDE nameserver pointed at this VPS's Tailscale IP, not
+# split-DNS (which solves a different problem: routing specific domains
+# elsewhere, not network-wide ad-blocking). Full instructions: README.md,
+# "Manual Post-Deploy Steps".

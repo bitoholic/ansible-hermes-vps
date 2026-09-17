@@ -57,6 +57,9 @@
       - 9119
       - 8090
       - 3001
+      - 53
+    docker_published_restricted_udp_ports:
+      - 53
     beszel_hub_data_dir: "{{ docker_compose_dir }}/beszel/hub"
     beszel_socket_dir: "{{ docker_compose_dir }}/beszel/socket"
     beszel_agent_data_dir: "{{ docker_compose_dir }}/beszel/agent"
@@ -113,7 +116,8 @@
              | map(attribute='ports') | flatten
              | map('regex_replace', ':.*$', '') | map('int') | unique | sort }}
         classified_ports: >-
-          {{ (docker_published_public_ports + docker_published_restricted_ports + [8999])
+          {{ (docker_published_public_ports + docker_published_restricted_ports
+             + (docker_published_restricted_udp_ports | default([])) + [8999])
              | map('int') | unique | sort }}
 
     - name: Assert owntracks publishes no host port (structural, not substring)
@@ -202,13 +206,18 @@
     # chosen specifically to avoid colliding with SilverBullet's 3000). No
     # `user:` override — the official image always runs as root (confirmed
     # against upstream), which is also why it can bind port 53 with no extra
-    # capability configuration once ticket #05 publishes it. Config is entirely
-    # file-based (AdGuardHome.yaml, tested separately below), not env vars.
-    - name: Assert adguard is dual-reachable on a non-colliding port
+    # capability configuration. Config is entirely file-based (AdGuardHome.yaml,
+    # tested separately below), not env vars.
+    #
+    # Epic 18 ticket #05: DNS (53, both protocols) is also published — restricted
+    # to Tailscale sources at the firewall (roles/tailscale/tasks/main.yml), not
+    # public. AdGuardHome.yaml's dns.bind_hosts/port (set in ticket #04, in
+    # anticipation of this) is what the container listens on internally.
+    - name: Assert adguard is dual-reachable on a non-colliding port and serves DNS
       ansible.builtin.assert:
         that:
           - compose.services['adguard'].image == 'adguard/adguardhome:latest'
-          - compose.services['adguard'].ports == ['3001:3000']
+          - compose.services['adguard'].ports | sort == (['3001:3000', '53:53/tcp', '53:53/udp'] | sort)
           - compose.services['adguard'].networks == ['gateway']
           - compose.services['adguard'].volumes | sort == ([adguard_conf_dir ~ ':/opt/adguardhome/conf', adguard_work_dir ~ ':/opt/adguardhome/work'] | sort)
         fail_msg: >-

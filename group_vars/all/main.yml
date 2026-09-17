@@ -77,7 +77,9 @@ tailscale_subnet_v6: "fd7a:115c:a1e0::/48"
 # INPUT (Docker DNATs in nat PREROUTING), so access classes are enforced in the
 # DOCKER-USER chain by the tailscale role (single firewall owner).
 #   public:     reachable from anywhere (Caddy ingress; cert/HTTP challenge ports)
-#   restricted: Tailscale clients only (services with no public ingress)
+#   restricted: Tailscale clients only (services with no public ingress), TCP
+#   restricted_udp: same Tailscale-only model, for UDP services (epic 18, #05:
+#               today's mechanism was TCP-only until AdGuard's DNS needed UDP)
 #   8999:       syncplay - special-cased: allow from syncplay_allowed_ips, drop rest
 #   8090:       beszel hub dashboard (epic 18, #03) - also reachable via its own
 #               tailnet_only Caddy route; this is the raw-port belt-and-suspenders
@@ -85,6 +87,11 @@ tailscale_subnet_v6: "fd7a:115c:a1e0::/48"
 #   3001:       adguard admin UI (epic 18, #04) - same belt-and-suspenders
 #               reasoning as 8090; deliberately not 3000 to avoid colliding with
 #               SilverBullet's published port
+#   53:         AdGuard DNS (epic 18, #05) - Tailscale-only, both protocols. TCP
+#               joins the existing restricted list (DNS falls back to TCP for
+#               large responses); UDP (DNS's primary transport) needs the new
+#               restricted_udp list since the existing DOCKER-USER mechanism only
+#               ever matched protocol: tcp.
 # NOTE: only 1:1 host:container port mappings are supported (post-DNAT dport matching).
 docker_published_public_ports:
   - 80
@@ -97,6 +104,9 @@ docker_published_restricted_ports:
   - 9119
   - 8090
   - 3001
+  - 53
+docker_published_restricted_udp_ports:
+  - 53
 
 # The single Hermes agent, expressed as a data entry and consumed by the render loop in
 # the hermes role. The `default` entry is the main "second brain" agent, deployed to

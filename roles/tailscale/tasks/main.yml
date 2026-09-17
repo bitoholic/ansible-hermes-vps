@@ -135,9 +135,12 @@
 # networks (container-to-container, e.g. caddy -> conduit:8008) RETURNs early so
 # Docker's own forwarding applies — only host-uplink traffic is classified by port.
 #
-# Port classes (group_vars/all/main.yml): public (80/443/8448), Tailscale-only
-# (3000, conduit 8008, 8642, 9119), and syncplay 8999 (syncplay_allowed_ips).
-# NOTE: 1:1 host:container mappings only — post-DNAT dport == original dport.
+# Port classes (group_vars/all/main.yml): public (80/443/8448), Tailscale-only TCP
+# (3000, conduit 8008, 8642, 9119, beszel 8090, adguard-ui 3001, adguard-dns 53),
+# Tailscale-only UDP (epic 18 #05: adguard-dns 53 — the first UDP restricted
+# service; the mechanism below was TCP-only until this), and syncplay 8999
+# (syncplay_allowed_ips). NOTE: 1:1 host:container mappings only — post-DNAT
+# dport == original dport.
 # The rules are not persisted across reboot; the deployment model restores them
 # by playbook run (Docker recreates the empty chain at daemon start).
 - name: Reset the DOCKER-USER chain (declarative rebuild)
@@ -206,6 +209,32 @@
     jump: DROP
     comment: "tailscale-only service deny"
   loop: "{{ docker_published_restricted_ports }}"
+
+# Epic 18, #05: mirrors the TCP restricted-port pair above, protocol: udp — the
+# first UDP-restricted service (AdGuard's DNS). A separate list/rule pair rather
+# than teaching the existing one a protocol parameter: two protocols is not
+# enough live cases to justify a generic per-protocol mechanism (same reasoning
+# epic 13 already applied to the gateway route schema).
+- name: DOCKER-USER v4 - restricted UDP ports from Tailscale subnet
+  tags: [tailscale]
+  ansible.builtin.iptables:
+    chain: DOCKER-USER
+    source: "{{ tailscale_subnet }}"
+    protocol: udp
+    destination_port: "{{ item }}"
+    jump: ACCEPT
+    comment: "tailscale-only service (udp)"
+  loop: "{{ docker_published_restricted_udp_ports | default([]) }}"
+
+- name: DOCKER-USER v4 - restricted UDP ports denied for everyone else
+  tags: [tailscale]
+  ansible.builtin.iptables:
+    chain: DOCKER-USER
+    protocol: udp
+    destination_port: "{{ item }}"
+    jump: DROP
+    comment: "tailscale-only service deny (udp)"
+  loop: "{{ docker_published_restricted_udp_ports | default([]) }}"
 
 - name: DOCKER-USER v4 - public ingress ports
   tags: [tailscale]
@@ -278,6 +307,30 @@
     jump: DROP
     comment: "tailscale-only service deny"
   loop: "{{ docker_published_restricted_ports }}"
+
+# Epic 18, #05: v6 mirror of the v4 restricted-UDP pair above.
+- name: DOCKER-USER v6 - restricted UDP ports from Tailscale ULA
+  tags: [tailscale]
+  ansible.builtin.iptables:
+    chain: DOCKER-USER
+    ip_version: ipv6
+    source: "{{ tailscale_subnet_v6 }}"
+    protocol: udp
+    destination_port: "{{ item }}"
+    jump: ACCEPT
+    comment: "tailscale-only service (udp)"
+  loop: "{{ docker_published_restricted_udp_ports | default([]) }}"
+
+- name: DOCKER-USER v6 - restricted UDP ports denied for everyone else
+  tags: [tailscale]
+  ansible.builtin.iptables:
+    chain: DOCKER-USER
+    ip_version: ipv6
+    protocol: udp
+    destination_port: "{{ item }}"
+    jump: DROP
+    comment: "tailscale-only service deny (udp)"
+  loop: "{{ docker_published_restricted_udp_ports | default([]) }}"
 
 - name: DOCKER-USER v6 - public ingress ports
   tags: [tailscale]

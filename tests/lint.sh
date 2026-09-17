@@ -80,6 +80,14 @@ python3 scripts/generate-env.py --check
 # rules. Live ufw/Tailscale behavior is operator-validated on the VPS (guarded/skipped in CI).
 ./tests/check-tailscale.sh
 
+# AdGuard DNS-serving (epic 18 ticket #05): the host-level systemd-resolved handover's
+# sequencing contract (must run after the docker stack starts, wait -> drop-in ->
+# repoint -> restart order, kept out of the role's early-phase tasks), the UDP
+# restricted-port firewall class, the compose fragment's DNS port publish, and the
+# manual Tailscale-console documentation. Static/structural only — the live host-level
+# change itself is operator-validated on the VPS, never executed here.
+./tests/check-adguard-dns.sh
+
 # backup_sync module tests (epic 04 tickets #01-#04): CLI interface + sync/create-pr/git-crypt-init
 # unit tests (git-crypt-init guarded/skipped when the git-crypt binary is absent). Also asserts the
 # backup role is a thin adapter (epic 04 ticket #07): deploys only the module, the credential helper,

@@ -109,6 +109,15 @@
         tasks_from: start
       tags: [docker]
 
+    # Epic 18, #05: must run immediately after the stack starts, not during the
+    # earlier config-deploying phase — see roles/adguard/tasks/free_host_dns_port.yml's
+    # own header for why. A bare include_tasks, same reasoning as conduit's/hermes's
+    # provisioning below (this needs no meta-dependency re-trigger, only the
+    # running container the stack-start step immediately above just created).
+    - name: "AdGuard DNS: free host port 53 for the container"
+      ansible.builtin.include_tasks: roles/adguard/tasks/free_host_dns_port.yml
+      tags: [adguard]
+
     - name: Conduit bot provisioning
       ansible.builtin.include_tasks: roles/conduit/tasks/provision.yml
       tags: [conduit]
