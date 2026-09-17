@@ -57,6 +57,13 @@ beszel_hub_data_dir: "{{ docker_compose_dir }}/beszel/hub"
 beszel_socket_dir: "{{ docker_compose_dir }}/beszel/socket"
 beszel_agent_data_dir: "{{ docker_compose_dir }}/beszel/agent"
 
+# AdGuard Home storage (epic 18, #04): host bind-mount directories, owned by
+# wiki_volume_uid/gid, following the owntracks/beszel precedent above.
+# adguard_conf_dir holds the pre-seeded AdGuardHome.yaml (roles/adguard);
+# adguard_work_dir is AdGuard's own runtime data (blocklists, query log).
+adguard_conf_dir: "{{ docker_compose_dir }}/adguard/conf"
+adguard_work_dir: "{{ docker_compose_dir }}/adguard/work"
+
 # Tailscale private-access overlay (epic 07). The host firewall (tailscale role) and the
 # gateway Caddy MFA bypass (epic 07 #02) both reference these, so a subnet/interface change
 # is a single edit (user story #12).
@@ -75,6 +82,9 @@ tailscale_subnet_v6: "fd7a:115c:a1e0::/48"
 #   8090:       beszel hub dashboard (epic 18, #03) - also reachable via its own
 #               tailnet_only Caddy route; this is the raw-port belt-and-suspenders
 #               layer, independent of Caddy
+#   3001:       adguard admin UI (epic 18, #04) - same belt-and-suspenders
+#               reasoning as 8090; deliberately not 3000 to avoid colliding with
+#               SilverBullet's published port
 # NOTE: only 1:1 host:container port mappings are supported (post-DNAT dport matching).
 docker_published_public_ports:
   - 80
@@ -86,6 +96,7 @@ docker_published_restricted_ports:
   - 8642
   - 9119
   - 8090
+  - 3001
 
 # The single Hermes agent, expressed as a data entry and consumed by the render loop in
 # the hermes role. The `default` entry is the main "second brain" agent, deployed to

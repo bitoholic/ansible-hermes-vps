@@ -33,4 +33,5 @@ docker_enabled_services:
   - owntracks-frontend
   - beszel-hub
   - beszel-agent
+  - adguard
   - syncplay

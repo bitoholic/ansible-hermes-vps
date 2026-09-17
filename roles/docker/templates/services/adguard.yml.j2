@@ -1,0 +1,16 @@
+adguard:
+  image: adguard/adguardhome:latest
+  container_name: adguard
+  # Host-side 3001 avoids colliding with SilverBullet's published 3000; the
+  # container's own internal listener stays at its default 3000 (AdGuardHome.yaml
+  # sets http.address to 0.0.0.0:3000) — Caddy's gateway route (roles/adguard/
+  # defaults/main.yml) reaches it container-to-container on that actual port,
+  # unaffected by this host-side remap.
+  ports:
+    - "3001:3000"
+  volumes:
+    - "{{ adguard_conf_dir }}:/opt/adguardhome/conf"
+    - "{{ adguard_work_dir }}:/opt/adguardhome/work"
+  networks:
+    - gateway
+  restart: unless-stopped

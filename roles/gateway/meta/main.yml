@@ -14,8 +14,13 @@
 # defaults FILE by path, it never runs that role's tasks. Without this
 # dependency (and with no explicit site.yml entry, per the epic-15 precedent),
 # beszel's tasks would simply never execute.
+# gateway depends on adguard for the same reason as beszel: adguard's
+# gateway_publish is fully static, so this exists purely to get adguard's own
+# directory-bootstrap/config-render tasks invoked at all.
 dependencies:
   - role: owntracks
     tags: [owntracks]
   - role: beszel
     tags: [beszel]
+  - role: adguard
+    tags: [adguard]

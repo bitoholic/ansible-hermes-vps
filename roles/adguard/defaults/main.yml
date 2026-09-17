@@ -1,0 +1,16 @@
+---
+# AdGuard's ingress contribution (epic 18, #04): the admin UI only — DNS-serving
+# (port 53, firewall rules, the host-level systemd-resolved change) is epic 18
+# ticket #05's scope, not this one. tailnet_only (epic 18, #01) — no public
+# path, no MFA. The raw container port (3001) is ALSO published directly and
+# firewall-restricted (group_vars/all/main.yml's docker_published_restricted_ports)
+# as an independent enforcement layer from this Caddy route. upstream targets
+# the container's own default listen port (3000, unchanged) — the host-side
+# port is remapped to 3001 purely to avoid colliding with SilverBullet's 3000;
+# container-to-container traffic (Caddy -> adguard) uses the container's actual
+# port regardless of the host-side remap.
+adguard_gateway_publish:
+  - host: adguard
+    upstream: adguard:3000
+    mfa: false
+    tailnet_only: true

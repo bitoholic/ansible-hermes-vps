@@ -16,6 +16,7 @@
     - conduit
     - owntracks
     - beszel
+    - adguard
 
 - name: Validate gateway_routes shape
   tags: [gateway]

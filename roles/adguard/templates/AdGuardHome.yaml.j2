@@ -1,0 +1,19 @@
+# Pre-seeded config (epic 18, #04): this is what skips AdGuard's interactive
+# first-run setup wizard entirely — verified against AdGuard's own official
+# Configuration wiki (github.com/AdguardTeam/AdGuardHome/wiki/Configuration).
+# No schema_version key: confirmed not required for a hand-written config; the
+# only schema_version example found upstream belongs to an explicitly
+# experimental "next-gen" config rewrite, not the stable format this image uses.
+users:
+  - name: {{ secrets.adguard_admin_username }}
+    password: '{{ secrets.adguard_admin_password_hash }}'
+http:
+  address: 0.0.0.0:3000
+dns:
+  # Configured now so the wizard-skip is complete, even though nothing routes
+  # to port 53 externally yet — that's epic 18 ticket #05's job (firewall +
+  # systemd-resolved). The container's own internal listener binding here is
+  # inert until then.
+  bind_hosts:
+    - 0.0.0.0
+  port: 53

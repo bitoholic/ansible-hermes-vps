@@ -20,6 +20,7 @@
       - owntracks-frontend
       - beszel-hub
       - beszel-agent
+      - adguard
       - syncplay
     docker_networks:
       - name: gateway
@@ -55,9 +56,12 @@
       - 8642
       - 9119
       - 8090
+      - 3001
     beszel_hub_data_dir: "{{ docker_compose_dir }}/beszel/hub"
     beszel_socket_dir: "{{ docker_compose_dir }}/beszel/socket"
     beszel_agent_data_dir: "{{ docker_compose_dir }}/beszel/agent"
+    adguard_conf_dir: "{{ docker_compose_dir }}/adguard/conf"
+    adguard_work_dir: "{{ docker_compose_dir }}/adguard/work"
     secrets:
       silverbullet_domain: test.example.com
       silverbullet_admin_username: admin
@@ -67,6 +71,8 @@
       syncplay_password: fake-syncplay-pass
       beszel_agent_key: fake-beszel-key
       beszel_agent_token: fake-beszel-token
+      adguard_admin_username: admin
+      adguard_admin_password_hash: "$2y$12$fakeAdguardBcryptHashXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
 
   pre_tasks:
     - name: Ensure temp render dir exists
@@ -190,6 +196,27 @@
       vars:
         compose: "{{ rendered_compose.content | b64decode | from_yaml }}"
 
+    # Epic 18 ticket #04: AdGuard's admin UI is dual-reachable like Beszel's hub —
+    # a tailnet_only Caddy route (upstream: adguard:3000, the container's own
+    # default listen port, unchanged) plus a directly-published host port (3001,
+    # chosen specifically to avoid colliding with SilverBullet's 3000). No
+    # `user:` override — the official image always runs as root (confirmed
+    # against upstream), which is also why it can bind port 53 with no extra
+    # capability configuration once ticket #05 publishes it. Config is entirely
+    # file-based (AdGuardHome.yaml, tested separately below), not env vars.
+    - name: Assert adguard is dual-reachable on a non-colliding port
+      ansible.builtin.assert:
+        that:
+          - compose.services['adguard'].image == 'adguard/adguardhome:latest'
+          - compose.services['adguard'].ports == ['3001:3000']
+          - compose.services['adguard'].networks == ['gateway']
+          - compose.services['adguard'].volumes | sort == ([adguard_conf_dir ~ ':/opt/adguardhome/conf', adguard_work_dir ~ ':/opt/adguardhome/work'] | sort)
+        fail_msg: >-
+          adguard does not match the expected shape. Rendered:
+          {{ compose.services['adguard'] | default('MISSING') }}
+      vars:
+        compose: "{{ rendered_compose.content | b64decode | from_yaml }}"
+
     - name: Assert all enabled services are present in rendered docker-compose.yml
       ansible.builtin.assert:
         that:
@@ -203,6 +230,7 @@
           - "'owntracks-frontend:' in (rendered_compose.content | b64decode)"
           - "'beszel-hub:' in (rendered_compose.content | b64decode)"
           - "'beszel-agent:' in (rendered_compose.content | b64decode)"
+          - "'adguard:' in (rendered_compose.content | b64decode)"
           - "'syncplay:' in (rendered_compose.content | b64decode)"
           - "'gateway:' in (rendered_compose.content | b64decode)"
           - "'internal:' in (rendered_compose.content | b64decode)"
@@ -211,3 +239,32 @@
           - "'owntracks_data:' not in (rendered_compose.content | b64decode)"
           - "'syncplay_data:' in (rendered_compose.content | b64decode)"
         fail_msg: "Rendered docker-compose.yml is missing expected services or configuration."
+
+    # Epic 18 ticket #04: AdGuardHome.yaml is what actually skips the interactive
+    # setup wizard — a real correctness stake, not just a compose-fragment shape.
+    # Verified minimal shape against AdGuard's own official Configuration wiki:
+    # users[].name/password, http.address, dns.bind_hosts/port. No schema_version
+    # key (confirmed not required for a hand-written config; the only schema_version
+    # example found upstream belongs to an explicitly experimental config rewrite).
+    - name: Render AdGuard Home configuration
+      ansible.builtin.template:
+        src: "{{ playbook_dir }}/../roles/adguard/templates/AdGuardHome.yaml.j2"
+        dest: /tmp/docker_compose_test/AdGuardHome.yaml
+      vars:
+        secrets:
+          adguard_admin_username: admin
+          adguard_admin_password_hash: "$2y$12$fakeAdguardBcryptHashXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
+
+    - name: Assert AdGuardHome.yaml has the confirmed wizard-skipping minimal shape
+      ansible.builtin.assert:
+        that:
+          - adguard_config.users | length == 1
+          - adguard_config.users[0].name == 'admin'
+          - adguard_config.users[0].password == '$2y$12$fakeAdguardBcryptHashXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX'
+          - adguard_config.http.address == '0.0.0.0:3000'
+          - adguard_config.dns.bind_hosts == ['0.0.0.0']
+          - adguard_config.dns.port == 53
+          - "'schema_version' not in adguard_config"
+        fail_msg: "AdGuardHome.yaml does not match the confirmed minimal shape: {{ adguard_config }}"
+      vars:
+        adguard_config: "{{ lookup('file', '/tmp/docker_compose_test/AdGuardHome.yaml') | from_yaml }}"

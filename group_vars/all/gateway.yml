@@ -7,4 +7,5 @@
 # Caddyfile; it loads these contributions (via include_vars) before rendering.
 gateway_routes: >-
   {{ silverbullet_gateway_publish + hermes_gateway_publish + authelia_gateway_publish
-     + conduit_gateway_publish + owntracks_gateway_publish + beszel_gateway_publish }}
+     + conduit_gateway_publish + owntracks_gateway_publish + beszel_gateway_publish
+     + adguard_gateway_publish }}

@@ -29,12 +29,13 @@ DOCKER_COUNT="$(echo "$LIST_OUTPUT" | grep -c "docker : Validate Docker role pre
 
 # Known, accepted ceiling — NOT "exactly once". See the comment above and the epic
 # 17 spec for why full elimination isn't achieved by this epic. Tightened in epic 17
-# ticket #02 to 7/4. Epic 18 ticket #03 adds a new wiki_volume-dependent role
-# (beszel, pulled in via gateway's meta dependency, same shape as owntracks) —
-# exactly the kind of shift epic 17's own spec anticipated and explicitly scoped
-# this test to tolerate, not something this ticket is expected to hold at 7. Raised
-# to 8; docker's count is unaffected (beszel doesn't depend on docker).
-WIKI_VOLUME_MAX=8
+# ticket #02 to 7/4. Epic 18 tickets #03 and #04 each add a new wiki_volume-dependent
+# role (beszel, then adguard, both pulled in via gateway's meta dependency, same
+# shape as owntracks) — exactly the kind of shift epic 17's own spec anticipated
+# and explicitly scoped this test to tolerate, not something either ticket is
+# expected to hold at 7. Raised 7->8 (#03), now 8->9 (#04); docker's count is
+# unaffected (neither beszel nor adguard depends on docker).
+WIKI_VOLUME_MAX=9
 DOCKER_MAX=4
 
 if (( WIKI_VOLUME_COUNT > WIKI_VOLUME_MAX )); then

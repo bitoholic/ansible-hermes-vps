@@ -1,0 +1,43 @@
+---
+- name: Assert mandatory secrets are present
+  tags: [adguard]
+  ansible.builtin.assert:
+    that:
+      - secrets.adguard_admin_password_hash | default('') | string | length > 0
+    fail_msg: Provide ADGUARD_ADMIN_PASSWORD_HASH before running the playbook
+
+# Host bind-mounts owned by llm_wiki, following the owntracks/beszel precedent
+# (a Docker-initialized named volume would be root-owned). The official
+# adguard/adguardhome image always runs as root (verified — no documented
+# non-root support), so this ownership isn't load-bearing for container write
+# access the way it is for owntracks' recorder, but it's harmless and keeps
+# this role consistent with every other service's directory-bootstrap convention.
+- name: Ensure AdGuard config directory exists
+  tags: [adguard]
+  ansible.builtin.include_role:
+    name: wiki_volume
+    tasks_from: ensure_directory
+  vars:
+    wiki_volume_directory_path: "{{ adguard_conf_dir }}"
+    wiki_volume_directory_mode: '0755'
+
+- name: Ensure AdGuard work directory exists
+  tags: [adguard]
+  ansible.builtin.include_role:
+    name: wiki_volume
+    tasks_from: ensure_directory
+  vars:
+    wiki_volume_directory_path: "{{ adguard_work_dir }}"
+    wiki_volume_directory_mode: '0755'
+
+# Mode 0600: this file carries the admin bcrypt password hash, same protection
+# as Authelia's rendered configuration.yml. The container runs as root, so it
+# can still read/write this file regardless of its host-side owner/mode.
+- name: Render AdGuard Home configuration
+  tags: [adguard]
+  ansible.builtin.template:
+    src: AdGuardHome.yaml.j2
+    dest: "{{ adguard_conf_dir }}/AdGuardHome.yaml"
+    owner: llm_wiki
+    group: llm_wiki
+    mode: '0600'

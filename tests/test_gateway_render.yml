@@ -34,6 +34,8 @@
     - ansible.builtin.include_vars:
         file: "{{ playbook_dir }}/../roles/beszel/defaults/main.yml"
     - ansible.builtin.include_vars:
+        file: "{{ playbook_dir }}/../roles/adguard/defaults/main.yml"
+    - ansible.builtin.include_vars:
         file: "{{ playbook_dir }}/../group_vars/all/main.yml"
     - ansible.builtin.include_vars:
         file: "{{ playbook_dir }}/../roles/gateway/vars/main.yml"
@@ -62,14 +64,14 @@
       ansible.builtin.include_tasks:
         file: "{{ playbook_dir }}/../roles/gateway/tasks/validate.yml"
       vars:
-        gateway_routes: "{{ silverbullet_gateway_publish + hermes_gateway_publish + authelia_gateway_publish + conduit_gateway_publish + owntracks_gateway_publish + beszel_gateway_publish }}"
+        gateway_routes: "{{ silverbullet_gateway_publish + hermes_gateway_publish + authelia_gateway_publish + conduit_gateway_publish + owntracks_gateway_publish + beszel_gateway_publish + adguard_gateway_publish }}"
 
     - name: Render the gateway Caddyfile adapter
       ansible.builtin.template:
         src: "{{ playbook_dir }}/../roles/gateway/templates/Caddyfile.j2"
         dest: /tmp/gateway_test_render/Caddyfile
       vars:
-        gateway_routes: "{{ silverbullet_gateway_publish + hermes_gateway_publish + authelia_gateway_publish + conduit_gateway_publish + owntracks_gateway_publish + beszel_gateway_publish }}"
+        gateway_routes: "{{ silverbullet_gateway_publish + hermes_gateway_publish + authelia_gateway_publish + conduit_gateway_publish + owntracks_gateway_publish + beszel_gateway_publish + adguard_gateway_publish }}"
 
     # Regression guard removed — the template change (moving Conduit from hardcoded block to
     # gateway loop, adding tls_mode/port fields, and adding matrix. prefix) is an intentional
@@ -100,13 +102,15 @@
           # Epic 18 ticket #03: Beszel's hub dashboard is also tailnet_only — same
           # posture as owntracks-ui, no public path, no basic-auth secret.
           - "rendered is search('monitor\\.test\\.example\\.com \\{\\n  log\\n  tls internal\\n  import tailnet_only\\n  reverse_proxy beszel-hub:8090\\n\\}')"
+          # Epic 18 ticket #04: AdGuard's admin UI, same tailnet_only posture.
+          - "rendered is search('adguard\\.test\\.example\\.com \\{\\n  log\\n  tls internal\\n  import tailnet_only\\n  reverse_proxy adguard:3000\\n\\}')"
           - "(rendered | regex_findall('import mfa_auth')) | length == (gateway_routes | selectattr('mfa') | list | length)"
           - "(rendered | regex_findall('basic_auth \\{')) | length == (gateway_routes | selectattr('basic_auth_user', 'defined') | list | length)"
           # Regression guard (epic 12): routes without tls_mode render `tls internal`
-          # (pre-epic-12 behavior) — wiki, dash, auth, and (epic 18 #02/#03)
-          # owntracks-ui/monitor. Matrix and the recorder use tls_mode auto (real
-          # ACME certs, ADR-0003).
-          - "(rendered | regex_findall('tls internal')) | length == 5"
+          # (pre-epic-12 behavior) — wiki, dash, auth, and (epic 18 #02/#03/#04)
+          # owntracks-ui/monitor/adguard. Matrix and the recorder use tls_mode auto
+          # (real ACME certs, ADR-0003).
+          - "(rendered | regex_findall('tls internal')) | length == 6"
           # Byte-exact block assertions for every mfa:true route (epic 18 ticket #01
           # review: wiki/dash previously only had a partial opening-line check here,
           # not the same byte-exact block coverage auth/matrix/owntracks already had
@@ -122,7 +126,7 @@
         fail_msg: "Gateway Caddyfile shape mismatch: {{ rendered }}"
       vars:
         rendered: "{{ lookup('file', '/tmp/gateway_test_render/Caddyfile') }}"
-        gateway_routes: "{{ silverbullet_gateway_publish + hermes_gateway_publish + authelia_gateway_publish + conduit_gateway_publish + owntracks_gateway_publish + beszel_gateway_publish }}"
+        gateway_routes: "{{ silverbullet_gateway_publish + hermes_gateway_publish + authelia_gateway_publish + conduit_gateway_publish + owntracks_gateway_publish + beszel_gateway_publish + adguard_gateway_publish }}"
 
     # Epic 18 ticket #01: a route with tailnet_only: true renders a hard 404 block for
     # non-Tailscale sources instead of the MFA-bypass challenge — genuinely no public
