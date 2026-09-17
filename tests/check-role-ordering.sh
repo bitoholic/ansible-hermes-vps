@@ -77,4 +77,40 @@ if [[ "$COUNT" != "1" ]]; then
 fi
 echo "no duplicate owntracks execution in site.yml OK"
 
+# 5. Same guard extended to beszel and adguard (epic 18, tickets #03/#04): both
+# have a gateway_publish contribution (Beszel's hub dashboard, AdGuard's admin
+# UI), so they're wired the same way owntracks is — a gateway meta dependency,
+# never a separate site.yml entry, for the same double-execution reason.
+# Reuses $REAL_LIST from check #4 above rather than recompiling it twice.
+#
+# Task names below have no "role : " prefix, unlike owntracks's above — both
+# roles' own tasks call `include_role: name: wiki_volume, tasks_from:
+# ensure_directory` (a dynamic include), and Ansible displays that outer
+# task's bare `name:` in --list-tasks without the calling role's prefix,
+# unlike a plain module task. Neither role has a plain-module task of its own
+# to use instead (adguard's "Assert mandatory secrets are present" and "Render
+# AdGuard Home configuration" both DO get the prefix, but beszel has no
+# equivalent — using the unprefixed directory-bootstrap task name for both
+# keeps this loop symmetric).
+for pair in "beszel:Ensure beszel hub data directory exists" \
+            "adguard:Ensure AdGuard config directory exists"; do
+  role="${pair%%:*}"; task_name="${pair#*:}"
+
+  if ! grep -q "role: $role" roles/gateway/meta/main.yml; then
+    echo "FAIL: roles/gateway/meta/main.yml does not declare $role as a dependency"; exit 1
+  fi
+
+  if grep -q "role: $role" site.yml; then
+    echo "FAIL: site.yml still lists $role explicitly — combined with gateway's meta dependency, this duplicates its execution"
+    exit 1
+  fi
+
+  COUNT="$(echo "$REAL_LIST" | grep -c "$task_name" || true)"
+  if [[ "$COUNT" != "1" ]]; then
+    echo "FAIL: $role's own task ('$task_name') appears $COUNT times in site.yml's compiled task list (expected exactly 1)"
+    exit 1
+  fi
+done
+echo "gateway->beszel/adguard dependency ordering OK (no duplicate execution, no separate site.yml entries)"
+
 echo "role ordering guard OK"

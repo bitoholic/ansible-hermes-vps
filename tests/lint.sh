@@ -100,10 +100,18 @@ python3 scripts/generate-env.py --check
 # run of the role is operator-validated on the VPS (guarded/skipped when llm_wiki is absent).
 ./tests/check-wiki-volume.sh
 
-# Machine-checked role ordering (epic 15 ticket #01): gateway depends on owntracks via a
-# real meta/main.yml dependency, not site.yml list position — and site.yml must not list
-# owntracks explicitly too, or it runs twice per playbook execution.
+# Machine-checked role ordering (epic 15 ticket #01, extended by epic 18 ticket #06):
+# gateway depends on owntracks/beszel/adguard via real meta/main.yml dependencies, not
+# site.yml list position for any of them — and site.yml must not list any of the three
+# explicitly too, or they'd run twice per playbook execution.
 ./tests/check-role-ordering.sh
+
+# Second-wave custom services full-epic guard (epic 18 ticket #06): consolidated
+# compose/gateway render re-verification, the real (not test-mirrored) firewall port
+# classes for Beszel/AdGuard, the new secrets' required/default shape (guards against
+# ticket #03's near-miss deploy-deadlock regressing), env-catalog sync, and skip-tags/
+# README membership for beszel and adguard.
+./tests/check-second-wave-services.sh
 
 # Bounded role-execution duplication (epic 17): docker's and wiki_volume's own tasks
 # run more than once per site.yml execution (Ansible's role dedup defeated by tag
