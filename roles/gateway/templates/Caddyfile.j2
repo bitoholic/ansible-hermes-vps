@@ -41,6 +41,9 @@
   log
 {% if not auto_tls %}  tls internal
 {% endif %}
+{# tailnet_only is optional (schema required: false) so it needs the `is defined`
+   guard below, same as tls_mode/port/basic_auth_user above — mfa needs no such
+   guard because the schema requires it on every route, so it's always present. #}
 {% if route.tailnet_only is defined and route.tailnet_only %}  import tailnet_only
 {% endif %}{% if route.mfa %}  import mfa_auth
 {% endif %}{% if route.basic_auth_user is defined %}  basic_auth {
