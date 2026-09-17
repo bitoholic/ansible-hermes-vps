@@ -30,4 +30,5 @@ docker_enabled_services:
   - signal-cli
   - hermes-agent
   - owntracks
+  - owntracks-frontend
   - syncplay

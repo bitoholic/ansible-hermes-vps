@@ -8,6 +8,13 @@ owntracks_htpasswd_path: "{{ docker_compose_dir }}/owntracks/htpasswd"
 # because mobile apps can't handle forward-auth. Auth is basic_auth_user/hash
 # (below), enforced by Caddy — the recorder has no HTTP auth of its own, so the
 # gateway is the only thing standing between this route and the open internet.
+#
+# Second entry (epic 18, #02): the browser UI for the recorder. Deliberately the
+# opposite posture from the recorder above — tailnet_only (hard-blocked for
+# non-Tailscale sources, no MFA needed, Tailscale membership alone is trusted),
+# no basic_auth secret at all. It reaches the recorder over the internal gateway
+# network by service name (see the owntracks-frontend service fragment); the
+# recorder's own /pub ingest route above is completely untouched by this.
 owntracks_gateway_publish:
   - host: owntracks
     upstream: owntracks:8083
@@ -16,3 +23,7 @@ owntracks_gateway_publish:
     port: 8448
     basic_auth_user: "{{ owntracks_basic_auth_user }}"
     basic_auth_hash: "{{ owntracks_basic_auth_hash }}"
+  - host: owntracks-ui
+    upstream: owntracks-frontend:80
+    mfa: false
+    tailnet_only: true

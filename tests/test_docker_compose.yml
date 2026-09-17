@@ -17,6 +17,7 @@
       - signal-cli
       - hermes-agent
       - owntracks
+      - owntracks-frontend
       - syncplay
     docker_networks:
       - name: gateway
@@ -120,6 +121,24 @@
       vars:
         compose: "{{ rendered_compose.content | b64decode | from_yaml }}"
 
+    # Epic 18 ticket #02: the frontend is a browser UI for the recorder, reached
+    # only via its own tailnet_only Caddy route — never a raw published host port,
+    # same posture as the recorder itself. It reaches the recorder over the
+    # internal gateway network by service name, not a host-published port.
+    - name: Assert owntracks-frontend has no published port and reaches the recorder internally
+      ansible.builtin.assert:
+        that:
+          - compose.services['owntracks-frontend'].ports is not defined
+          - compose.services['owntracks-frontend'].networks == ['gateway']
+          - "'SERVER_HOST=owntracks' in compose.services['owntracks-frontend'].environment"
+          - compose.services['owntracks-frontend'].volumes is not defined
+        fail_msg: >-
+          owntracks-frontend must not publish a host port and must point at the
+          recorder over the internal network. Rendered service:
+          {{ compose.services['owntracks-frontend'] | default('MISSING') }}
+      vars:
+        compose: "{{ rendered_compose.content | b64decode | from_yaml }}"
+
     - name: Assert all enabled services are present in rendered docker-compose.yml
       ansible.builtin.assert:
         that:
@@ -130,6 +149,7 @@
           - "'signal-cli:' in (rendered_compose.content | b64decode)"
           - "'hermes-agent:' in (rendered_compose.content | b64decode)"
           - "'owntracks:' in (rendered_compose.content | b64decode)"
+          - "'owntracks-frontend:' in (rendered_compose.content | b64decode)"
           - "'syncplay:' in (rendered_compose.content | b64decode)"
           - "'gateway:' in (rendered_compose.content | b64decode)"
           - "'internal:' in (rendered_compose.content | b64decode)"

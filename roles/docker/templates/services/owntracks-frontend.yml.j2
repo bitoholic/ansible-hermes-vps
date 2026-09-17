@@ -1,0 +1,17 @@
+owntracks-frontend:
+  image: owntracks/frontend:latest
+  container_name: owntracks-frontend
+  depends_on:
+    - owntracks
+  environment:
+    # Points the frontend's own embedded nginx at the recorder over the internal
+    # gateway network (docker DNS resolves the service name) — the frontend proxies
+    # its own /api and /ws calls to the recorder; it never touches /pub, so the
+    # recorder's public mobile-ingest route (roles/owntracks/defaults/main.yml) is
+    # untouched by this service's existence. No LISTEN_PORT override: the image's
+    # default (80) is what owntracks_gateway_publish's upstream targets.
+    - SERVER_HOST=owntracks
+    - SERVER_PORT=8083
+  networks:
+    - gateway
+  restart: unless-stopped

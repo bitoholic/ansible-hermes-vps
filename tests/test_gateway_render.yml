@@ -91,12 +91,16 @@
           # mfa_auth; basic_auth is the actual enforcement (the recorder has none
           # of its own — see roles/owntracks/tasks/main.yml).
           - "rendered is search('https://owntracks\\.test\\.example\\.com:8448 \\{\\n  log\\n  basic_auth \\{\\n    owntracks_admin stubbcrypthashvalue\\n  \\}\\n  reverse_proxy owntracks:8083\\n\\}')"
+          # Epic 18 ticket #02: the OwnTracks frontend's route is tailnet_only, no
+          # public path, no basic-auth secret — the opposite posture from the
+          # recorder route directly above, on purpose (only the recorder is public).
+          - "rendered is search('owntracks-ui\\.test\\.example\\.com \\{\\n  log\\n  tls internal\\n  import tailnet_only\\n  reverse_proxy owntracks-frontend:80\\n\\}')"
           - "(rendered | regex_findall('import mfa_auth')) | length == (gateway_routes | selectattr('mfa') | list | length)"
           - "(rendered | regex_findall('basic_auth \\{')) | length == (gateway_routes | selectattr('basic_auth_user', 'defined') | list | length)"
           # Regression guard (epic 12): routes without tls_mode render `tls internal`
-          # (pre-epic-12 behavior) — wiki, dash, auth. Matrix and owntracks use
-          # tls_mode auto (real ACME certs, ADR-0003).
-          - "(rendered | regex_findall('tls internal')) | length == 3"
+          # (pre-epic-12 behavior) — wiki, dash, auth, and (epic 18 #02) owntracks-ui.
+          # Matrix and the recorder use tls_mode auto (real ACME certs, ADR-0003).
+          - "(rendered | regex_findall('tls internal')) | length == 4"
           # Byte-exact block assertions for every mfa:true route (epic 18 ticket #01
           # review: wiki/dash previously only had a partial opening-line check here,
           # not the same byte-exact block coverage auth/matrix/owntracks already had
