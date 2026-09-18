@@ -26,10 +26,13 @@ check_in() { grep -qEi "$2" "$1" || { echo "FAIL: $1 missing: $3"; exit 1; }; }
 # indentation level. Indentation for the boundary is derived from
 # key_pattern's own leading spaces, so this works for both
 # group_vars/all/main.yml's 0-indent top-level keys and
-# group_vars/all/secrets.yml's 2-indent manifest entries. Same name/shape as
-# tests/check-adguard-dns.sh's entry_has (see that file for why a fixed-line
-# `grep -A<N>` window doesn't have this guarantee — verified empirically to
-# silently pass a real regression) — duplicated rather than shared, since this
+# group_vars/all/secrets.yml's 2-indent manifest entries. Same name and
+# contract as tests/check-adguard-dns.sh's entry_has (see that file for why a
+# fixed-line `grep -A<N>` window doesn't have this guarantee — verified
+# empirically to silently pass a real regression); split into block_of plus a
+# thin entry_has wrapper here (not just entry_has, unlike that file) because
+# this script also needs the raw block for a count check below, not just a
+# boolean membership test — duplicated rather than shared, since this
 # repo's test scripts are each self-contained by convention (no shared-helpers
 # file exists anywhere else either); unify if a third caller ever needs this.
 block_of() {
@@ -103,6 +106,16 @@ DOCKER_DEFAULTS=roles/docker/defaults/main.yml
 for svc in owntracks-frontend beszel-hub beszel-agent adguard; do
   entry_has "$DOCKER_DEFAULTS" '^docker_enabled_services:' "  - ${svc}\$" "docker_enabled_services includes ${svc}"
 done
+# Exact count too (caught in review as an asymmetry with the docker_volumes
+# exact-count check below): presence alone wouldn't catch a duplicate entry or
+# an unrelated, unauthorized 5th addition slipping in alongside this epic's
+# four. 12 = the 8 pre-epic-18 services (caddy, authelia, silverbullet,
+# conduit, signal-cli, hermes-agent, owntracks, syncplay) + this epic's 4.
+DOCKER_ENABLED_COUNT="$(block_of "$DOCKER_DEFAULTS" '^docker_enabled_services:' | grep -c '  - ')"
+if [[ "$DOCKER_ENABLED_COUNT" != "12" ]]; then
+  echo "FAIL: $DOCKER_DEFAULTS docker_enabled_services has $DOCKER_ENABLED_COUNT entries, expected exactly 12 (8 pre-epic-18 + this epic's 4) — a duplicate or an unrelated addition may have slipped in"
+  exit 1
+fi
 DOCKER_VOLUMES_COUNT="$(block_of "$DOCKER_DEFAULTS" '^docker_volumes:' | grep -c '  - ')"
 if [[ "$DOCKER_VOLUMES_COUNT" != "3" ]]; then
   echo "FAIL: $DOCKER_DEFAULTS docker_volumes has $DOCKER_VOLUMES_COUNT entries, expected exactly 3 (caddy_data, caddy_config, syncplay_data) — epic 18 should not have added any named volumes (bind-mounts only)"

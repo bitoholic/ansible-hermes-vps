@@ -41,10 +41,13 @@ line_of() { grep -nE "$2" "$1" 2>/dev/null | head -1 | cut -d: -f1; }
 # passing even with 53 removed from that list, because the window bled into
 # docker_published_restricted_udp_ports's own "- 53" line right after it
 # ends). Indentation for the boundary is derived from key_pattern's own
-# leading spaces. Same name/shape as tests/check-second-wave-services.sh's
-# entry_has, duplicated rather than shared (this repo's test scripts are each
-# self-contained by convention) — kept the names in sync so the two aren't a
-# confusing pair of near-identical-but-differently-named helpers.
+# leading spaces. Same name and contract as tests/check-second-wave-services.sh's
+# entry_has (that file splits the same logic into a block_of/entry_has pair
+# since it also needs the raw block for a count check; this one doesn't, so
+# it stays a single function) — duplicated rather than shared (this repo's
+# test scripts are each self-contained by convention) — kept the names in
+# sync so the two aren't a confusing pair of near-identical-but-differently-
+# named helpers.
 entry_has() {
   local file="$1" key_pat="$2" content_pat="$3" desc="$4"
   local indent="${key_pat#^}"; indent="${indent%%[^ ]*}"
