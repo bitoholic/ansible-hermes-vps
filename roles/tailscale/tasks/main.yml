@@ -99,6 +99,24 @@
     - 443
     - 8443
 
+# Cleanup for the 8448 -> 8443 move (epic 19, #02, discovered on the first real
+# deploy of this migration): this repo's UFW rate-limit rules are ensured
+# PRESENT by the loop above, not declaratively rebuilt from a single source of
+# truth the way the DOCKER-USER chain is (that chain is flushed and rebuilt
+# from scratch every run; plain `ufw` rules aren't, since many unrelated rules
+# from other tasks/roles share the same firewall — a full flush-and-rebuild of
+# every UFW rule isn't this fix's scope). Without this, a host that was ever
+# deployed before this ticket keeps an orphaned rate-limit rule for a port
+# nothing publishes anymore. `delete: true` is idempotent — a no-op on any
+# host that never had 8448 (a fresh deploy) or has already been cleaned up.
+- name: Remove the stale 8448 rate-limit rule (superseded by 8443)
+  tags: [tailscale]
+  community.general.ufw:
+    rule: limit
+    port: 8448
+    proto: tcp
+    delete: true
+
 # --- Syncplay IP allowlist (epic 12, #06) --------------------------------------
 # IP-restricted public access: each allowed IP gets allow + rate-limit in one
 # rule (ufw limit = allow with a 6-connections/30s flood guard); every other

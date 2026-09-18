@@ -64,4 +64,15 @@ if [ "$BUILDER_VERSION" != "$RUNTIME_VERSION" ]; then
 fi
 echo "Caddy Dockerfile version pin OK ($BUILDER_VERSION, builder == runtime)"
 
+# 5: stale 8448 UFW rate-limit rule cleanup (found on the first real deploy of this
+# migration) — the rate-limit loop only ensures 8443 present, it doesn't remove a
+# pre-existing 8448 rule from before this ticket, since plain ufw rules aren't
+# declaratively rebuilt the way the DOCKER-USER chain is. Must be delete: true,
+# not just present, or a host deployed before this ticket keeps an orphaned rule
+# for a port nothing publishes anymore forever.
+TS_TASKS=roles/tailscale/tasks/main.yml
+entry_has "$TS_TASKS" 'Remove the stale 8448 rate-limit rule' 'delete: true' "8448 UFW cleanup task must delete the stale rule, not just ensure a rule present"
+entry_has "$TS_TASKS" 'Remove the stale 8448 rate-limit rule' 'port: 8448' "8448 UFW cleanup task must target port 8448"
+echo "stale 8448 UFW rule cleanup OK"
+
 echo "cloudflare-proxied-ingress guard OK"
