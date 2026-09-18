@@ -16,38 +16,10 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 export ANSIBLE_BECOME=false
+# shellcheck source=support/yaml_block_assertions.sh
+source "$REPO_ROOT/tests/support/yaml_block_assertions.sh"
 
 echo "== second-wave services guard (epic 18) =="
-
-check_in() { grep -qEi "$2" "$1" || { echo "FAIL: $1 missing: $3"; exit 1; }; }
-
-# block_of <file> <key_pattern> — prints the bounded block starting at the
-# line matching key_pattern, up to (not including) the next line at the SAME
-# indentation level. Indentation for the boundary is derived from
-# key_pattern's own leading spaces, so this works for both
-# group_vars/all/main.yml's 0-indent top-level keys and
-# group_vars/all/secrets.yml's 2-indent manifest entries. Same name and
-# contract as tests/check-adguard-dns.sh's entry_has (see that file for why a
-# fixed-line `grep -A<N>` window doesn't have this guarantee — verified
-# empirically to silently pass a real regression); split into block_of plus a
-# thin entry_has wrapper here (not just entry_has, unlike that file) because
-# this script also needs the raw block for a count check below, not just a
-# boolean membership test — duplicated rather than shared, since this
-# repo's test scripts are each self-contained by convention (no shared-helpers
-# file exists anywhere else either); unify if a third caller ever needs this.
-block_of() {
-  local key_pat="$2"
-  local indent="${key_pat#^}"; indent="${indent%%[^ ]*}"
-  awk -v key_pat="$key_pat" -v exit_pat="^${indent}[A-Za-z_]" '
-    $0 ~ key_pat { found=1; print; next }
-    found && $0 ~ exit_pat { exit }
-    found { print }
-  ' "$1"
-}
-
-# entry_has <file> <key_pattern> <content_pattern> <description> — does
-# block_of(file, key_pattern) contain content_pattern.
-entry_has() { block_of "$1" "$2" | grep -qE "$3" || { echo "FAIL: $1 missing: $4"; exit 1; }; }
 
 # 1: consolidated compose + gateway render — all four new services, all three
 # new tailnet_only routes, every pre-existing route unchanged (asserted by the

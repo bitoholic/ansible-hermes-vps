@@ -15,25 +15,10 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 export ANSIBLE_BECOME=false
+# shellcheck source=support/yaml_block_assertions.sh
+source "$REPO_ROOT/tests/support/yaml_block_assertions.sh"
 
 echo "== cloudflare-proxied-ingress guard (epic 19) =="
-
-check_in() { grep -qEi "$2" "$1" || { echo "FAIL: $1 missing: $3"; exit 1; }; }
-
-# block_of/entry_has: same boundary-aware shape as tests/check-second-wave-services.sh's own
-# (see that file's comment for why a fixed-line `grep -A<N>` window doesn't have this guarantee
-# — verified empirically there to silently pass a real regression).
-block_of() {
-  local key_pat="$2"
-  local indent="${key_pat#^}"; indent="${indent%%[^ ]*}"
-  awk -v key_pat="$key_pat" -v exit_pat="^${indent}[A-Za-z_]" '
-    $0 ~ key_pat { found=1; print; next }
-    found && $0 ~ exit_pat { exit }
-    found { print }
-  ' "$1"
-}
-entry_has() { block_of "$1" "$2" | grep -qE "$3" || { echo "FAIL: $1 missing: $4"; exit 1; }; }
-entry_lacks() { if block_of "$1" "$2" | grep -qE "$3"; then echo "FAIL: $1: $4"; exit 1; fi; }
 
 # 1: consolidated compose + gateway render — port move, DNS-01 scoping, Caddy build-not-pull
 # shape (asserted by the shared test files themselves; re-run here per convention above).

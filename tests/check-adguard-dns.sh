@@ -12,6 +12,8 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
+# shellcheck source=support/yaml_block_assertions.sh
+source "$REPO_ROOT/tests/support/yaml_block_assertions.sh"
 
 echo "== AdGuard DNS-serving guard =="
 
@@ -21,42 +23,17 @@ DOCKER_MAIN=roles/docker/tasks/main.yml
 TS_TASKS=roles/tailscale/tasks/main.yml
 ADGUARD_FRAGMENT=roles/docker/templates/services/adguard.yml.j2
 
-# check_in <file> <pattern> <description> — mirrors check-tailscale.sh's
-# single-file check() helper, generalized to take the target file as an
-# argument since this script spans several files, not just one.
-# Case-insensitive (-i): the two README prose checks below need it (matching a
-# heading/phrase regardless of capitalization), and none of this script's other
-# patterns are specific enough that case-folding could cause a false match.
-check_in() { grep -qEi "$2" "$1" || { echo "FAIL: $1 missing: $3"; exit 1; }; }
+# check_in/entry_has: shared helpers, see tests/support/yaml_block_assertions.sh
+# (that file's own comment has the "why not a fixed grep -A window" history —
+# this script is the one that originally found that bug empirically, fixed
+# here first before tests/check-second-wave-services.sh hit the same thing).
+# check_in's case-insensitivity is used below by the two README prose checks
+# (matching a heading/phrase regardless of capitalization).
 
-# line_of <file> <pattern> — first matching line number, or empty.
+# line_of <file> <pattern> — first matching line number, or empty. Not part of
+# the shared lib: unlike check_in/entry_has, nothing else in this repo needs
+# it yet.
 line_of() { grep -nE "$2" "$1" 2>/dev/null | head -1 | cut -d: -f1; }
-
-# entry_has <file> <key_pattern> <content_pattern> <description> — does the
-# bounded block starting at key_pattern (up to, not including, the next line
-# at the same indentation level) contain content_pattern — NOT a fixed-line
-# grep -A window (that was this function's original shape as `list_has`;
-# fixed after epic 18 ticket #06 found the bug empirically: a fixed 10-line
-# window here made "53 in docker_published_restricted_ports" (TCP) keep
-# passing even with 53 removed from that list, because the window bled into
-# docker_published_restricted_udp_ports's own "- 53" line right after it
-# ends). Indentation for the boundary is derived from key_pattern's own
-# leading spaces. Same name and contract as tests/check-second-wave-services.sh's
-# entry_has (that file splits the same logic into a block_of/entry_has pair
-# since it also needs the raw block for a count check; this one doesn't, so
-# it stays a single function) — duplicated rather than shared (this repo's
-# test scripts are each self-contained by convention) — kept the names in
-# sync so the two aren't a confusing pair of near-identical-but-differently-
-# named helpers.
-entry_has() {
-  local file="$1" key_pat="$2" content_pat="$3" desc="$4"
-  local indent="${key_pat#^}"; indent="${indent%%[^ ]*}"
-  awk -v key_pat="$key_pat" -v exit_pat="^${indent}[A-Za-z_]" '
-    $0 ~ key_pat { found=1; print; next }
-    found && $0 ~ exit_pat { exit }
-    found { print }
-  ' "$file" | grep -qE "$content_pat" || { echo "FAIL: $file missing: $desc"; exit 1; }
-}
 
 # 1: correction #1 (found in code review) — AdGuard's container physically
 # cannot bind host port 53 while systemd-resolved's stub listener still holds
