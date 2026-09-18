@@ -1,7 +1,7 @@
 [global]
 # Personal homeserver identity. Clients reach it over the internal Docker network as
-# http://conduit:{{ conduit_port }}, and externally at https://{{ conduit_server_name }}:8448
-# where Caddy terminates TLS with a real ACME cert (ADR-0003).
+# http://conduit:{{ conduit_port }}, and externally at https://{{ conduit_server_name }}:8443
+# where Caddy terminates TLS with a real ACME cert (ADR-0003, epic 19 #02).
 server_name = "{{ conduit_server_name }}"
 address = "0.0.0.0"
 port = {{ conduit_port }}

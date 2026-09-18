@@ -8,10 +8,19 @@ caddy:
     context: "{{ docker_compose_dir }}/caddy"
     dockerfile: Dockerfile
   container_name: caddy
+  # 8443, not 8448 (epic 19, #02): Cloudflare's proxy allowlist includes 8443,
+  # not 8448 — see roles/conduit/defaults/main.yml's own comment for the full
+  # rationale. Both matrix and owntracks (the two SNI-sharers on this port)
+  # move together.
   ports:
     - "80:80"
     - "443:443"
-    - "8448:8448"
+    - "8443:8443"
+  # CLOUDFLARE_API_TOKEN (epic 19, #02): read by Caddyfile.j2's DNS-01
+  # directive via Caddy's own {env.CLOUDFLARE_API_TOKEN} placeholder — not
+  # baked into the rendered Caddyfile as a literal value.
+  environment:
+    - CLOUDFLARE_API_TOKEN={{ secrets.cloudflare_api_token }}
   volumes:
     - "{{ docker_compose_dir }}/Caddyfile:/etc/caddy/Caddyfile:ro"
     - "caddy_data:/data"

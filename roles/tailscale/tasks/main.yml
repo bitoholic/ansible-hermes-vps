@@ -82,7 +82,11 @@
     interface: "{{ tailscale_interface }}"
     comment: "Tailscale private access"
 
-- name: Rate-limit SSH, HTTP, HTTPS, and OwnTracks HTTPS
+# 8443, not 8448 (epic 19, #02): matrix + owntracks recorder moved here so
+# their DNS records can be Cloudflare-proxied (Cloudflare's proxy allowlist
+# includes 8443, not 8448) — see roles/conduit/defaults/main.yml's own comment
+# for the full rationale.
+- name: Rate-limit SSH, HTTP, HTTPS, and OwnTracks/Matrix HTTPS
   tags: [tailscale]
   community.general.ufw:
     rule: limit
@@ -93,7 +97,7 @@
     - "{{ common_ssh_port }}"
     - 80
     - 443
-    - 8448
+    - 8443
 
 # --- Syncplay IP allowlist (epic 12, #06) --------------------------------------
 # IP-restricted public access: each allowed IP gets allow + rate-limit in one
@@ -135,7 +139,7 @@
 # networks (container-to-container, e.g. caddy -> conduit:8008) RETURNs early so
 # Docker's own forwarding applies — only host-uplink traffic is classified by port.
 #
-# Port classes (group_vars/all/main.yml): public (80/443/8448), Tailscale-only TCP
+# Port classes (group_vars/all/main.yml): public (80/443/8443), Tailscale-only TCP
 # (3000, conduit 8008, 8642, 9119, beszel 8090, adguard-ui 3001, adguard-dns 53),
 # Tailscale-only UDP (epic 18 #05: adguard-dns 53 — the first UDP restricted
 # service; the mechanism below was TCP-only until this), and syncplay 8999

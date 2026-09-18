@@ -1,12 +1,22 @@
 ---
 # Conduit's ingress contribution (epic 03, #02): the matrix homeserver.
 # tls_mode "auto" (ADR-0003): Matrix clients refuse Caddy's internal CA, so the
-# client API on 8448 serves a real Let's Encrypt cert. The server is
-# non-federated, so 8448 carries no federation traffic — it is only the
-# historical client port, SNI-shared with owntracks.
+# client API serves a real Let's Encrypt cert. The server is non-federated, so
+# this carries no federation traffic — it is only the historical client port,
+# SNI-shared with owntracks.
+#
+# Port 8443, not 8448 (epic 19, #02 — supersedes ADR-0003's port choice):
+# Cloudflare's standard proxy only forwards a fixed allowlist of ports for
+# proxied HTTPS traffic, and 8448 isn't on it while 8443 is. Moving here (and
+# on owntracks' recorder entry, which must move together — they still share
+# one Caddy listener) is what makes proxying matrix'/owntracks' DNS records
+# through Cloudflare possible at all, alongside the DNS-01 switch in
+# Caddyfile.j2. No federation traffic uses this port (see above), so there's
+# no external convention forcing a specific number — matrix clients accept
+# whatever port their homeserver URL specifies.
 conduit_gateway_publish:
   - host: matrix
     upstream: conduit:{{ conduit_port }}
     mfa: false
     tls_mode: "auto"
-    port: 8448
+    port: 8443

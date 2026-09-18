@@ -49,7 +49,7 @@
     docker_published_public_ports:
       - 80
       - 443
-      - 8448
+      - 8443
     docker_published_restricted_ports:
       - 3000
       - 8008
@@ -76,6 +76,7 @@
       beszel_agent_token: fake-beszel-token
       adguard_admin_username: admin
       adguard_admin_password_hash: "$2y$12$fakeAdguardBcryptHashXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
+      cloudflare_api_token: fake-cf-token
 
   pre_tasks:
     - name: Ensure temp render dir exists
@@ -98,15 +99,18 @@
 
     # Epic 19 ticket #01: Caddy now builds from a local Dockerfile (with the
     # Cloudflare DNS plugin compiled in, for ticket #02's DNS-01 challenges)
-    # instead of pulling a stock image — zero behavior change otherwise: same
-    # ports, volumes, depends_on, networks as before this ticket.
+    # instead of pulling a stock image. Epic 19 ticket #02: 8443, not 8448
+    # (Cloudflare's proxy allowlist includes 8443, not 8448), and a new
+    # CLOUDFLARE_API_TOKEN env var for the DNS-01 directive in Caddyfile.j2
+    # to read via Caddy's own {env.CLOUDFLARE_API_TOKEN} placeholder.
     - name: Assert caddy builds from a local Dockerfile, not a pulled image
       ansible.builtin.assert:
         that:
           - compose.services.caddy.image is not defined
           - compose.services.caddy.build.context == (docker_compose_dir ~ '/caddy')
           - compose.services.caddy.build.dockerfile == 'Dockerfile'
-          - compose.services.caddy.ports == ['80:80', '443:443', '8448:8448']
+          - compose.services.caddy.ports == ['80:80', '443:443', '8443:8443']
+          - "'CLOUDFLARE_API_TOKEN=fake-cf-token' in compose.services.caddy.environment"
           - compose.services.caddy.volumes | sort == ([docker_compose_dir ~ '/Caddyfile:/etc/caddy/Caddyfile:ro', 'caddy_data:/data', 'caddy_config:/config'] | sort)
           - compose.services.caddy.depends_on == ['authelia']
           - compose.services.caddy.networks == ['gateway']

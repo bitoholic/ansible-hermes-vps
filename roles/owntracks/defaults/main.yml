@@ -3,11 +3,18 @@
 owntracks_htpasswd_path: "{{ docker_compose_dir }}/owntracks/htpasswd"
 
 # Owntracks' ingress contribution (epic 12, #03): public HTTPS with basic auth.
-# Port 8448 is shared with matrix.* via Caddy SNI-based routing. tls_mode: auto
-# issues a real ACME cert (mobile apps can't trust the internal CA); mfa: false
-# because mobile apps can't handle forward-auth. Auth is basic_auth_user/hash
-# (below), enforced by Caddy — the recorder has no HTTP auth of its own, so the
-# gateway is the only thing standing between this route and the open internet.
+# Port 8443 (epic 19, #02 — was 8448; see below) is shared with matrix.* via
+# Caddy SNI-based routing. tls_mode: auto issues a real ACME cert (mobile apps
+# can't trust the internal CA); mfa: false because mobile apps can't handle
+# forward-auth. Auth is basic_auth_user/hash (below), enforced by Caddy — the
+# recorder has no HTTP auth of its own, so the gateway is the only thing
+# standing between this route and the open internet.
+#
+# Port 8443, not 8448 (epic 19, #02): see roles/conduit/defaults/main.yml's
+# comment for the full Cloudflare proxy-port-allowlist rationale — matrix's
+# entry must move together with this one, since they still share one Caddy
+# listener. The mobile app's configured server URL needs a one-time manual
+# update to the new port.
 #
 # Second entry (epic 18, #02): the browser UI for the recorder. Deliberately the
 # opposite posture from the recorder above — tailnet_only (hard-blocked for
@@ -20,7 +27,7 @@ owntracks_gateway_publish:
     upstream: owntracks:8083
     mfa: false
     tls_mode: "auto"
-    port: 8448
+    port: 8443
     basic_auth_user: "{{ owntracks_basic_auth_user }}"
     basic_auth_hash: "{{ owntracks_basic_auth_hash }}"
   - host: owntracks-ui

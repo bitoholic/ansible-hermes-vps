@@ -93,10 +93,13 @@ tailscale_subnet_v6: "fd7a:115c:a1e0::/48"
 #               restricted_udp list since the existing DOCKER-USER mechanism only
 #               ever matched protocol: tcp.
 # NOTE: only 1:1 host:container port mappings are supported (post-DNAT dport matching).
+#   8443:       matrix + owntracks recorder, SNI-shared (epic 19, #02 — was 8448;
+#               moved because Cloudflare's proxy allowlist includes 8443, not 8448,
+#               a prerequisite for proxying those two hosts' DNS records)
 docker_published_public_ports:
   - 80
   - 443
-  - 8448
+  - 8443
 docker_published_restricted_ports:
   - 3000
   - "{{ conduit_port }}"

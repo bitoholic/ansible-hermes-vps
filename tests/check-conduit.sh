@@ -7,7 +7,8 @@
 #      / Tailscale, never the public ingress).
 #   3. Hermes default profile env wires the bot to Conduit via MATRIX_HOMESERVER/MATRIX_USER_ID.
 #   4. Matrix ingress comes from the gateway loop (epic 12 #00): conduit_gateway_publish
-#      contributes the matrix.<domain>:8448 route (SNI-shared with owntracks); the Caddyfile
+#      contributes the matrix.<domain>:8443 route (SNI-shared with owntracks; was 8448
+#      until epic 19 #02 moved it for Cloudflare proxy-port compatibility); the Caddyfile
 #      has no hardcoded matrix block and the route seam is wired in group_vars.
 #   5. Bot registration is idempotent by construction: guarded by the availability probe
 #      (when status == 200) and declares changed_when so a re-run is a no-op once registered.
@@ -50,8 +51,8 @@ echo "hermes Matrix env OK"
 
 # 4: gateway surface (epic 12 #00): Matrix is published through the gateway loop via
 # conduit_gateway_publish — not hardcoded in the Caddyfile. The rendered block itself
-# (https://matrix.<domain>:8448, ACME cert per ADR-0003, SNI-shared with owntracks) is asserted by
-# tests/test_gateway_render.yml; here we pin the seam wiring.
+# (https://matrix.<domain>:8443, DNS-01 ACME cert per ADR-0003/epic 19 #02, SNI-shared with
+# owntracks) is asserted by tests/test_gateway_render.yml; here we pin the seam wiring.
 if ! grep -q 'conduit_gateway_publish' roles/conduit/defaults/main.yml; then
   echo "FAIL: conduit role does not contribute conduit_gateway_publish"; exit 1
 fi

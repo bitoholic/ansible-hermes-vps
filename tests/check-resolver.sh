@@ -24,6 +24,7 @@ export DASHBOARD_ADMIN_PASSWORD_HASH=DASH_HASH
 export ADMIN_SSH_PUBLIC_KEY="ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQCtestkey"
 export OWNTRACKS_ADMIN_PASSWORD=OTR_PASS
 export SYNCPLAY_PASSWORD=SYNC_PASS
+export CLOUDFLARE_API_TOKEN=CF_TOKEN
 
 echo "== resolver resolves expected values =="
 ansible-playbook tests/test_resolver.yml --check -e secrets_enforce_required=false
@@ -34,7 +35,8 @@ echo "== resolver fails fast on a missing required secret (--check path) =="
 LOG=/tmp/hermes-resolver-fail.log
 for pair in "AUTHELIA_ADMIN_PASSWORD_HASH:authelia_admin_password_hash" \
             "OWNTRACKS_ADMIN_PASSWORD:owntracks_admin_password" \
-            "SYNCPLAY_PASSWORD:syncplay_password"; do
+            "SYNCPLAY_PASSWORD:syncplay_password" \
+            "CLOUDFLARE_API_TOKEN:cloudflare_api_token"; do
   env_var="${pair%%:*}"
   manifest_key="${pair##*:}"
   unset "$env_var"
@@ -53,5 +55,6 @@ for pair in "AUTHELIA_ADMIN_PASSWORD_HASH:authelia_admin_password_hash" \
     AUTHELIA_ADMIN_PASSWORD_HASH) export AUTHELIA_ADMIN_PASSWORD_HASH=AUTHELIA_HASH ;;
     OWNTRACKS_ADMIN_PASSWORD)     export OWNTRACKS_ADMIN_PASSWORD=OTR_PASS ;;
     SYNCPLAY_PASSWORD)            export SYNCPLAY_PASSWORD=SYNC_PASS ;;
+    CLOUDFLARE_API_TOKEN)         export CLOUDFLARE_API_TOKEN=CF_TOKEN ;;
   esac
 done

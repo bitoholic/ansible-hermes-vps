@@ -31,15 +31,30 @@
 
 {# TLS rendering per route (verified with `caddy adapt`/`caddy run`, v2.11):
    - tls_mode "auto" → https:// scheme prefix, NO tls directive: automatic HTTPS
-     issues a real ACME cert, including on custom ports like :8448 (a bare `tls`
+     issues a real ACME cert, including on custom ports like :8443 (a bare `tls`
      line is a Caddyfile parse error and prevents Caddy from starting).
    - tls_mode "internal" or unset → bare address + `tls internal` (locally
-     trusted CA — the pre-epic-12 behavior for all routes). #}
+     trusted CA — the pre-epic-12 behavior for all routes).
+   - matrix/owntracks specifically (epic 19, #02) also get an explicit `tls`
+     block with the Cloudflare DNS-01 issuer — HTTP-01/TLS-ALPN-01 (automatic
+     HTTPS's default challenges) require the origin to be directly reachable,
+     which breaks once these two hosts' DNS records are Cloudflare-proxied;
+     DNS-01 proves ownership via a DNS TXT record instead, needing no inbound
+     reachability at all. Scoped to exactly these two hosts by name — a
+     deliberate, explicit special case, not inferred from tls_mode alone
+     (rejected: a hypothetical future tls_mode:auto route might not need or
+     want DNS-01, e.g. one whose DNS record stays unproxied), and not a new
+     schema field (two live cases don't justify one — see epic 19 spec's Out
+     of Scope). #}
+{% set dns01_hosts = ['matrix', 'owntracks'] %}
 {% for route in gateway_routes %}
 {% set auto_tls = route.tls_mode is defined and route.tls_mode == 'auto' %}
 {% if auto_tls %}https://{% endif %}{{ route.host }}.{{ secrets.silverbullet_domain }}{% if route.port is defined %}:{{ route.port }}{% endif %} {
   log
 {% if not auto_tls %}  tls internal
+{% endif %}{% if auto_tls and route.host in dns01_hosts %}  tls {
+    dns cloudflare {env.CLOUDFLARE_API_TOKEN}
+  }
 {% endif %}
 {# tailnet_only is optional (schema required: false) so it needs the `is defined`
    guard below, same as tls_mode/port/basic_auth_user above — mfa needs no such

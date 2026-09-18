@@ -71,7 +71,7 @@ python3 scripts/generate-env.py --check
 
 # Custom Docker services (epic 12 ticket #07): OwnTracks + Syncplay compose render
 # (and docker compose config when docker is present), Caddyfile owntracks/matrix blocks,
-# firewall contract greps (8448 rate-limit; syncplay per-IP limit-from), secrets manifest
+# firewall contract greps (8443 rate-limit; syncplay per-IP limit-from), secrets manifest
 # entries, and syncplay_allowed_ips defined.
 ./tests/check-custom-services.sh
 

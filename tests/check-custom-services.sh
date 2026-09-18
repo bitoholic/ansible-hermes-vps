@@ -3,12 +3,13 @@
 # CI-safe checks (always run):
 #   1. Rendered docker-compose.yml includes both services (and passes
 #      `docker compose config` when docker is available).
-#   2. Caddyfile renders the owntracks HTTPS block (SNI-shared 8448,
-#      https:// scheme = ACME automatic HTTPS, no tls directive, no import
-#      mfa_auth, basic_auth present — the recorder has no HTTP auth of its own)
-#      and the matrix prefix regression guard (matrix.<domain>:8448, not bare
-#      domain).
-#   3. Firewall contract: 8448 in the rate-limit loop; syncplay 8999 granted
+#   2. Caddyfile renders the owntracks HTTPS block (SNI-shared 8443 — was 8448,
+#      moved in epic 19 #02 since Cloudflare's proxy allowlist includes 8443,
+#      not 8448 — https:// scheme = ACME automatic HTTPS, DNS-01 tls directive,
+#      no import mfa_auth, basic_auth present — the recorder has no HTTP auth
+#      of its own) and the matrix prefix regression guard (matrix.<domain>:8443,
+#      not bare domain).
+#   3. Firewall contract: 8443 in the rate-limit loop; syncplay 8999 granted
 #      per-IP via limit-from rules (allow + flood guard) driven by
 #      syncplay_allowed_ips. NOTE: published ports bypass UFW INPUT — the
 #      enforcement layer is DOCKER-USER (ticket #08); these greps pin the
@@ -69,11 +70,11 @@ if ! grep -q "role: owntracks" roles/gateway/meta/main.yml 2>/dev/null; then
 fi
 echo "owntracks-before-gateway ordering OK (via gateway's meta dependency — see check-role-ordering.sh)"
 
-# 3: firewall contract — 8448 in the rate-limit loop.
-if ! grep -A 12 'Rate-limit SSH, HTTP, HTTPS, and OwnTracks HTTPS' roles/tailscale/tasks/main.yml | grep -q '8448'; then
-  echo "FAIL: 8448 missing from the UFW rate-limit loop"; exit 1
+# 3: firewall contract — 8443 in the rate-limit loop (epic 19 #02: was 8448).
+if ! grep -A 12 'Rate-limit SSH, HTTP, HTTPS, and OwnTracks/Matrix HTTPS' roles/tailscale/tasks/main.yml | grep -q '8443'; then
+  echo "FAIL: 8443 missing from the UFW rate-limit loop"; exit 1
 fi
-echo "ufw 8448 rate-limit OK"
+echo "ufw 8443 rate-limit OK"
 
 # 3: firewall contract — syncplay per-IP limit-from rules on 8999.
 if ! grep -q 'Allow and rate-limit Syncplay from allowed IPs' roles/tailscale/tasks/main.yml; then

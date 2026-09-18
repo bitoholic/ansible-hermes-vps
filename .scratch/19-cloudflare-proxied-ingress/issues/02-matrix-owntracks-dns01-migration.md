@@ -7,12 +7,21 @@
 
 **Status:** ready-for-agent
 
-- [ ] Both routes' shared listener moves to the new port; every other field on both route entries (auth model, TLS mode) is unchanged
-- [ ] Certificate issuance for exactly these two routes switches to the DNS-01 method, authenticated via a newly-added, minimally-scoped API credential — every other route's certificate handling (self-signed internal CA) is untouched
-- [ ] A real, trusted certificate is obtained and verified serving correctly for both hosts on the new port while their DNS records are still in their current (non-proxied) state
-- [ ] The new credential is stored via this repo's existing secrets-manifest pattern, not hardcoded or logged
-- [ ] Matrix and OwnTracks clients configured with the new port successfully connect
+- [x] Both routes' shared listener moves to the new port; every other field on both route entries (auth model, TLS mode) is unchanged
+- [x] Certificate issuance for exactly these two routes switches to the DNS-01 method, authenticated via a newly-added, minimally-scoped API credential — every other route's certificate handling (self-signed internal CA) is untouched
+- [ ] A real, trusted certificate is obtained and verified serving correctly for both hosts on the new port while their DNS records are still in their current (non-proxied) state (operator-validated on the live VPS — see Implementation notes)
+- [x] The new credential is stored via this repo's existing secrets-manifest pattern, not hardcoded or logged
+- [ ] Matrix and OwnTracks clients configured with the new port successfully connect (operator-validated on the live VPS — see Implementation notes)
 
 ## Notes
 
 See epic 19 spec, "Solution" and "Implementation Decisions". The actual Cloudflare-dashboard flip to a proxied DNS record is an explicit manual operator step performed only after this ticket's verification passes — it is not part of this ticket and is not Ansible-automatable (this repo has no DNS-record-management automation today). Do not flip the DNS record as part of implementing or testing this ticket.
+
+## Implementation notes
+
+- `roles/conduit/defaults/main.yml` (matrix) and `roles/owntracks/defaults/main.yml` (recorder): `gateway_publish` entry's `port: 8448` → `port: 8443`. Every other field (`mfa: false`, `tls_mode: "auto"`, `basic_auth_user`/`hash` on owntracks) unchanged — verified by regression assertions in `tests/test_gateway_render.yml`.
+- `roles/gateway/templates/Caddyfile.j2`: added a `dns01_hosts = ['matrix', 'owntracks']` scoping list (deliberately not derived from `tls_mode == 'auto'` alone, and not a new schema field — see the template's own comment for the rejected alternatives) that renders an explicit `tls { dns cloudflare {env.CLOUDFLARE_API_TOKEN} }` block for exactly those two routes. Every other `tls_mode: auto` route (none exist today besides these two) or `tls internal` route is unaffected. Verified by rendering the real template with representative data via a throwaway playbook and inspecting the byte output before writing the corresponding test assertions.
+- New secret `cloudflare_api_token` added to `group_vars/all/secrets.yml` (`required: true`, no default — Zone:DNS:Edit scoped token, per the resolver's single-seam contract) and wired through `roles/docker/templates/services/caddy.yml.j2` as `CLOUDFLARE_API_TOKEN` env var on the `caddy` service, which Caddy reads via its own `{env.CLOUDFLARE_API_TOKEN}` placeholder (never touches Ansible's `lookup('env', ...)` outside the resolver). `.env.template`/`setup-env.sh` regenerated. Covered by `tests/check-resolver.sh`'s fail-fast loop (missing token is named in the failure) and `tests/test_docker_compose.yml`'s caddy env-var assertion.
+- Every reference to the old port (`docker_published_public_ports`, the UFW rate-limit loop and its task name in `roles/tailscale/tasks/main.yml`, the `caddy` compose fragment's port mapping) moved from 8448 → 8443. `docs/adr/0003-matrix-public-cert-and-server-name.md` deliberately left untouched — superseding it is ticket #03's scope, not this ticket's.
+- Full `tests/lint.sh` suite green (exit 0) after these changes, including `tests/check-custom-services.sh` (grep anchor updated for the renamed rate-limit task) and `tests/check-conduit.sh` (comments updated for accuracy; no functional assertions there depended on the port number). `ansible-lint` and `ansible-playbook --syntax-check site.yml` both clean.
+- Not automatable in this sandbox, left for the operator on the real VPS (same posture as epic 18 ticket #05's DNS handover): the actual ACME DNS-01 handshake against the real Cloudflare account/zone, and live client reconnection at the new port. This repo's tests verify the *rendered configuration* is correct (route fields, Caddyfile directive, firewall port, secret wiring) but cannot execute a real ACME challenge or a real client TLS handshake from this environment.
