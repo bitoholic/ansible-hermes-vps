@@ -1,7 +1,12 @@
 # ADR-0003: Matrix Serves a Public ACME Certificate; server_name Is matrix.<domain>
 
 ## Status
-Accepted
+Superseded in part by [ADR-0004](0004-matrix-owntracks-cloudflare-proxy-migration.md) (epic 19):
+the port choice (`:8448`) and the "DNS record must stay direct/unproxied" conclusion below no
+longer hold — matrix/owntracks moved to `:8443` with DNS-01 issuance specifically so their DNS
+records *can* be Cloudflare-proxied. The `server_name`/registration-token decisions below are
+unaffected and still stand. Left in place, not rewritten, to preserve the original incident
+diagnosis and reasoning.
 
 ## Context
 After the epic 12 deploy, Matrix clients could not register against

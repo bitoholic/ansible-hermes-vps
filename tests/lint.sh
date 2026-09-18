@@ -113,6 +113,13 @@ python3 scripts/generate-env.py --check
 # README membership for beszel and adguard.
 ./tests/check-second-wave-services.sh
 
+# Cloudflare-proxied-ingress full-epic guard (epic 19 ticket #03): consolidated
+# compose/gateway render re-verification (matrix/owntracks on :8443, DNS-01 scoped to
+# exactly those two routes), cloudflare_api_token's required/no-default secrets-manifest
+# shape, env-catalog sync, and the Caddy Dockerfile's version pin (no :latest, builder
+# and runtime stages match).
+./tests/check-cloudflare-proxied-ingress.sh
+
 # Bounded role-execution duplication (epic 17): docker's and wiki_volume's own tasks
 # run more than once per site.yml execution (Ansible's role dedup defeated by tag
 # inheritance, pre-existing and not fully eliminated) — this bounds the duplication
