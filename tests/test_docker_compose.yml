@@ -96,6 +96,26 @@
         path: "{{ docker_compose_dir }}/docker-compose.yml"
       register: rendered_compose
 
+    # Epic 19 ticket #01: Caddy now builds from a local Dockerfile (with the
+    # Cloudflare DNS plugin compiled in, for ticket #02's DNS-01 challenges)
+    # instead of pulling a stock image — zero behavior change otherwise: same
+    # ports, volumes, depends_on, networks as before this ticket.
+    - name: Assert caddy builds from a local Dockerfile, not a pulled image
+      ansible.builtin.assert:
+        that:
+          - compose.services.caddy.image is not defined
+          - compose.services.caddy.build.context == (docker_compose_dir ~ '/caddy')
+          - compose.services.caddy.build.dockerfile == 'Dockerfile'
+          - compose.services.caddy.ports == ['80:80', '443:443', '8448:8448']
+          - compose.services.caddy.volumes | sort == ([docker_compose_dir ~ '/Caddyfile:/etc/caddy/Caddyfile:ro', 'caddy_data:/data', 'caddy_config:/config'] | sort)
+          - compose.services.caddy.depends_on == ['authelia']
+          - compose.services.caddy.networks == ['gateway']
+        fail_msg: >-
+          caddy does not match the expected build shape. Rendered:
+          {{ compose.services.caddy | default('MISSING') }}
+      vars:
+        compose: "{{ rendered_compose.content | b64decode | from_yaml }}"
+
     - name: Assert every published host port belongs to a declared firewall class
       # Closes the open-by-default gap (epic 12 #08 review): a future fragment
       # adding ports: ["X:X"] without classifying X would be silently

@@ -32,6 +32,16 @@ if [[ ! -f roles/docker/tasks/start.yml ]] || ! grep -q "Start consolidated dock
   echo "FAIL: roles/docker/tasks/start.yml missing or missing the compose-stack start task"; exit 1
 fi
 
+# 1b. build: always (epic 19, #01, caught in review): the default `policy`
+# only builds an image if none exists yet under that project/service name, so
+# a Dockerfile edit on an already-provisioned host would silently keep
+# running the stale binary with nothing surfacing it. This matters for two
+# build-based services now (hermes-agent, and Caddy as of epic 19) — Caddy
+# being the stack's single TLS-termination point raises the stakes.
+if ! grep -qE '^\s*build:\s*always\s*$' roles/docker/tasks/start.yml; then
+  echo "FAIL: roles/docker/tasks/start.yml's docker_compose_v2 task is missing build: always"; exit 1
+fi
+
 # 2. conduit's provisioning tasks moved out of its default sequence.
 if grep -q "Register the @hermes bot account" roles/conduit/tasks/main.yml; then
   echo "FAIL: roles/conduit/tasks/main.yml still contains bot provisioning"; exit 1

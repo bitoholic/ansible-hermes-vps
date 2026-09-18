@@ -200,6 +200,25 @@
     group: llm_wiki
     mode: '0640'
 
+# Epic 19, #01: Caddy's own build context, mirroring the Hermes pattern above
+# — a dedicated directory (not docker_compose_dir itself) so the build
+# context doesn't accidentally pull in the whole compose-dir tree.
+- name: Ensure Caddy build context directory exists
+  tags: [docker]
+  ansible.builtin.file:
+    path: "{{ docker_compose_dir }}/caddy"
+    state: directory
+    mode: '0755'
+
+- name: Copy Caddy Dockerfile to build context
+  tags: [docker]
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/roles/gateway/files/Dockerfile"
+    dest: "{{ docker_compose_dir }}/caddy/Dockerfile"
+    owner: "{{ secrets.admin_username }}"
+    group: llm_wiki
+    mode: '0640'
+
 # "Start consolidated docker compose stack" moved to tasks/start.yml (epic 16, #01) —
 # no longer runs automatically as part of this role's default sequence. It's invoked
 # explicitly at the end of site.yml's play, after every role that deploys a

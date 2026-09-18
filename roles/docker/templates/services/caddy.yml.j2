@@ -1,5 +1,12 @@
 caddy:
-  image: caddy:2.8.4
+  # Built from a local Dockerfile (epic 19, #01) — not a pulled stock image —
+  # to compile in the Cloudflare DNS plugin (roles/gateway/files/Dockerfile
+  # has the full rationale). Build context is a dedicated directory
+  # (roles/docker/tasks/main.yml copies the Dockerfile there) so this doesn't
+  # accidentally pull in the whole compose-dir tree as build context.
+  build:
+    context: "{{ docker_compose_dir }}/caddy"
+    dockerfile: Dockerfile
   container_name: caddy
   ports:
     - "80:80"

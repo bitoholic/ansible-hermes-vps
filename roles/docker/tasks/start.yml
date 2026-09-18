@@ -11,6 +11,17 @@
 # Invoked from site.yml's end-of-play tasks via import_role/tasks_from — NOT a bare
 # include_tasks — so this role's own meta/main.yml dependencies still fire for it,
 # the same way they do for any other role invocation.
+# build: always (epic 19, #01, caught in review): the default `policy` only
+# builds a service's image if none exists yet under that project/service name
+# — a Dockerfile edit on a host that already has a built image from a prior
+# run would silently keep running the STALE binary, with nothing here
+# surfacing that. This now matters for two build-based services (hermes-agent,
+# and Caddy as of this ticket) instead of one, and Caddy is the stack's single
+# TLS-termination point, so a silently-stale rebuild here is a materially
+# bigger risk than it was for hermes-agent alone. `always` is Docker's own
+# layer-cache-backed rebuild — cheap (a no-op re-verify) when the Dockerfile
+# hasn't actually changed, so this doesn't meaningfully slow down the common
+# case of a redeploy where nothing built changed.
 - name: Start consolidated docker compose stack
   tags: [docker]
   community.docker.docker_compose_v2:
@@ -21,4 +32,5 @@
     services: "{{ docker_enabled_services }}"
     state: present
     pull: missing
+    build: always
   ignore_errors: "{{ ansible_check_mode }}"
