@@ -32,17 +32,20 @@ check_in() { grep -qEi "$2" "$1" || { echo "FAIL: $1 missing: $3"; exit 1; }; }
 # line_of <file> <pattern> — first matching line number, or empty.
 line_of() { grep -nE "$2" "$1" 2>/dev/null | head -1 | cut -d: -f1; }
 
-# list_has <file> <list_header_pattern> <item_pattern> <description> — does
-# list X contain item Y, bounded to the block starting at list_header_pattern
-# up to (not including) the next line at the same indentation level — NOT a
-# fixed-line grep -A window (that was this function's original shape; fixed
-# after epic 18 ticket #06 found the identical bug empirically: a fixed
-# 10-line window here made "53 in docker_published_restricted_ports" (TCP)
-# keep passing even with 53 removed from that list, because the window bled
-# into docker_published_restricted_udp_ports's own "- 53" line right after it
-# ends). Indentation for the boundary is derived from list_header_pattern's
-# own leading spaces.
-list_has() {
+# entry_has <file> <key_pattern> <content_pattern> <description> — does the
+# bounded block starting at key_pattern (up to, not including, the next line
+# at the same indentation level) contain content_pattern — NOT a fixed-line
+# grep -A window (that was this function's original shape as `list_has`;
+# fixed after epic 18 ticket #06 found the bug empirically: a fixed 10-line
+# window here made "53 in docker_published_restricted_ports" (TCP) keep
+# passing even with 53 removed from that list, because the window bled into
+# docker_published_restricted_udp_ports's own "- 53" line right after it
+# ends). Indentation for the boundary is derived from key_pattern's own
+# leading spaces. Same name/shape as tests/check-second-wave-services.sh's
+# entry_has, duplicated rather than shared (this repo's test scripts are each
+# self-contained by convention) — kept the names in sync so the two aren't a
+# confusing pair of near-identical-but-differently-named helpers.
+entry_has() {
   local file="$1" key_pat="$2" content_pat="$3" desc="$4"
   local indent="${key_pat#^}"; indent="${indent%%[^ ]*}"
   awk -v key_pat="$key_pat" -v exit_pat="^${indent}[A-Za-z_]" '
@@ -151,8 +154,8 @@ echo "early-phase/late-phase separation OK"
 # 5: firewall — a UDP restricted-port class exists and is wired into
 # DOCKER-USER (v4 and v6), mirroring the existing TCP restricted-port rules.
 check_in group_vars/all/main.yml '^docker_published_restricted_udp_ports:' "docker_published_restricted_udp_ports defined"
-list_has group_vars/all/main.yml '^docker_published_restricted_udp_ports:' '  - 53' "53 in docker_published_restricted_udp_ports"
-list_has group_vars/all/main.yml '^docker_published_restricted_ports:' '  - 53' "53 in docker_published_restricted_ports (TCP, for DNS's TCP fallback)"
+entry_has group_vars/all/main.yml '^docker_published_restricted_udp_ports:' '  - 53' "53 in docker_published_restricted_udp_ports"
+entry_has group_vars/all/main.yml '^docker_published_restricted_ports:' '  - 53' "53 in docker_published_restricted_ports (TCP, for DNS's TCP fallback)"
 for rule in "DOCKER-USER v4 - restricted UDP ports from Tailscale subnet" \
             "DOCKER-USER v4 - restricted UDP ports denied for everyone else" \
             "DOCKER-USER v6 - restricted UDP ports from Tailscale ULA" \

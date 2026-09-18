@@ -21,28 +21,30 @@ echo "== second-wave services guard (epic 18) =="
 
 check_in() { grep -qEi "$2" "$1" || { echo "FAIL: $1 missing: $3"; exit 1; }; }
 
-# entry_has <file> <key_pattern> <content_pattern> <description> — checks
-# content_pattern only within the bounded block starting at key_pattern, up to
-# (not including) the next line at the SAME indentation level. A fixed-line
-# `grep -A<N>` window doesn't have this guarantee, and got this wrong twice
-# here originally (caught in review, verified empirically): the check for
-# beszel_agent_key's `required: false` kept passing even after flipping that
-# key's own value to `true`, because the window bled into beszel_agent_token's
-# unrelated `required: false` three lines later — and the identical shape
-# existed for docker_published_restricted_ports's own window bleeding into
-# docker_published_restricted_udp_ports's list right after it. Indentation for
-# the boundary is derived from key_pattern's own leading spaces, so this works
-# for both group_vars/all/main.yml's 0-indent top-level keys and
-# group_vars/all/secrets.yml's 2-indent manifest entries.
-entry_has() {
-  local file="$1" key_pat="$2" content_pat="$3" desc="$4"
+# block_of <file> <key_pattern> — prints the bounded block starting at the
+# line matching key_pattern, up to (not including) the next line at the SAME
+# indentation level. Indentation for the boundary is derived from
+# key_pattern's own leading spaces, so this works for both
+# group_vars/all/main.yml's 0-indent top-level keys and
+# group_vars/all/secrets.yml's 2-indent manifest entries. Same name/shape as
+# tests/check-adguard-dns.sh's entry_has (see that file for why a fixed-line
+# `grep -A<N>` window doesn't have this guarantee — verified empirically to
+# silently pass a real regression) — duplicated rather than shared, since this
+# repo's test scripts are each self-contained by convention (no shared-helpers
+# file exists anywhere else either); unify if a third caller ever needs this.
+block_of() {
+  local key_pat="$2"
   local indent="${key_pat#^}"; indent="${indent%%[^ ]*}"
   awk -v key_pat="$key_pat" -v exit_pat="^${indent}[A-Za-z_]" '
     $0 ~ key_pat { found=1; print; next }
     found && $0 ~ exit_pat { exit }
     found { print }
-  ' "$file" | grep -qE "$content_pat" || { echo "FAIL: $file missing: $desc"; exit 1; }
+  ' "$1"
 }
+
+# entry_has <file> <key_pattern> <content_pattern> <description> — does
+# block_of(file, key_pattern) contain content_pattern.
+entry_has() { block_of "$1" "$2" | grep -qE "$3" || { echo "FAIL: $1 missing: $4"; exit 1; }; }
 
 # 1: consolidated compose + gateway render — all four new services, all three
 # new tailnet_only routes, every pre-existing route unchanged (asserted by the
@@ -91,7 +93,24 @@ echo "secrets manifest shape (required/default) OK"
 python3 scripts/generate-env.py --check
 echo "env catalog sync OK"
 
-# 5: skip-tags guard membership for the epic's two new roles — already asserted
+# 5 (spec.md's own Testing Decisions, found missing in review — same class of
+# gap as check #2 above): docker_enabled_services includes all four new
+# services, and docker_volumes gained NO new entries (confirms the
+# bind-mount-over-named-volume decision held), against the REAL
+# roles/docker/defaults/main.yml — not test_docker_compose.yml's own hardcoded
+# mirror of both lists.
+DOCKER_DEFAULTS=roles/docker/defaults/main.yml
+for svc in owntracks-frontend beszel-hub beszel-agent adguard; do
+  entry_has "$DOCKER_DEFAULTS" '^docker_enabled_services:' "  - ${svc}\$" "docker_enabled_services includes ${svc}"
+done
+DOCKER_VOLUMES_COUNT="$(block_of "$DOCKER_DEFAULTS" '^docker_volumes:' | grep -c '  - ')"
+if [[ "$DOCKER_VOLUMES_COUNT" != "3" ]]; then
+  echo "FAIL: $DOCKER_DEFAULTS docker_volumes has $DOCKER_VOLUMES_COUNT entries, expected exactly 3 (caddy_data, caddy_config, syncplay_data) — epic 18 should not have added any named volumes (bind-mounts only)"
+  exit 1
+fi
+echo "docker_enabled_services/docker_volumes (real file) OK"
+
+# 6: skip-tags guard membership for the epic's two new roles — already asserted
 # generically by tests/lint.sh's own role loop; spot-checked here too for the
 # same reason as #4.
 check_in tests/lint.sh '\bbeszel\b' "beszel in the skip-tags guard role list"
