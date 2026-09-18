@@ -200,9 +200,15 @@
     group: llm_wiki
     mode: '0640'
 
-# Epic 19, #01: Caddy's own build context, mirroring the Hermes pattern above
-# — a dedicated directory (not docker_compose_dir itself) so the build
-# context doesn't accidentally pull in the whole compose-dir tree.
+# Epic 19, #01: Caddy's own build context — a dedicated directory (not
+# docker_compose_dir itself) so the build context doesn't accidentally pull in
+# the whole compose-dir tree. The directory itself mirrors docker_compose_dir's
+# OWN unowned creation style above (mode only, no owner/group — Docker's build
+# runs as root regardless), not hermes_home's llm_wiki-owned style (that
+# ownership matters there because hermes_home is a persistent, bind-mounted
+# data directory the running container writes to; this one is build-time-only
+# and nothing writes to it after the copy below). Only the Dockerfile copy
+# itself picks up ownership, mirroring Hermes's own Dockerfile-copy task.
 - name: Ensure Caddy build context directory exists
   tags: [docker]
   ansible.builtin.file:
