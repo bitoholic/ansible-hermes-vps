@@ -26,12 +26,19 @@ global
     # "haproxy" as its own default), so this isn't inventing a new identity.
     user haproxy
     group haproxy
-    # Confirmed /var/empty exists (read-only, root-owned) in the haproxy:3.4-alpine
-    # image. Silences HAProxy's own runtime warning about starting as root without
-    # a chroot — this process never needs filesystem access beyond reading its own
-    # config at startup (pure TCP passthrough, no file uploads, no user-supplied
-    # paths), so confining it further costs nothing.
-    chroot /var/empty
+    # chroot INTO the shared socket directory itself (not /var/empty, an
+    # earlier version of this file's own choice) — silences HAProxy's own
+    # runtime warning about starting as root without a chroot, but more
+    # importantly: this process needs filesystem access to exactly one thing
+    # post-startup, the Unix socket to Caddy below, and nothing else (pure
+    # TCP passthrough, no certs, no ACL files). Chrooting to /var/empty
+    # instead would have made that socket path UNREACHABLE after the chroot
+    # takes effect — a chrooted process can't see anything outside its new
+    # root, including an absolute path that was valid before the chroot.
+    # Caught before deploying, not live: reasoned through the exact
+    # `connect()`-time path resolution rather than repeating this ticket's
+    # earlier pattern of finding out via a crash-loop.
+    chroot /caddy-relay-socket
 
 defaults
     mode tcp
@@ -45,11 +52,27 @@ frontend tailnet_https
 {% endif %}    default_backend caddy_internal
 
 backend caddy_internal
+    # unix@/caddy-relay.sock, not a TCP address: a Unix domain socket shared
+    # with Caddy's own container via the same host directory this process is
+    # chrooted into above (both containers mount {{ caddy_relay_socket_dir }}
+    # at their own internal paths — Caddy at /caddy-relay-socket, this
+    # container at /caddy-relay-socket too, which then BECOMES this
+    # container's "/" once chroot takes effect, so the socket at
+    # {{ caddy_relay_socket_dir }}/caddy-relay.sock appears here simply as
+    # /caddy-relay.sock). Replaced an earlier loopback-TCP-port design found,
+    # in review, to be a real auth-bypass vector: Docker's own port-publish
+    # NAT made ANY host-networked container's connection (not just this
+    # one's) appear to originate from the same untrustable address range —
+    # see roles/gateway/templates/Caddyfile.j2's own comment for the full
+    # story. A Unix socket has no network-layer identity to spoof at all;
+    # only a container with this exact directory bind-mounted can reach it.
+    #
     # send-proxy-v2: PROXY protocol v2 (binary), not v1 (text) — v2 is the
     # more robust, modern format and cleanly supports both address families
     # in one wire format. Caddy's own proxy_protocol module — which ships
     # natively in the pinned Caddy version, no Dockerfile change needed, see
-    # roles/gateway/templates/Caddyfile.j2's own comment — auto-detects the
-    # protocol version on read, so no matching config is needed on Caddy's
-    # side.
-    server caddy 127.0.0.1:{{ caddy_proxy_protocol_port }} send-proxy-v2
+    # Caddyfile.j2's own comment — auto-detects the protocol version on
+    # read, so no matching config is needed on Caddy's side. PROXY protocol
+    # works the same way over a Unix socket as over TCP: it's a payload-level
+    # header, transport-agnostic once the connection is established.
+    server caddy unix@/caddy-relay.sock send-proxy-v2

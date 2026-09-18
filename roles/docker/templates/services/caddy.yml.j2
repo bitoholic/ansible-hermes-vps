@@ -22,17 +22,9 @@ caddy:
   # 8443 (matrix/owntracks) is untouched for the same reason: neither route
   # has any source-based access control to begin with.
   #
-  # 127.0.0.1:{{ caddy_proxy_protocol_port }} (epic 20): the internal,
-  # PROXY-protocol-trusting listener defined in Caddyfile.j2's global options
-  # — reachable only by the caddy-relay container's own loopback-bound
-  # forward, never the public internet or the Docker bridge's externally-
-  # reachable side. Half of this listener's defense-in-depth (the other half
-  # is the listener's own `allow 127.0.0.1/32 ::1/128` restriction) — see
-  # Caddyfile.j2's own comment for the full security-boundary rationale.
   ports:
     - "80:80"
     - "{{ ansible_default_ipv4.address }}:443:443"
-    - "127.0.0.1:{{ caddy_proxy_protocol_port }}:{{ caddy_proxy_protocol_port }}"
     - "8443:8443"
   # CLOUDFLARE_API_TOKEN (epic 19, #02): read by Caddyfile.j2's DNS-01
   # directive via Caddy's own {env.CLOUDFLARE_API_TOKEN} placeholder — not
@@ -43,6 +35,16 @@ caddy:
     - "{{ docker_compose_dir }}/Caddyfile:/etc/caddy/Caddyfile:ro"
     - "caddy_data:/data"
     - "caddy_config:/config"
+    # Shared Unix socket directory with caddy-relay (epic 20) — the internal,
+    # PROXY-protocol-trusting listener defined in Caddyfile.j2's global
+    # options binds a socket file here, not a Docker-published TCP port at
+    # all. Reachable only by a container that also has this exact directory
+    # bind-mounted (caddy-relay does; nothing else in this stack does) — a
+    # filesystem-scoped boundary, not an IP-based one. See Caddyfile.j2's own
+    # comment for why this replaced an earlier, insecure loopback-TCP-port
+    # design (an IP allow-list couldn't actually distinguish "the relay" from
+    # any other host-networked container, e.g. beszel-agent).
+    - "{{ caddy_relay_socket_dir }}:/caddy-relay-socket"
   depends_on:
     - authelia
   networks:

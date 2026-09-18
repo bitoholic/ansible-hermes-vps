@@ -72,7 +72,7 @@
     # this repo fake config that would otherwise come from real host state.
     ansible_default_ipv4:
       address: "203.0.113.10"
-    caddy_proxy_protocol_port: 8543
+    caddy_relay_socket_dir: "{{ docker_compose_dir }}/caddy-relay/socket"
     secrets:
       silverbullet_domain: test.example.com
       silverbullet_admin_username: admin
@@ -112,19 +112,23 @@
     # CLOUDFLARE_API_TOKEN env var for the DNS-01 directive in Caddyfile.j2
     # to read via Caddy's own {env.CLOUDFLARE_API_TOKEN} placeholder. Epic 20:
     # 443 is now scoped to this VPS's own public IP (not 0.0.0.0), freeing
-    # <tailscale-ip>:443 for caddy-relay; a new 127.0.0.1-only port publishes
-    # the internal PROXY-protocol-trusting listener — 80 and 8443 are
-    # untouched (neither has a source-IP gate the tailnet masquerade bug
-    # could break).
+    # <tailscale-ip>:443 for caddy-relay — 80 and 8443 are untouched (neither
+    # has a source-IP gate the tailnet masquerade bug could break). The
+    # internal PROXY-protocol listener is a shared Unix socket (a bind-mounted
+    # directory), not a Docker-published port at all — a real security fix,
+    # not a style choice: an IP-scoped loopback port couldn't actually
+    # distinguish "the relay" from any other host-networked container in this
+    # exact stack (beszel-agent already is one) or host-level process, since
+    # Docker's own port-publish NAT gave them all the same apparent source.
     - name: Assert caddy builds from a local Dockerfile, not a pulled image
       ansible.builtin.assert:
         that:
           - compose.services.caddy.image is not defined
           - compose.services.caddy.build.context == (docker_compose_dir ~ '/caddy')
           - compose.services.caddy.build.dockerfile == 'Dockerfile'
-          - compose.services.caddy.ports == ['80:80', '203.0.113.10:443:443', '127.0.0.1:8543:8543', '8443:8443']
+          - compose.services.caddy.ports == ['80:80', '203.0.113.10:443:443', '8443:8443']
           - "'CLOUDFLARE_API_TOKEN=fake-cf-token' in compose.services.caddy.environment"
-          - compose.services.caddy.volumes | sort == ([docker_compose_dir ~ '/Caddyfile:/etc/caddy/Caddyfile:ro', 'caddy_data:/data', 'caddy_config:/config'] | sort)
+          - compose.services.caddy.volumes | sort == ([docker_compose_dir ~ '/Caddyfile:/etc/caddy/Caddyfile:ro', 'caddy_data:/data', 'caddy_config:/config', caddy_relay_socket_dir ~ ':/caddy-relay-socket'] | sort)
           - compose.services.caddy.depends_on == ['authelia']
           - compose.services.caddy.networks == ['gateway']
         fail_msg: >-
@@ -137,7 +141,8 @@
     # same network_mode: host precedent as beszel-agent, for a different
     # reason (binding this VPS's own Tailscale interface IP directly, not
     # host-level stats collection). Not on the gateway Docker network at all:
-    # it only ever needs to reach Caddy's own loopback-published port.
+    # it only ever needs to reach Caddy over the shared Unix socket, not by
+    # Docker service name.
     # user: root: found on the live VPS via two real crash-loops — the
     # official haproxy image's own Dockerfile launches its ENTRYPOINT
     # directly as a non-root user, so cap_add: NET_BIND_SERVICE (tried
@@ -150,6 +155,10 @@
     # socket as root, then drops to the unprivileged haproxy user/group via
     # its own config directives (roles/gateway/templates/haproxy.cfg.j2)
     # immediately after — not "run everything as root" as a shortcut.
+    # The shared socket volume (not a Docker-published TCP port, found in
+    # review to be a real auth-bypass vector — any host-networked container
+    # or host-level process could otherwise reach it and forge a source IP)
+    # is the actual security boundary for the internal listener.
     - name: Assert caddy-relay is host-networked and mounts its own config
       ansible.builtin.assert:
         that:
@@ -158,6 +167,7 @@
           - compose.services['caddy-relay'].image == 'haproxy:3.4-alpine'
           - compose.services['caddy-relay'].user == 'root'
           - "(docker_compose_dir ~ '/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro') in compose.services['caddy-relay'].volumes"
+          - "(caddy_relay_socket_dir ~ ':/caddy-relay-socket') in compose.services['caddy-relay'].volumes"
           - compose.services['caddy-relay'].depends_on == ['caddy']
         fail_msg: >-
           caddy-relay does not match the expected shape. Rendered:

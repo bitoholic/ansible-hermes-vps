@@ -73,13 +73,28 @@ tailscale_subnet: "100.64.0.0/10"
 # DOCKER-USER v6 rules that mirror the v4 source-based restrictions (epic 12 #08).
 tailscale_subnet_v6: "fd7a:115c:a1e0::/48"
 
-# Internal-only Caddy listener port for tailnet-facing traffic (epic 20). Not a
-# Docker-published port at all — bound only to host loopback, reachable solely by
-# the caddy-relay container's own PROXY-protocol-wrapped forward. Exists
-# alongside, not instead of, Caddy's normal public :443 listener (which gets no
-# PROXY-protocol trust and is otherwise completely unchanged) — see
-# roles/gateway/templates/Caddyfile.j2's own comment for the full rationale.
-caddy_proxy_protocol_port: 8543
+# Internal Caddy<->caddy-relay link for tailnet-facing traffic (epic 20): a shared
+# Unix domain socket, NOT a TCP port — same host bind-mount-directory pattern as
+# beszel's own hub<->agent socket (beszel_socket_dir), for the same underlying
+# reason (a local, same-host IPC channel needs no network hop at all).
+#
+# This was originally a loopback-only TCP port (127.0.0.1:8543) with an IP
+# `allow`-list as Caddy's PROXY-protocol trust boundary — found, in review, to be
+# a real security hole: ANY host-networked container (beszel-agent already is
+# one) or host-level process can reach a Docker-published 127.0.0.1 port, and
+# Docker's own port-publish NAT rewrites ITS source to the gateway network's
+# bridge address too — the exact same address range the relay's own connection
+# appeared from, so the allow-list couldn't actually distinguish "the relay"
+# from "anything else on the host." A Unix socket has no network-layer identity
+# to spoof at all: only a container with this exact directory bind-mounted can
+# reach the socket file, a boundary Docker's own volume-mount scoping enforces,
+# not an IP check. See roles/gateway/templates/Caddyfile.j2's own comment for
+# the full rationale and the Caddyfile syntax this required (a second, unix-
+# socket-bound site block per gated route — verified against a real Caddy
+# binary that comma-joining a unix-socket address onto a normal hostname
+# address, the original approach, silently mis-parses as a URL host+path
+# instead of a second listener).
+caddy_relay_socket_dir: "{{ docker_compose_dir }}/caddy-relay/socket"
 
 # Docker published-port firewall classes (epic 12 #08). Published ports bypass UFW
 # INPUT (Docker DNATs in nat PREROUTING), so access classes are enforced in the

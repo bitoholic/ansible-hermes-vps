@@ -14,7 +14,11 @@ caddy-relay:
   # bridge to reach something host-level) so it can bind tailscale0's address
   # the same way tailscaled itself does. Not on the `gateway` Docker network at
   # all: it never needs to resolve "caddy" by service name, only to reach
-  # Caddy's own Docker-published loopback port (127.0.0.1:{{ caddy_proxy_protocol_port }}).
+  # Caddy over the shared Unix socket below — deliberately NOT a Docker-
+  # published TCP port (found in review: any host-networked container, or any
+  # host-level process, could reach a loopback-published port and forge a
+  # PROXY header, since Docker's own port-publish NAT made every such
+  # connection's source indistinguishable from this container's own).
   #
   # Version pinned explicitly, no floating `latest` tag, matching this repo's
   # standing convention for every other pinned image.
@@ -46,6 +50,10 @@ caddy-relay:
   user: root
   volumes:
     - "{{ docker_compose_dir }}/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro"
+    # Shared with caddy's own container (roles/docker/templates/services/
+    # caddy.yml.j2) — the actual security boundary for the internal listener,
+    # see this file's own header comment and Caddyfile.j2's for the full story.
+    - "{{ caddy_relay_socket_dir }}:/caddy-relay-socket"
   depends_on:
     - caddy
   restart: unless-stopped

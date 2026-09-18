@@ -82,15 +82,20 @@
     # gateway loop, adding tls_mode/port fields, and adding matrix. prefix) is an intentional
     # change that will alter the rendered output. Functional assertions below verify correctness.
 
-    - name: Assert one site block per route and correct mfa_auth wrapping
+    - name: Assert one site block per route (two for mfa/tailnet_only-gated ones) and correct wrapping
       ansible.builtin.assert:
         that:
-          - "(rendered | regex_findall('\\.test\\.example\\.com[^{]*\\{')) | length == gateway_routes | length"
-          - "(rendered | regex_findall('reverse_proxy ')) | length == gateway_routes | length"
-          # wiki/dash also carry epic 20's second, comma-joined internal-listener
-          # address (mfa: true) — auth does not (no mfa/tailnet_only import at all).
-          - "rendered is search('wiki\\.test\\.example\\.com, wiki\\.test\\.example\\.com:8543 \\{')"
-          - "rendered is search('dash\\.test\\.example\\.com, dash\\.test\\.example\\.com:8543 \\{')"
+          # Epic 20: every mfa/tailnet_only-gated route (wiki, dash, owntracks-ui,
+          # monitor, adguard — 5 of the 8 routes) now renders TWO separate site
+          # blocks (one per listener), not one block with a second comma-joined
+          # address — verified against a real Caddy binary that a Unix-socket
+          # address comma-joined onto a normal hostname address silently
+          # mis-parses as a URL host+path match instead of a second listener.
+          # Total block count is therefore routes + gated routes, not just routes.
+          - "(rendered | regex_findall('\\.test\\.example\\.com[^{]*\\{')) | length == (gateway_routes | length) + gated_route_count"
+          - "(rendered | regex_findall('reverse_proxy ')) | length == (gateway_routes | length) + gated_route_count"
+          - "rendered is search('wiki\\.test\\.example\\.com \\{')"
+          - "rendered is search('dash\\.test\\.example\\.com \\{')"
           - "rendered is search('auth.test.example.com \\{')"
           - "rendered is search('https://matrix.test.example.com:8443 \\{')"
           - "rendered is search('https://owntracks.test.example.com:8443 \\{')"
@@ -104,6 +109,7 @@
           # HTTPS's default HTTP-01/TLS-ALPN-01 challenges for exactly this route
           # and owntracks' recorder below — those default challenges need the
           # origin directly reachable, which breaks once the DNS record is proxied.
+          # Neither route is mfa/tailnet_only-gated, so neither gets a second block.
           - "rendered is search('https://matrix\\.test\\.example\\.com:8443 \\{\\n  log\\n  import dns01_tls\\n  reverse_proxy conduit:8008\\n\\}')"
           # OwnTracks: tls_mode auto renders the https:// scheme (automatic HTTPS →
           # real ACME cert) and NO bare `tls` line — a bare `tls` line is a Caddyfile
@@ -113,16 +119,28 @@
           # comes before basic_auth in the rendered block (Caddyfile.j2's own
           # directive order), same DNS-01 reasoning as matrix above.
           - "rendered is search('https://owntracks\\.test\\.example\\.com:8443 \\{\\n  log\\n  import dns01_tls\\n  basic_auth \\{\\n    owntracks_admin stubbcrypthashvalue\\n  \\}\\n  reverse_proxy owntracks:8083\\n\\}')"
-          # Epic 18 ticket #02: the OwnTracks frontend's route is tailnet_only, no
-          # public path, no basic-auth secret — the opposite posture from the
-          # recorder route directly above, on purpose (only the recorder is public).
-          - "rendered is search('owntracks-ui\\.test\\.example\\.com, owntracks-ui\\.test\\.example\\.com:8543 \\{\\n  log\\n  tls internal\\n  import tailnet_only\\n  reverse_proxy owntracks-frontend:80\\n\\}')"
+          # Epic 18 ticket #02 / epic 20: the OwnTracks frontend's route is
+          # tailnet_only — its normal :443 block (no public path posture change
+          # here) plus its second, Unix-socket-bound block for the internal
+          # listener (epic 20's actual fix — this exact block is what makes it
+          # reachable again from a real tailnet client).
+          - "rendered is search('owntracks-ui\\.test\\.example\\.com \\{\\n  log\\n  tls internal\\n  import tailnet_only\\n  reverse_proxy owntracks-frontend:80\\n\\}')"
+          - "rendered is search('owntracks-ui\\.test\\.example\\.com \\{\\n  bind unix//caddy-relay-socket/caddy-relay\\.sock\\|0666\\n  log\\n  tls internal\\n  import tailnet_only\\n  reverse_proxy owntracks-frontend:80\\n\\}')"
           # Epic 18 ticket #03: Beszel's hub dashboard is also tailnet_only — same
-          # posture as owntracks-ui, no public path, no basic-auth secret.
-          - "rendered is search('monitor\\.test\\.example\\.com, monitor\\.test\\.example\\.com:8543 \\{\\n  log\\n  tls internal\\n  import tailnet_only\\n  reverse_proxy beszel-hub:8090\\n\\}')"
-          # Epic 18 ticket #04: AdGuard's admin UI, same tailnet_only posture.
-          - "rendered is search('adguard\\.test\\.example\\.com, adguard\\.test\\.example\\.com:8543 \\{\\n  log\\n  tls internal\\n  import tailnet_only\\n  reverse_proxy adguard:3000\\n\\}')"
-          - "(rendered | regex_findall('import mfa_auth')) | length == (gateway_routes | selectattr('mfa') | list | length)"
+          # posture as owntracks-ui, both blocks.
+          - "rendered is search('monitor\\.test\\.example\\.com \\{\\n  log\\n  tls internal\\n  import tailnet_only\\n  reverse_proxy beszel-hub:8090\\n\\}')"
+          - "rendered is search('monitor\\.test\\.example\\.com \\{\\n  bind unix//caddy-relay-socket/caddy-relay\\.sock\\|0666\\n  log\\n  tls internal\\n  import tailnet_only\\n  reverse_proxy beszel-hub:8090\\n\\}')"
+          # Epic 18 ticket #04: AdGuard's admin UI, same tailnet_only posture, both blocks.
+          - "rendered is search('adguard\\.test\\.example\\.com \\{\\n  log\\n  tls internal\\n  import tailnet_only\\n  reverse_proxy adguard:3000\\n\\}')"
+          - "rendered is search('adguard\\.test\\.example\\.com \\{\\n  bind unix//caddy-relay-socket/caddy-relay\\.sock\\|0666\\n  log\\n  tls internal\\n  import tailnet_only\\n  reverse_proxy adguard:3000\\n\\}')"
+          # import mfa_auth/import tailnet_only now appear TWICE per gated route
+          # (once per block), not once — mfa: wiki+dash (2 routes x 2 blocks = 4);
+          # tailnet_only: owntracks-ui+monitor+adguard (3 routes x 2 blocks = 6).
+          - "(rendered | regex_findall('import mfa_auth')) | length == (gateway_routes | selectattr('mfa') | list | length) * 2"
+          - "(rendered | regex_findall('import tailnet_only')) | length == (gateway_routes | selectattr('tailnet_only', 'defined') | selectattr('tailnet_only') | list | length) * 2"
+          # basic_auth is only ever on the owntracks recorder, which isn't
+          # gated (mfa: false, no tailnet_only) — one block, one occurrence,
+          # unaffected by the dual-block change.
           - "(rendered | regex_findall('basic_auth \\{')) | length == (gateway_routes | selectattr('basic_auth_user', 'defined') | list | length)"
           # Epic 19 ticket #02: DNS-01 is scoped to exactly matrix + owntracks — not
           # wiki/dash/auth/syncplay (untouched), and not any epic-18 tailnet_only
@@ -132,21 +150,26 @@
           # snippet definition's own `dns cloudflare` line appears exactly once
           # regardless of how many routes import it (snippets aren't inlined per
           # import site) — the per-route fan-out is `import dns01_tls`, not this.
+          # Neither matrix nor owntracks is gated, so this count is unaffected by
+          # the dual-block change.
           - "(rendered | regex_findall('dns cloudflare')) | length == 1"
           - "(rendered | regex_findall('import dns01_tls')) | length == 2"
           # Regression guard (epic 12): routes without tls_mode render `tls internal`
           # (pre-epic-12 behavior) — wiki, dash, auth, and (epic 18 #02/#03/#04)
           # owntracks-ui/monitor/adguard. Matrix and the recorder use tls_mode auto
-          # (real ACME certs, ADR-0003).
-          - "(rendered | regex_findall('tls internal')) | length == 6"
-          # Byte-exact block assertions for every mfa:true route (epic 18 ticket #01
-          # review: wiki/dash previously only had a partial opening-line check here,
-          # not the same byte-exact block coverage auth/matrix/owntracks already had
-          # — closing that gap makes the "existing routes are untouched" claim this
-          # ticket's own tests rely on to prove additivity actually literal, not
-          # merely inferred from the field-count assertions).
-          - "rendered is search('wiki\\.test\\.example\\.com, wiki\\.test\\.example\\.com:8543 \\{\\n  log\\n  tls internal\\n  import mfa_auth\\n  reverse_proxy silverbullet:3000\\n\\}')"
-          - "rendered is search('dash\\.test\\.example\\.com, dash\\.test\\.example\\.com:8543 \\{\\n  log\\n  tls internal\\n  import mfa_auth\\n  reverse_proxy hermes-agent:9119\\n\\}')"
+          # (real ACME certs, ADR-0003). Was 6 (one per non-auto_tls route); now
+          # 6 + gated_route_count, since every gated route's SECOND block also
+          # renders tls internal.
+          - "(rendered | regex_findall('tls internal')) | length == 6 + gated_route_count"
+          # Byte-exact block assertions for every mfa:true route's FIRST (normal
+          # :443) block — epic 18 ticket #01 review: wiki/dash previously only had
+          # a partial opening-line check here, not the same byte-exact block
+          # coverage auth/matrix/owntracks already had. Each gated route's SECOND
+          # (Unix-socket) block is asserted separately below.
+          - "rendered is search('wiki\\.test\\.example\\.com \\{\\n  log\\n  tls internal\\n  import mfa_auth\\n  reverse_proxy silverbullet:3000\\n\\}')"
+          - "rendered is search('wiki\\.test\\.example\\.com \\{\\n  bind unix//caddy-relay-socket/caddy-relay\\.sock\\|0666\\n  log\\n  tls internal\\n  import mfa_auth\\n  reverse_proxy silverbullet:3000\\n\\}')"
+          - "rendered is search('dash\\.test\\.example\\.com \\{\\n  log\\n  tls internal\\n  import mfa_auth\\n  reverse_proxy hermes-agent:9119\\n\\}')"
+          - "rendered is search('dash\\.test\\.example\\.com \\{\\n  bind unix//caddy-relay-socket/caddy-relay\\.sock\\|0666\\n  log\\n  tls internal\\n  import mfa_auth\\n  reverse_proxy hermes-agent:9119\\n\\}')"
           - "rendered is search('auth\\.test\\.example\\.com \\{\\n  log\\n  tls internal\\n  reverse_proxy authelia:9091\\n\\}')"
           - "'forward_auth @not_tailscale authelia:9091' in rendered"
           - "rendered is search('not remote_ip')"
@@ -154,26 +177,30 @@
           # Epic 20: both matchers must check the v6 tailnet range too, not just v4
           # (pre-existing gap this epic's investigation surfaced — tailscale_subnet_v6
           # was already defined and used by the DOCKER-USER v6 rules, but never wired
-          # into either Caddyfile matcher until now).
+          # into either Caddyfile matcher until now). Matchers are defined once each
+          # at file scope, unaffected by the dual-block change.
           - "(rendered | regex_findall('not remote_ip 100\\.64\\.0\\.0/10 fd7a:115c:a1e0::/48')) | length == 2"
-          # Epic 20: exactly the 5 mfa/tailnet_only-gated routes (wiki, dash,
-          # owntracks-ui, monitor, adguard) get the second, comma-joined
-          # caddy_proxy_protocol_port address — not matrix/owntracks (8443, no
-          # source-IP gate) and not auth (no mfa/tailnet_only import at all). A
-          # future route accidentally matching would silently add a 6th occurrence
-          # unnoticed without this count, the same reasoning as the dns01 count above.
-          - "(rendered | regex_findall('\\.com:8543')) | length == 5"
-          # Epic 20: the internal PROXY-protocol-trusting listener is defined exactly
-          # once, scoped to its own dedicated port — never applied to the public
-          # listener (no servers block exists for :443 at all in this Caddyfile;
-          # omitting one is what leaves it with Caddy's own unmodified defaults).
+          # Epic 20: exactly the 5 mfa/tailnet_only-gated routes get a second,
+          # Unix-socket-bound block — not matrix/owntracks (8443, no source-IP
+          # gate) and not auth (no mfa/tailnet_only import at all). A future route
+          # accidentally matching would silently add a 6th occurrence unnoticed
+          # without this count, the same reasoning as the dns01 count above.
+          - "(rendered | regex_findall('bind unix//caddy-relay-socket/caddy-relay\\.sock\\|0666')) | length == gated_route_count"
+          # Epic 20: the internal PROXY-protocol-trusting listener is defined
+          # exactly once, scoped to its own dedicated Unix socket address — never
+          # applied to the public listener (no servers block exists for :443 at
+          # all in this Caddyfile; omitting one is what leaves it with Caddy's
+          # own unmodified defaults).
           - "(rendered | regex_findall('listener_wrappers \\{')) | length == 1"
           - "(rendered | regex_findall('proxy_protocol \\{')) | length == 1"
-          - "rendered is search('servers :8543 \\{\\n    listener_wrappers \\{\\n      proxy_protocol \\{\\n        allow 127\\.0\\.0\\.1/32 ::1/128 172\\.16\\.0\\.0/12\\n      \\}\\n      tls\\n    \\}\\n  \\}')"
+          - "rendered is search('servers unix//caddy-relay-socket/caddy-relay\\.sock\\|0666 \\{\\n    listener_wrappers \\{\\n      proxy_protocol \\{\\n        allow 127\\.0\\.0\\.1/32 ::1/128\\n      \\}\\n      tls\\n    \\}\\n  \\}')"
         fail_msg: "Gateway Caddyfile shape mismatch: {{ rendered }}"
       vars:
         rendered: "{{ lookup('file', '/tmp/gateway_test_render/Caddyfile') }}"
         gateway_routes: "{{ silverbullet_gateway_publish + hermes_gateway_publish + authelia_gateway_publish + conduit_gateway_publish + owntracks_gateway_publish + beszel_gateway_publish + adguard_gateway_publish }}"
+        gated_route_count: >-
+          {{ (gateway_routes | selectattr('mfa') | list | length) +
+             (gateway_routes | selectattr('tailnet_only', 'defined') | selectattr('tailnet_only') | list | length) }}
 
     # Epic 18 ticket #01: a route with tailnet_only: true renders a hard 404 block for
     # non-Tailscale sources instead of the MFA-bypass challenge — genuinely no public
@@ -198,10 +225,13 @@
         that:
           - "'(tailnet_only) {' in rendered_tailnet_only"
           - "rendered_tailnet_only is search('respond @not_tailscale_hard 404')"
-          # Exact-match on the whole rendered block (log line through closing brace)
-          # — this alone already proves no import mfa_auth / basic_auth line snuck
-          # in, since any extra line would break the match.
-          - "rendered_tailnet_only is search('monitor\\.test\\.example\\.com, monitor\\.test\\.example\\.com:8543 \\{\\n  log\\n  tls internal\\n  import tailnet_only\\n  reverse_proxy beszel-hub:8090\\n\\}')"
+          # Exact-match on both rendered blocks (log line through closing brace) —
+          # this alone already proves no import mfa_auth / basic_auth line snuck
+          # in, since any extra line would break the match. tailnet_only: true
+          # gates the route (epic 20), so it gets both the normal :443 block and
+          # the second, Unix-socket-bound block.
+          - "rendered_tailnet_only is search('monitor\\.test\\.example\\.com \\{\\n  log\\n  tls internal\\n  import tailnet_only\\n  reverse_proxy beszel-hub:8090\\n\\}')"
+          - "rendered_tailnet_only is search('monitor\\.test\\.example\\.com \\{\\n  bind unix//caddy-relay-socket/caddy-relay\\.sock\\|0666\\n  log\\n  tls internal\\n  import tailnet_only\\n  reverse_proxy beszel-hub:8090\\n\\}')"
         fail_msg: "tailnet_only route did not render the expected hard-block shape: {{ rendered_tailnet_only }}"
       vars:
         rendered_tailnet_only: "{{ lookup('file', '/tmp/gateway_test_render/Caddyfile.tailnet_only') }}"
@@ -235,7 +265,8 @@
     - name: Assert a route with both flags renders both imports intact
       ansible.builtin.assert:
         that:
-          - "rendered_both_flags is search('monitor\\.test\\.example\\.com, monitor\\.test\\.example\\.com:8543 \\{\\n  log\\n  tls internal\\n  import tailnet_only\\n  import mfa_auth\\n  reverse_proxy beszel-hub:8090\\n\\}')"
+          - "rendered_both_flags is search('monitor\\.test\\.example\\.com \\{\\n  log\\n  tls internal\\n  import tailnet_only\\n  import mfa_auth\\n  reverse_proxy beszel-hub:8090\\n\\}')"
+          - "rendered_both_flags is search('monitor\\.test\\.example\\.com \\{\\n  bind unix//caddy-relay-socket/caddy-relay\\.sock\\|0666\\n  log\\n  tls internal\\n  import tailnet_only\\n  import mfa_auth\\n  reverse_proxy beszel-hub:8090\\n\\}')"
         fail_msg: "route with mfa+tailnet_only both set did not render safely: {{ rendered_both_flags }}"
       vars:
         rendered_both_flags: "{{ lookup('file', '/tmp/gateway_test_render/Caddyfile.both_flags') }}"

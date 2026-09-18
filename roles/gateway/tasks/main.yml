@@ -22,6 +22,20 @@
   tags: [gateway]
   ansible.builtin.include_tasks: validate.yml
 
+# Shared Unix socket directory for caddy<->caddy-relay (epic 20) — same
+# wiki_volume ensure_directory pattern as beszel's own hub<->agent socket dir.
+# Relies on wiki_volume's uid/gid facts already being resolved by the time
+# this role's tasks run: gateway depends on owntracks (meta/main.yml), which
+# itself depends on wiki_volume, so this is already transitively satisfied.
+- name: Ensure caddy-relay socket directory exists
+  tags: [gateway]
+  ansible.builtin.include_role:
+    name: wiki_volume
+    tasks_from: ensure_directory
+  vars:
+    wiki_volume_directory_path: "{{ caddy_relay_socket_dir }}"
+    wiki_volume_directory_mode: '0755'
+
 - name: Ensure ingress (Caddyfile) deploy directory exists
   tags: [gateway]
   ansible.builtin.file:

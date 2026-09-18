@@ -3,13 +3,15 @@
 # ticket #01.
 #
 # The shared test files (tests/test_gateway_render.yml, tests/test_docker_compose.yml)
-# already cover the rendered shape in depth: the internal PROXY-protocol listener, its
-# `allow` restriction, the v6 matcher extension, the exact-5-routes second-address
-# count, and caddy-relay's compose shape. Re-run here too, per this repo's established
-# per-epic-summary-script convention. This script adds what isn't covered by rendering
-# a synthetic fixture: assertions against the REAL template/task files themselves, and
-# the security-critical "don't reintroduce the broken third-party module" regression
-# guard a synthetic render can't express.
+# already cover the rendered shape in depth: the internal PROXY-protocol Unix-socket
+# listener, its `allow` restriction, the v6 matcher extension, the exact-5-routes
+# second-block count, and caddy-relay's compose shape. Re-run here too, per this
+# repo's established per-epic-summary-script convention. This script adds what isn't
+# covered by rendering a synthetic fixture: assertions against the REAL
+# template/task files themselves, and two security-critical regression guards a
+# synthetic render can't express — "don't reintroduce the broken third-party
+# module" and "don't reintroduce the IP-allowlist auth-bypass this epic's own
+# review caught" (see section 5b below).
 #
 # What this script does NOT and cannot verify: the actual live behavior this epic
 # fixes — a real Tailscale client's traffic surviving the masquerade round-trip,
@@ -80,7 +82,13 @@ check_in "$HAPROXY_CFG" '\{% if tailscale_ip_v6 %\}' "haproxy.cfg.j2's v6 bind l
 # drops privileges at all, running every worker as root indefinitely.
 check_in "$HAPROXY_CFG" '^\s*user haproxy\s*$' "haproxy.cfg.j2 must drop to the unprivileged haproxy user after binding"
 check_in "$HAPROXY_CFG" '^\s*group haproxy\s*$' "haproxy.cfg.j2 must drop to the unprivileged haproxy group after binding"
-check_in "$HAPROXY_CFG" '^\s*chroot /var/empty\s*$' "haproxy.cfg.j2 must chroot after binding (confirmed /var/empty exists in the pinned image)"
+# chroot INTO the shared socket directory itself, not /var/empty (an earlier
+# version of this file's own choice) — a chroot to /var/empty would make the
+# Unix socket below UNREACHABLE post-chroot at connect() time. Caught before
+# deploying by reasoning through Linux chroot()/connect()-time path
+# resolution, not via a live crash-loop.
+check_in "$HAPROXY_CFG" '^\s*chroot /caddy-relay-socket\s*$' "haproxy.cfg.j2 must chroot into the shared socket directory (not /var/empty, which would make the socket unreachable post-chroot)"
+check_in "$HAPROXY_CFG" 'server caddy unix@/caddy-relay\.sock send-proxy-v2' "haproxy.cfg.j2's backend must forward to Caddy over the shared Unix socket, not a TCP address"
 if grep -qE '^\s*bind :443\s*$' "$HAPROXY_CFG"; then
   echo "FAIL: $HAPROXY_CFG has an unconditional 'bind :443' line — would silently become an unscoped, all-interfaces bind if a tailscale IP fact were ever empty"
   exit 1
@@ -96,6 +104,18 @@ if grep -qi ':latest' "$RELAY_FRAGMENT"; then
   echo "FAIL: $RELAY_FRAGMENT pins a floating :latest tag — version must be explicit"
   exit 1
 fi
+# Security fix (found in review, PR #105): the internal listener is a shared Unix
+# domain socket, NOT a Docker-published TCP port — a loopback TCP port + IP
+# allow-list could never actually distinguish "the relay" from any other
+# host-networked container (beszel-agent already is one) or host-level process,
+# since Docker's own port-publish NAT rewrites every such connection's source to
+# the same bridge address range. A Unix socket has no network-layer identity to
+# spoof: only a container with this exact directory bind-mounted can reach it.
+check_in "$RELAY_FRAGMENT" '\{\{ caddy_relay_socket_dir \}\}:/caddy-relay-socket' "caddy-relay must bind-mount the shared socket directory, not publish a TCP port"
+if grep -qE 'ports:' "$RELAY_FRAGMENT"; then
+  echo "FAIL: $RELAY_FRAGMENT publishes a Docker port — the internal listener must be a Unix socket only, reachable exclusively via the shared bind-mounted directory"
+  exit 1
+fi
 echo "caddy-relay compose fragment shape OK"
 
 # 5: Caddy's own compose fragment — 443 must be scoped to a specific address
@@ -108,16 +128,37 @@ if grep -qE '^\s*-\s*"443:443"\s*$' "$CADDY_FRAGMENT"; then
   exit 1
 fi
 check_in "$CADDY_FRAGMENT" 'ansible_default_ipv4\.address' "caddy's 443 publish must be scoped to this VPS's own public IP"
-check_in "$CADDY_FRAGMENT" '127\.0\.0\.1:\{\{ caddy_proxy_protocol_port \}\}' "caddy must publish the internal PROXY-protocol listener to loopback only"
+check_in "$CADDY_FRAGMENT" '\{\{ caddy_relay_socket_dir \}\}:/caddy-relay-socket' "caddy must bind-mount the shared socket directory for the internal PROXY-protocol listener"
+if grep -qE 'caddy_proxy_protocol_port' "$CADDY_FRAGMENT"; then
+  echo "FAIL: $CADDY_FRAGMENT still references caddy_proxy_protocol_port — the internal listener was redesigned as a Unix socket (no TCP port at all, see caddy_relay_socket_dir)"
+  exit 1
+fi
 echo "caddy compose fragment shape OK"
 
-# 5b: Caddyfile.j2's internal listener must trust more than just loopback — found on
-# a real live deploy that caddy-relay's own connection to this listener transits
-# Docker's port-publish NAT for 127.0.0.1:{{ caddy_proxy_protocol_port }}, which
-# rewrites ITS source to the gateway network's bridge address, not literal loopback.
-# A loopback-only allow list silently defeats the entire fix (Caddy falls back to
-# the raw, NAT'd peer address exactly like the original bug being fixed).
-check_in roles/gateway/templates/Caddyfile.j2 '172\.16\.0\.0/12' "Caddyfile.j2's proxy_protocol allow list must include Docker's bridge address pool, not just loopback"
+# 5b: Caddyfile.j2's internal listener's allow-list must NOT include Docker's
+# bridge pool. Security fix (found in review, PR #105): an earlier version of this
+# listener was a loopback TCP port with `allow 127.0.0.1/32 ::1/128 172.16.0.0/12`
+# — added to work around Docker's port-publish NAT rewriting caddy-relay's own
+# source to a bridge address, but 172.16.0.0/12 is Docker's ENTIRE default bridge
+# pool, not "just the relay": any host-networked container (beszel-agent already
+# is one, network_mode: host) or host-level process could reach the same
+# Docker-published loopback port, get NAT'd to the same apparent address, and
+# forge a PROXY header claiming an arbitrary tailnet source IP — fully bypassing
+# both mfa_auth and tailnet_only. This is a hard regression guard, not a
+# judgement call: a future change reintroducing an IP-based allow-list here
+# (rather than the current Unix-socket design) must fail this check.
+if grep -q '172\.16\.0\.0/12' roles/gateway/templates/Caddyfile.j2; then
+  echo "FAIL: roles/gateway/templates/Caddyfile.j2 allows Docker's entire bridge pool (172.16.0.0/12) to present a trusted PROXY header — this was a confirmed auth-bypass vector (any host-networked container, e.g. beszel-agent, or host-level process could forge a source IP and bypass mfa_auth/tailnet_only). The internal listener must be a Unix socket scoped by bind-mount, not an IP allow-list."
+  exit 1
+fi
+check_in roles/gateway/templates/Caddyfile.j2 'servers unix//caddy-relay-socket/caddy-relay\.sock\|0666 \{' "Caddyfile.j2's internal listener must be a Unix socket, not a TCP port"
+# relay_socket_bind (not a literal "bind unix..." string in the template source —
+# that only appears in the RENDERED output, already covered by test_gateway_render.yml)
+# must match the servers address above byte-for-byte, including the |0666 suffix —
+# verified empirically that a mismatched suffix makes listener_wrappers silently not
+# apply at all, no error either way.
+check_in roles/gateway/templates/Caddyfile.j2 "set relay_socket_bind = 'unix//caddy-relay-socket/caddy-relay\.sock\|0666'" "gated routes' second site block must bind the shared Unix socket, matching the internal listener's own address byte-for-byte"
+echo "Caddyfile.j2 internal listener security boundary OK (Unix socket, no Docker bridge pool trust)"
 
 # 5c: a Caddyfile/haproxy.cfg content-only change (no compose-fragment change
 # alongside it) must actually take effect — found on a real live deploy that
@@ -183,9 +224,15 @@ fi
 check_in "$TS_TASKS" "ignore_errors: .\{\{ ansible_check_mode \}\}." "the Tailscale IP query tasks must tolerate --check (command modules don't run under check mode)"
 echo "tailscale IP fact-gathering ordering OK"
 
-# 7: caddy_proxy_protocol_port is defined once, as a real named constant, not a
-# magic number scattered across files.
-check_in group_vars/all/main.yml '^caddy_proxy_protocol_port:' "caddy_proxy_protocol_port must be defined in group_vars/all/main.yml"
-echo "caddy_proxy_protocol_port defined OK"
+# 7: caddy_relay_socket_dir is defined once, as a real named constant, not a
+# magic path scattered across files.
+check_in group_vars/all/main.yml '^caddy_relay_socket_dir:' "caddy_relay_socket_dir must be defined in group_vars/all/main.yml"
+echo "caddy_relay_socket_dir defined OK"
+
+# 8: the gateway role must actually create the shared socket directory before
+# either container tries to bind-mount it — same wiki_volume ensure_directory
+# pattern beszel's own hub<->agent socket dir uses.
+check_in "$GATEWAY_TASKS" 'wiki_volume_directory_path: "\{\{ caddy_relay_socket_dir \}\}"' "gateway role must ensure the shared caddy-relay socket directory exists before it's bind-mounted"
+echo "caddy-relay socket directory provisioning OK"
 
 echo "tailnet-caddy-access guard OK"
