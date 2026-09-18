@@ -88,21 +88,25 @@
           - "rendered is search('auth.test.example.com \\{')"
           - "rendered is search('https://matrix.test.example.com:8443 \\{')"
           - "rendered is search('https://owntracks.test.example.com:8443 \\{')"
+          # The (dns01_tls) snippet (epic 19 #02) is defined once, unconditionally,
+          # at file scope — same shape as mfa_auth/tailnet_only above — and imported
+          # by exactly the routes named in Caddyfile.j2's dns01_hosts list.
+          - "'(dns01_tls) {' in rendered"
           # Matrix: tls_mode auto (ADR-0003) — real ACME cert; no bare `tls` line.
           # Port 8443, not 8448 (epic 19 #02): Cloudflare's proxy allowlist includes
-          # 8443, not 8448. DNS-01 via the Cloudflare module (epic 19 #02) replaces
-          # automatic HTTPS's default HTTP-01/TLS-ALPN-01 challenges for exactly this
-          # route and owntracks' recorder below — those default challenges need the
+          # 8443, not 8448. `import dns01_tls` (epic 19 #02) replaces automatic
+          # HTTPS's default HTTP-01/TLS-ALPN-01 challenges for exactly this route
+          # and owntracks' recorder below — those default challenges need the
           # origin directly reachable, which breaks once the DNS record is proxied.
-          - "rendered is search('https://matrix\\.test\\.example\\.com:8443 \\{\\n  log\\n  tls \\{\\n    dns cloudflare \\{env\\.CLOUDFLARE_API_TOKEN\\}\\n  \\}\\n  reverse_proxy conduit:8008\\n\\}')"
+          - "rendered is search('https://matrix\\.test\\.example\\.com:8443 \\{\\n  log\\n  import dns01_tls\\n  reverse_proxy conduit:8008\\n\\}')"
           # OwnTracks: tls_mode auto renders the https:// scheme (automatic HTTPS →
           # real ACME cert) and NO bare `tls` line — a bare `tls` line is a Caddyfile
           # parse error that prevents Caddy from starting. mfa false omits import
           # mfa_auth; basic_auth is the actual enforcement (the recorder has none
-          # of its own — see roles/owntracks/tasks/main.yml). tls { dns cloudflare
-          # ... } comes before basic_auth in the rendered block (Caddyfile.j2's
-          # own directive order), same DNS-01 reasoning as matrix above.
-          - "rendered is search('https://owntracks\\.test\\.example\\.com:8443 \\{\\n  log\\n  tls \\{\\n    dns cloudflare \\{env\\.CLOUDFLARE_API_TOKEN\\}\\n  \\}\\n  basic_auth \\{\\n    owntracks_admin stubbcrypthashvalue\\n  \\}\\n  reverse_proxy owntracks:8083\\n\\}')"
+          # of its own — see roles/owntracks/tasks/main.yml). import dns01_tls
+          # comes before basic_auth in the rendered block (Caddyfile.j2's own
+          # directive order), same DNS-01 reasoning as matrix above.
+          - "rendered is search('https://owntracks\\.test\\.example\\.com:8443 \\{\\n  log\\n  import dns01_tls\\n  basic_auth \\{\\n    owntracks_admin stubbcrypthashvalue\\n  \\}\\n  reverse_proxy owntracks:8083\\n\\}')"
           # Epic 18 ticket #02: the OwnTracks frontend's route is tailnet_only, no
           # public path, no basic-auth secret — the opposite posture from the
           # recorder route directly above, on purpose (only the recorder is public).
@@ -118,8 +122,12 @@
           # wiki/dash/auth/syncplay (untouched), and not any epic-18 tailnet_only
           # route (tls internal, no ACME at all) — confirmed by both the byte-exact
           # blocks above and this count, so a future route accidentally matching
-          # dns01_hosts wouldn't silently add a third occurrence unnoticed.
-          - "(rendered | regex_findall('dns cloudflare')) | length == 2"
+          # dns01_hosts wouldn't silently add a third occurrence unnoticed. The
+          # snippet definition's own `dns cloudflare` line appears exactly once
+          # regardless of how many routes import it (snippets aren't inlined per
+          # import site) — the per-route fan-out is `import dns01_tls`, not this.
+          - "(rendered | regex_findall('dns cloudflare')) | length == 1"
+          - "(rendered | regex_findall('import dns01_tls')) | length == 2"
           # Regression guard (epic 12): routes without tls_mode render `tls internal`
           # (pre-epic-12 behavior) — wiki, dash, auth, and (epic 18 #02/#03/#04)
           # owntracks-ui/monitor/adguard. Matrix and the recorder use tls_mode auto

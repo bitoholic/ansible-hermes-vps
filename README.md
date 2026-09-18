@@ -104,6 +104,15 @@ A few services need a one-time step the operator completes by hand — either be
 
 - **Beszel agent pairing** (epic 18): after the first deploy brings up the `beszel-hub` container, visit its dashboard (`monitor.<domain>` over Tailscale, or `<tailscale-ip>:8090` directly) and add the local VPS as a "system." That generates a key/token pair — put them in `.env` as `BESZEL_AGENT_KEY`/`BESZEL_AGENT_TOKEN`, then redeploy so the agent container picks them up. Until this is done, the agent container will fail to authenticate against the hub — a self-contained failure of that one container, not a block on anything else.
 - **AdGuard as the tailnet's DNS resolver** (epic 18): AdGuard Home is deployed and already serving DNS on port 53 (Tailscale-only) once the playbook finishes, but nothing points your devices at it yet. In the [Tailscale admin console](https://login.tailscale.com/admin/dns), under DNS settings, add the VPS's Tailscale IP as a **global override nameserver** — not split DNS, which solves a different problem (routing specific domains elsewhere) and won't give you network-wide ad-blocking. Once set, every tailnet device's DNS traffic routes through AdGuard.
+- **Matrix/OwnTracks DNS-01 cert verification, then client reconfiguration** (epic 19 #02): after this deploy, and *before* flipping either host's Cloudflare DNS record to proxied, confirm Caddy actually obtained a real DNS-01 cert on the new `:8443` listener:
+  ```bash
+  docker compose -f /opt/hermes-vps/docker-compose.yml logs caddy | grep -i "certificate obtained successfully"
+  ```
+  should show a line for both `matrix.<domain>` and `owntracks.<domain>`. Then confirm the served cert itself is real (not the internal CA's self-signed one):
+  ```bash
+  openssl s_client -connect <vps-ip>:8443 -servername matrix.<domain> </dev/null 2>/dev/null | openssl x509 -noout -issuer
+  ```
+  should print a Let's Encrypt issuer. Once both check out, update the Matrix client's homeserver URL and the OwnTracks app's recorder URL on each device from `:8448` to `:8443` — a one-time manual per-device change; Ansible cannot push client-side app settings.
 
 ## 🧪 Local Testing
 
