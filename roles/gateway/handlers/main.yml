@@ -1,0 +1,37 @@
+---
+# Epic 20: Caddy/HAProxy config-content changes (Caddyfile.j2, haproxy.cfg.j2) are
+# bind-mounted, not part of either container's own service definition — `docker
+# compose up`'s own change-detection (the docker role's "Start consolidated docker
+# compose stack" task, which runs LATER in the same play) does not recreate a
+# container just because a bind-mounted file's content changed on disk, only when
+# the service definition itself changes (image, env, ports, etc.). Found live: a
+# pure Caddyfile-only fix (no compose-fragment change alongside it) silently didn't
+# take effect until a manual `docker restart caddy` — every past Caddyfile change in
+# this repo's history happened to also touch the compose fragment (a port move, a
+# new env var), which masked this gap until now.
+#
+# Handlers run at the end of the play, AFTER the docker role's stack-start step —
+# by the time either of these fires, `docker compose up` has already ensured the
+# container exists (freshly created on a first-ever deploy, or already running from
+# a prior deploy), so an unconditional restart here is always safe: a harmless,
+# idempotent-in-effect extra restart on a fresh container, or the actual fix on a
+# subsequent config-only change.
+- name: Restart caddy
+  ansible.builtin.command: docker restart caddy
+  register: gateway_restart_caddy_result
+  changed_when: true
+  failed_when: >-
+    gateway_restart_caddy_result.rc != 0 and
+    'No such container' not in gateway_restart_caddy_result.stderr
+  # Tolerates a scoped run (e.g. --tags gateway alone) where the container
+  # was never created in this play at all — nothing to restart, and the next
+  # full deploy creates it fresh with the current config anyway. Any OTHER
+  # failure still fails loudly.
+
+- name: Restart caddy-relay
+  ansible.builtin.command: docker restart caddy-relay
+  register: gateway_restart_caddy_relay_result
+  changed_when: true
+  failed_when: >-
+    gateway_restart_caddy_relay_result.rc != 0 and
+    'No such container' not in gateway_restart_caddy_relay_result.stderr

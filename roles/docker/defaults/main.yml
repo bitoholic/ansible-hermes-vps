@@ -24,6 +24,7 @@ docker_volumes:
 # roles/docker/templates/services/<name>.yml.j2
 docker_enabled_services:
   - caddy
+  - caddy-relay
   - authelia
   - silverbullet
   - conduit

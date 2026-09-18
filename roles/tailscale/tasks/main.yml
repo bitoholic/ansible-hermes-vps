@@ -70,6 +70,41 @@
      ((tailscale_status.stdout | from_json).BackendState | default('') != 'Running'))
   changed_when: true
 
+# The VPS's own tailnet address(es) (epic 20): needed by the caddy-relay compose
+# fragment to know which interface to bind, so tailnet-facing traffic can reach it
+# without going through Caddy's own (public-IP-only, post epic 20) port-publish.
+# Queried via `tailscale ip`, not Ansible's generic interface-fact-gathering
+# (`ansible_tailscale0`) — this is the same official, stable interface epic 18's
+# own README instructions already point operators at, and doesn't depend on how
+# reliably Ansible's `setup` module parses a WireGuard-style /32 point-to-point
+# interface. Must run after "Bring up Tailscale" above: the tailscale0 interface
+# (and therefore any address on it) doesn't exist before that task has run.
+- name: Query this host's own Tailscale IPv4 address
+  tags: [tailscale]
+  ansible.builtin.command:
+    cmd: tailscale ip -4
+  register: tailscale_ip_v4_result
+  changed_when: false
+  ignore_errors: "{{ ansible_check_mode }}"
+
+- name: Query this host's own Tailscale IPv6 address
+  tags: [tailscale]
+  ansible.builtin.command:
+    cmd: tailscale ip -6
+  register: tailscale_ip_v6_result
+  changed_when: false
+  ignore_errors: "{{ ansible_check_mode }}"
+
+# Empty-string fallback (not a hard failure) under --check on a host where
+# "Bring up Tailscale" above was itself skipped (command/shell tasks don't
+# support check mode) — a --check preview should still render the rest of the
+# play, not crash on an address that genuinely can't be known yet.
+- name: Set facts for this host's own Tailscale addresses
+  tags: [tailscale]
+  ansible.builtin.set_fact:
+    tailscale_ip_v4: "{{ tailscale_ip_v4_result.stdout | default('') | trim }}"
+    tailscale_ip_v6: "{{ tailscale_ip_v6_result.stdout | default('') | trim }}"
+
 # --- Host firewall (single owner of the perimeter) ----------------------------
 # Default-deny inbound; allow the SSH fallback (key-only via ssh_hardening), the
 # Caddy/MFA ingress (80/443), and the Tailscale VPN interface. The Tailscale subnet

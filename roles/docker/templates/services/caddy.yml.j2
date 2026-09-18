@@ -12,9 +12,27 @@ caddy:
   # not 8448 — see roles/conduit/defaults/main.yml's own comment for the full
   # rationale. Both matrix and owntracks (the two SNI-sharers on this port)
   # move together.
+  #
+  # 443 is bound to this VPS's own public IP specifically (epic 20), not
+  # 0.0.0.0 — freeing the exact <tailscale-ip>:443 combination for the
+  # caddy-relay container to bind exclusively. 80 stays unscoped: it only ever
+  # serves Caddy's automatic HTTP->HTTPS redirect, which runs before any
+  # mfa_auth/tailnet_only matcher does, so it has no source-IP check the
+  # tailnet-facing masquerade bug could break — no relay path needed for it.
+  # 8443 (matrix/owntracks) is untouched for the same reason: neither route
+  # has any source-based access control to begin with.
+  #
+  # 127.0.0.1:{{ caddy_proxy_protocol_port }} (epic 20): the internal,
+  # PROXY-protocol-trusting listener defined in Caddyfile.j2's global options
+  # — reachable only by the caddy-relay container's own loopback-bound
+  # forward, never the public internet or the Docker bridge's externally-
+  # reachable side. Half of this listener's defense-in-depth (the other half
+  # is the listener's own `allow 127.0.0.1/32 ::1/128` restriction) — see
+  # Caddyfile.j2's own comment for the full security-boundary rationale.
   ports:
     - "80:80"
-    - "443:443"
+    - "{{ ansible_default_ipv4.address }}:443:443"
+    - "127.0.0.1:{{ caddy_proxy_protocol_port }}:{{ caddy_proxy_protocol_port }}"
     - "8443:8443"
   # CLOUDFLARE_API_TOKEN (epic 19, #02): read by Caddyfile.j2's DNS-01
   # directive via Caddy's own {env.CLOUDFLARE_API_TOKEN} placeholder — not

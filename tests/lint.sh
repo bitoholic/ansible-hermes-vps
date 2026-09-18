@@ -120,6 +120,15 @@ python3 scripts/generate-env.py --check
 # and runtime stages match).
 ./tests/check-cloudflare-proxied-ingress.sh
 
+# Tailnet-Caddy-access full-epic guard (epic 20 ticket #01): consolidated compose/
+# gateway render re-verification (internal PROXY-protocol listener, its loopback-only
+# `allow` restriction, the v6 matcher extension, caddy-relay's shape), plus real-file
+# regression guards a synthetic render can't express: the Dockerfile must not
+# reintroduce the third-party proxy-protocol module (build-breaking — verified live),
+# haproxy.cfg.j2's bind lines must stay conditional on their address facts, and
+# caddy.yml.j2's 443 publish must stay IP-scoped, never a bare "443:443".
+./tests/check-tailnet-caddy-access.sh
+
 # Bounded role-execution duplication (epic 17): docker's and wiki_volume's own tasks
 # run more than once per site.yml execution (Ansible's role dedup defeated by tag
 # inheritance, pre-existing and not fully eliminated) — this bounds the duplication

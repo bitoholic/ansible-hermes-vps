@@ -73,6 +73,14 @@ tailscale_subnet: "100.64.0.0/10"
 # DOCKER-USER v6 rules that mirror the v4 source-based restrictions (epic 12 #08).
 tailscale_subnet_v6: "fd7a:115c:a1e0::/48"
 
+# Internal-only Caddy listener port for tailnet-facing traffic (epic 20). Not a
+# Docker-published port at all — bound only to host loopback, reachable solely by
+# the caddy-relay container's own PROXY-protocol-wrapped forward. Exists
+# alongside, not instead of, Caddy's normal public :443 listener (which gets no
+# PROXY-protocol trust and is otherwise completely unchanged) — see
+# roles/gateway/templates/Caddyfile.j2's own comment for the full rationale.
+caddy_proxy_protocol_port: 8543
+
 # Docker published-port firewall classes (epic 12 #08). Published ports bypass UFW
 # INPUT (Docker DNATs in nat PREROUTING), so access classes are enforced in the
 # DOCKER-USER chain by the tailscale role (single firewall owner).

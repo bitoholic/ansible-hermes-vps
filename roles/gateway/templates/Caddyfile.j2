@@ -4,13 +4,67 @@
   servers {
     trusted_proxies static private_ranges
   }
+
+  # Internal-only listener for tailnet-facing traffic (epic 20). Caddy's normal
+  # public listener (:443, above/default — no servers block needed for it at
+  # all, since omitting one leaves a listener completely unconfigured/default)
+  # keeps its current behavior exactly as-is: no PROXY-protocol trust, no new
+  # surface. This SEPARATE, differently-numbered listener is where the
+  # caddy-relay container (host-networked, bound to this VPS's own Tailscale
+  # IP — see roles/docker/templates/services/caddy-relay.yml.j2) forwards
+  # tailnet-sourced connections, wrapped in a PROXY protocol header carrying
+  # the real client IP that Tailscale's own local-subnet masquerade would
+  # otherwise have erased by the time a Docker-published port saw it (root
+  # cause: epic 20 spec). `proxy_protocol` needs NO Dockerfile change: verified
+  # directly (`caddy list-modules` against the real pinned image) that
+  # caddy.listeners.proxy_protocol already ships in stock Caddy 2.11.4 — it is
+  # not a third-party plugin at this version (a first attempt at compiling in
+  # a third-party proxy-protocol module via xcaddy panicked at runtime with
+  # "module already registered", which is what surfaced this).
+  #
+  # `allow` restricts whose PROXY-protocol claim is trusted — this listener is
+  # ALSO only Docker-published to 127.0.0.1 (defense in depth: two independent
+  # reasons the public internet can never reach it, not one). Getting either
+  # half of this wrong would let anyone on the public internet forge a PROXY
+  # header claiming a tailnet source IP and fully bypass both mfa_auth and
+  # tailnet_only below — treat this as a security boundary, not a config nit.
+  # `proxy_protocol` must be loaded before `tls` in the wrapper chain (unwraps
+  # the header before the TLS handshake starts), per the module's own
+  # documented requirement.
+  #
+  # allow is NOT scoped to loopback alone (an earlier version of this comment
+  # said it was, and it broke on the live VPS): caddy-relay's own connection to
+  # this listener transits Docker's OWN port-publish NAT for the
+  # 127.0.0.1:{{ caddy_proxy_protocol_port }} mapping (roles/docker/templates/
+  # services/caddy.yml.j2), which rewrites ITS source to the gateway
+  # network's bridge IP (e.g. 172.22.0.1) — confirmed via a real end-to-end
+  # test (curl through the relay, then reading Caddy's own access log) that
+  # this, not Tailscale's masquerade, is what the observed remote_ip actually
+  # was. 172.16.0.0/12 is Docker's entire default bridge address pool, not
+  # today's specific /16 (which isn't a stable value — it depends on network
+  # creation order and could differ on a fresh deploy) — this is still a
+  # meaningful boundary: nothing outside this host's own Docker networking can
+  # ever present a source address in this range to this listener, since the
+  # loopback-only Docker publish is what prevents the public internet from
+  # reaching it at all.
+  servers :{{ caddy_proxy_protocol_port }} {
+    listener_wrappers {
+      proxy_protocol {
+        allow 127.0.0.1/32 ::1/128 172.16.0.0/12
+      }
+      tls
+    }
+  }
 }
 
 (mfa_auth) {
   # Source-based MFA (ADR-0001): Tailscale (VPN) clients are already authenticated and
   # encrypted, so they skip Authelia; everyone else (public net) is challenged. The subnet
-  # is the single constant shared with the tailscale role's ufw allow.
-  @not_tailscale not remote_ip {{ tailscale_subnet }}
+  # is the single constant shared with the tailscale role's ufw allow. Both v4 and v6
+  # tailnet ranges (epic 20 — tailscale_subnet_v6 existed already, used by the
+  # DOCKER-USER v6 rules, but was never wired into this matcher until now; a
+  # v6-connecting tailnet client was silently treated as "not tailscale" before this).
+  @not_tailscale not remote_ip {{ tailscale_subnet }} {{ tailscale_subnet_v6 }}
   forward_auth @not_tailscale authelia:9091 {
     uri /api/authz/forward-auth?authelia_url=https://auth.<secret-silverbullet-domain>
     copy_headers Remote-User Remote-Groups Remote-Name Remote-Email
@@ -20,12 +74,13 @@
 (tailnet_only) {
   # Hard-block private routes (epic 18, #01): unlike mfa_auth above, this is not a
   # challenge — non-Tailscale sources get a flat 404, no forward_auth involved, so
-  # the route has no public path at all. Same tailscale_subnet constant as mfa_auth.
+  # the route has no public path at all. Same tailscale_subnet/tailscale_subnet_v6
+  # constants as mfa_auth (epic 20 added the v6 half to both matchers together).
   # Matcher deliberately named @not_tailscale_hard, distinct from mfa_auth's own
   # @not_tailscale — a route importing both snippets (schema allows mfa: true and
   # tailnet_only: true together) must not redefine the same matcher name twice in
   # one server block.
-  @not_tailscale_hard not remote_ip {{ tailscale_subnet }}
+  @not_tailscale_hard not remote_ip {{ tailscale_subnet }} {{ tailscale_subnet_v6 }}
   respond @not_tailscale_hard 404
 }
 
@@ -53,11 +108,21 @@
    - tls_mode "internal" or unset → bare address + `tls internal` (locally
      trusted CA — the pre-epic-12 behavior for all routes).
    - matrix/owntracks specifically (epic 19, #02) also `import dns01_tls` — see
-     that snippet's own comment above. #}
+     that snippet's own comment above.
+   - Every mfa/tailnet_only-gated route (epic 20) ALSO gets a second,
+     comma-joined address on caddy_proxy_protocol_port — the internal listener
+     defined above. Same hostname, so SNI/Host matching is unaffected; this
+     just makes the identical site content additionally reachable via the one
+     listener that can see a real tailnet client's IP again. Routes with
+     neither flag (owntracks recorder, matrix — and auth itself, which has no
+     mfa/tailnet_only import since Authelia obviously doesn't gate its own
+     login portal) don't gain this second address, since they have no
+     source-IP check that tailnet-facing masquerade could ever break. #}
 {% set dns01_hosts = ['matrix', 'owntracks'] %}
 {% for route in gateway_routes %}
 {% set auto_tls = route.tls_mode is defined and route.tls_mode == 'auto' %}
-{% if auto_tls %}https://{% endif %}{{ route.host }}.{{ secrets.silverbullet_domain }}{% if route.port is defined %}:{{ route.port }}{% endif %} {
+{% set source_ip_gated = route.mfa or (route.tailnet_only is defined and route.tailnet_only) %}
+{% if auto_tls %}https://{% endif %}{{ route.host }}.{{ secrets.silverbullet_domain }}{% if route.port is defined %}:{{ route.port }}{% endif %}{% if source_ip_gated %}, {{ route.host }}.{{ secrets.silverbullet_domain }}:{{ caddy_proxy_protocol_port }}{% endif %} {
   log
 {% if not auto_tls %}  tls internal
 {% endif %}{% if auto_tls and route.host in dns01_hosts %}  import dns01_tls

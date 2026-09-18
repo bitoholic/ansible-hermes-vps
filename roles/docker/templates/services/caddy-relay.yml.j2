@@ -1,0 +1,51 @@
+caddy-relay:
+  # PROXY-protocol relay for tailnet-facing access (epic 20) — see
+  # roles/gateway/templates/Caddyfile.j2's own comment for the full root-cause
+  # and security-boundary rationale. Binds this VPS's own Tailscale IP(s) on
+  # 443, accepts the raw TCP connection, and forwards it to Caddy's internal
+  # loopback-bound listener with a PROXY protocol header carrying the real
+  # client IP — the one piece of information Tailscale's own local-subnet
+  # masquerade would otherwise have erased by the time a Docker-published port
+  # saw it.
+  #
+  # network_mode: host (same as beszel-agent, for a different reason: that one
+  # needs host-level network-interface stats, this one needs to bind a
+  # specific host interface's IP directly — both need to escape the Docker
+  # bridge to reach something host-level) so it can bind tailscale0's address
+  # the same way tailscaled itself does. Not on the `gateway` Docker network at
+  # all: it never needs to resolve "caddy" by service name, only to reach
+  # Caddy's own Docker-published loopback port (127.0.0.1:{{ caddy_proxy_protocol_port }}).
+  #
+  # Version pinned explicitly, no floating `latest` tag, matching this repo's
+  # standing convention for every other pinned image.
+  image: haproxy:3.4-alpine
+  container_name: caddy-relay
+  network_mode: host
+  # user: root (found on the live VPS via two real crash-loops): the official
+  # haproxy image's Dockerfile sets USER haproxy directly — the container's
+  # entrypoint process never runs as root at all, so cap_add: NET_BIND_SERVICE
+  # has nothing to attach to (confirmed via `docker inspect` that the
+  # capability WAS correctly granted at the container level, yet binding
+  # port 443 still failed with "Permission denied" — Docker's capability
+  # grant only takes effect for a process that starts as root and is
+  # expected to keep it in its effective/ambient set, which doesn't reliably
+  # happen for an image whose ENTRYPOINT itself launches as a non-root user).
+  # network_mode: host also rules out the `--sysctl
+  # net.ipv4.ip_unprivileged_port_start=0` alternative some HAProxy guides
+  # suggest — that sysctl is scoped per network namespace, and a host-
+  # networked container shares the host's namespace entirely (Docker won't
+  # let a container override a host-global sysctl this way).
+  #
+  # This is HAProxy's own standard, designed-for pattern instead: the master
+  # process starts as root (root can always bind any port, no capability
+  # needed), binds every listening socket, and only THEN drops privileges to
+  # the unprivileged `haproxy` user/group via haproxy.cfg's own `global`
+  # section — see roles/gateway/templates/haproxy.cfg.j2. The socket is
+  # already bound before the privilege drop happens, so this sidesteps the
+  # ambient-capability issue entirely rather than fighting it.
+  user: root
+  volumes:
+    - "{{ docker_compose_dir }}/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro"
+  depends_on:
+    - caddy
+  restart: unless-stopped

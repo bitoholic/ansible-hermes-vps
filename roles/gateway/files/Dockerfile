@@ -29,6 +29,18 @@
 # needed. Verified by an actual `xcaddy build` against the real
 # `caddy:2.11.4-builder` image (not just Dockerfile syntax): it compiles clean,
 # and the resulting binary's `list-modules` includes `dns.providers.cloudflare`.
+# caddy.listeners.proxy_protocol (epic 20's internal, loopback-only listener
+# — see roles/gateway/templates/Caddyfile.j2's own comment for the full
+# root-cause and security-boundary rationale) needs NO Dockerfile change at
+# all: verified directly (`caddy list-modules` against the real, unmodified
+# `caddy:2.11.4` image) that this module already ships in stock Caddy as of
+# this pinned version — it is not a third-party plugin here. A first attempt
+# at compiling in github.com/mastercactapus/caddy2-proxyprotocol via xcaddy
+# panicked at runtime with "module already registered: caddy.listeners.
+# proxy_protocol", which is what surfaced this — Caddy adopted native
+# PROXY-protocol support as a built-in module at some point before 2.11.4,
+# after the third-party module (and Caddy's own docs page describing it as
+# non-standard) were written.
 FROM caddy:2.11.4-builder AS builder
 
 RUN xcaddy build --with github.com/caddy-dns/cloudflare

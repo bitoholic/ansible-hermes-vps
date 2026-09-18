@@ -1,0 +1,55 @@
+# PROXY-protocol relay for tailnet-facing access (epic 20) — see
+# roles/gateway/templates/Caddyfile.j2's own comment for the full root-cause
+# and security-boundary rationale. Pure TCP passthrough: HAProxy never
+# terminates TLS itself, it only injects a PROXY protocol v2 header carrying
+# the real client IP before forwarding to Caddy's internal listener, which
+# does the actual TLS handshake.
+#
+# Bind addresses are this VPS's own Tailscale IP(s), queried at deploy time
+# (roles/tailscale/tasks/main.yml, via `tailscale ip`) — never 0.0.0.0/all
+# interfaces. A bind line is rendered only when that address family's fact is
+# actually non-empty (e.g. a --check run before Tailscale has ever come up):
+# an unconditional `bind :443` with an empty address would silently become an
+# unscoped, all-interfaces bind, defeating the entire point of this relay.
+global
+    maxconn 256
+    # user/group haproxy (found on the live VPS via a real crash-loop): the
+    # container itself runs as root (roles/docker/templates/services/
+    # caddy-relay.yml.j2's own comment has the full story — the image's own
+    # non-root USER directive left cap_add: NET_BIND_SERVICE with nothing to
+    # attach to, and network_mode: host rules out the sysctl alternative) so
+    # the master process can bind privileged port 443 directly; these two
+    # directives are HAProxy's own standard mechanism for dropping to the
+    # unprivileged `haproxy` user/group (baked into this image) immediately
+    # after every listening socket is already bound. Verified this user/group
+    # actually exists in the image (`docker inspect` showed Config.User:
+    # "haproxy" as its own default), so this isn't inventing a new identity.
+    user haproxy
+    group haproxy
+    # Confirmed /var/empty exists (read-only, root-owned) in the haproxy:3.4-alpine
+    # image. Silences HAProxy's own runtime warning about starting as root without
+    # a chroot — this process never needs filesystem access beyond reading its own
+    # config at startup (pure TCP passthrough, no file uploads, no user-supplied
+    # paths), so confining it further costs nothing.
+    chroot /var/empty
+
+defaults
+    mode tcp
+    timeout connect 5s
+    timeout client 30s
+    timeout server 30s
+
+frontend tailnet_https
+{% if tailscale_ip_v4 %}    bind {{ tailscale_ip_v4 }}:443
+{% endif %}{% if tailscale_ip_v6 %}    bind {{ tailscale_ip_v6 }}:443
+{% endif %}    default_backend caddy_internal
+
+backend caddy_internal
+    # send-proxy-v2: PROXY protocol v2 (binary), not v1 (text) — v2 is the
+    # more robust, modern format and cleanly supports both address families
+    # in one wire format. Caddy's own proxy_protocol module — which ships
+    # natively in the pinned Caddy version, no Dockerfile change needed, see
+    # roles/gateway/templates/Caddyfile.j2's own comment — auto-detects the
+    # protocol version on read, so no matching config is needed on Caddy's
+    # side.
+    server caddy 127.0.0.1:{{ caddy_proxy_protocol_port }} send-proxy-v2

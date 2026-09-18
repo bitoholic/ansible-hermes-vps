@@ -37,3 +37,16 @@
     src: Caddyfile.j2
     dest: "{{ gateway_caddyfile_dir }}/Caddyfile"
     mode: '0644'
+  notify: Restart caddy
+
+# caddy-relay's config (epic 20) — same deploy directory as the Caddyfile above,
+# since both are bind-mounted into the consolidated compose stack the same way.
+# Depends on roles/tailscale/tasks/main.yml having already set tailscale_ip_v4/
+# tailscale_ip_v6 (the tailscale role runs before gateway in site.yml).
+- name: Deploy haproxy.cfg (caddy-relay adapter)
+  tags: [gateway]
+  ansible.builtin.template:
+    src: haproxy.cfg.j2
+    dest: "{{ gateway_caddyfile_dir }}/haproxy.cfg"
+    mode: '0644'
+  notify: Restart caddy-relay

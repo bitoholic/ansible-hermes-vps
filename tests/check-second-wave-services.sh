@@ -78,14 +78,22 @@ DOCKER_DEFAULTS=roles/docker/defaults/main.yml
 for svc in owntracks-frontend beszel-hub beszel-agent adguard; do
   entry_has "$DOCKER_DEFAULTS" '^docker_enabled_services:' "  - ${svc}\$" "docker_enabled_services includes ${svc}"
 done
+# caddy-relay (epic 20) isn't this epic's own service, but the exact-count check
+# right below needs the real total to include it — spot-checked here too, same
+# reasoning as the four services above.
+entry_has "$DOCKER_DEFAULTS" '^docker_enabled_services:' '  - caddy-relay$' "docker_enabled_services includes caddy-relay (epic 20)"
 # Exact count too (caught in review as an asymmetry with the docker_volumes
 # exact-count check below): presence alone wouldn't catch a duplicate entry or
 # an unrelated, unauthorized 5th addition slipping in alongside this epic's
-# four. 12 = the 8 pre-epic-18 services (caddy, authelia, silverbullet,
-# conduit, signal-cli, hermes-agent, owntracks, syncplay) + this epic's 4.
+# four. 13 = the 8 pre-epic-18 services (caddy, authelia, silverbullet,
+# conduit, signal-cli, hermes-agent, owntracks, syncplay) + this epic's 4 +
+# epic 20's caddy-relay (the tailnet-facing PROXY-protocol relay) — bumped
+# from 12 by that later epic, not this one; kept here rather than duplicated
+# into a separate epic-20 check since this IS the single existing exact-count
+# assertion for this list.
 DOCKER_ENABLED_COUNT="$(block_of "$DOCKER_DEFAULTS" '^docker_enabled_services:' | grep -c '  - ')"
-if [[ "$DOCKER_ENABLED_COUNT" != "12" ]]; then
-  echo "FAIL: $DOCKER_DEFAULTS docker_enabled_services has $DOCKER_ENABLED_COUNT entries, expected exactly 12 (8 pre-epic-18 + this epic's 4) — a duplicate or an unrelated addition may have slipped in"
+if [[ "$DOCKER_ENABLED_COUNT" != "13" ]]; then
+  echo "FAIL: $DOCKER_DEFAULTS docker_enabled_services has $DOCKER_ENABLED_COUNT entries, expected exactly 13 (8 pre-epic-18 + epic 18's 4 + epic 20's caddy-relay) — a duplicate or an unrelated addition may have slipped in"
   exit 1
 fi
 DOCKER_VOLUMES_COUNT="$(block_of "$DOCKER_DEFAULTS" '^docker_volumes:' | grep -c '  - ')"

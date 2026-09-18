@@ -11,6 +11,7 @@
     docker_project_name: test-hermes-vps
     docker_enabled_services:
       - caddy
+      - caddy-relay
       - authelia
       - silverbullet
       - conduit
@@ -65,6 +66,13 @@
     beszel_agent_data_dir: "{{ docker_compose_dir }}/beszel/agent"
     adguard_conf_dir: "{{ docker_compose_dir }}/adguard/conf"
     adguard_work_dir: "{{ docker_compose_dir }}/adguard/work"
+    # Epic 20: caddy.yml.j2 scopes its 443 publish to this VPS's own public IP.
+    # gather_facts is false here (this test only exercises template rendering,
+    # no real host needed), so the fact is faked the same way other tests in
+    # this repo fake config that would otherwise come from real host state.
+    ansible_default_ipv4:
+      address: "203.0.113.10"
+    caddy_proxy_protocol_port: 8543
     secrets:
       silverbullet_domain: test.example.com
       silverbullet_admin_username: admin
@@ -102,14 +110,19 @@
     # instead of pulling a stock image. Epic 19 ticket #02: 8443, not 8448
     # (Cloudflare's proxy allowlist includes 8443, not 8448), and a new
     # CLOUDFLARE_API_TOKEN env var for the DNS-01 directive in Caddyfile.j2
-    # to read via Caddy's own {env.CLOUDFLARE_API_TOKEN} placeholder.
+    # to read via Caddy's own {env.CLOUDFLARE_API_TOKEN} placeholder. Epic 20:
+    # 443 is now scoped to this VPS's own public IP (not 0.0.0.0), freeing
+    # <tailscale-ip>:443 for caddy-relay; a new 127.0.0.1-only port publishes
+    # the internal PROXY-protocol-trusting listener — 80 and 8443 are
+    # untouched (neither has a source-IP gate the tailnet masquerade bug
+    # could break).
     - name: Assert caddy builds from a local Dockerfile, not a pulled image
       ansible.builtin.assert:
         that:
           - compose.services.caddy.image is not defined
           - compose.services.caddy.build.context == (docker_compose_dir ~ '/caddy')
           - compose.services.caddy.build.dockerfile == 'Dockerfile'
-          - compose.services.caddy.ports == ['80:80', '443:443', '8443:8443']
+          - compose.services.caddy.ports == ['80:80', '203.0.113.10:443:443', '127.0.0.1:8543:8543', '8443:8443']
           - "'CLOUDFLARE_API_TOKEN=fake-cf-token' in compose.services.caddy.environment"
           - compose.services.caddy.volumes | sort == ([docker_compose_dir ~ '/Caddyfile:/etc/caddy/Caddyfile:ro', 'caddy_data:/data', 'caddy_config:/config'] | sort)
           - compose.services.caddy.depends_on == ['authelia']
@@ -117,6 +130,38 @@
         fail_msg: >-
           caddy does not match the expected build shape. Rendered:
           {{ compose.services.caddy | default('MISSING') }}
+      vars:
+        compose: "{{ rendered_compose.content | b64decode | from_yaml }}"
+
+    # Epic 20: caddy-relay is the new host-networked PROXY-protocol relay —
+    # same network_mode: host precedent as beszel-agent, for a different
+    # reason (binding this VPS's own Tailscale interface IP directly, not
+    # host-level stats collection). Not on the gateway Docker network at all:
+    # it only ever needs to reach Caddy's own loopback-published port.
+    # user: root: found on the live VPS via two real crash-loops — the
+    # official haproxy image's own Dockerfile launches its ENTRYPOINT
+    # directly as a non-root user, so cap_add: NET_BIND_SERVICE (tried
+    # first) had nothing to attach to even though `docker inspect` confirmed
+    # it was correctly granted at the container level; network_mode: host
+    # also ruled out the `--sysctl net.ipv4.ip_unprivileged_port_start=0`
+    # alternative (scoped per network namespace, which a host-networked
+    # container doesn't have its own copy of). Root here is HAProxy's own
+    # standard pattern: the master process binds every privileged-port
+    # socket as root, then drops to the unprivileged haproxy user/group via
+    # its own config directives (roles/gateway/templates/haproxy.cfg.j2)
+    # immediately after — not "run everything as root" as a shortcut.
+    - name: Assert caddy-relay is host-networked and mounts its own config
+      ansible.builtin.assert:
+        that:
+          - compose.services['caddy-relay'].network_mode == 'host'
+          - compose.services['caddy-relay'].networks is not defined
+          - compose.services['caddy-relay'].image == 'haproxy:3.4-alpine'
+          - compose.services['caddy-relay'].user == 'root'
+          - "(docker_compose_dir ~ '/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro') in compose.services['caddy-relay'].volumes"
+          - compose.services['caddy-relay'].depends_on == ['caddy']
+        fail_msg: >-
+          caddy-relay does not match the expected shape. Rendered:
+          {{ compose.services['caddy-relay'] | default('MISSING') }}
       vars:
         compose: "{{ rendered_compose.content | b64decode | from_yaml }}"
 
@@ -135,10 +180,33 @@
           Classify them or drop the publication.
       vars:
         compose: "{{ rendered_compose.content | b64decode | from_yaml }}"
+        # Extracts the HOST port regardless of whether the entry is the plain
+        # `host:container` shape, the IP-scoped `ip:host:container` shape
+        # (epic 20 — caddy's own ports gained this), or has a trailing
+        # `/tcp`/`/udp` protocol suffix (adguard's DNS ports, pre-existing).
+        # A naive strip-from-first-colon (this assertion's pre-epic-20 shape)
+        # silently truncated an IP-scoped entry down to the first octet of
+        # the IP itself, which then failed `int()` and fell back to Jinja's
+        # documented 0 default — verified empirically: this exact regression
+        # reproduced that failure, and a first fix attempt that added a bare
+        # `$` end-anchor without also tolerating the protocol suffix broke
+        # adguard's existing `53:53/tcp`/`53:53/udp` entries the same way, for
+        # the same underlying reason (regex_replace returns the input
+        # unchanged on no match, and the unchanged string still fails
+        # `int()`) — both fixed together here, not sequentially.
+        #
+        # Loopback-bound entries (127.0.0.1:X:Y, epic 20's internal
+        # PROXY-protocol listener) are excluded from classification entirely,
+        # not just a new class added for them: this check exists to catch
+        # ports Docker's DOCKER-USER-bypasses-UFW behavior makes externally
+        # reachable, and traffic to 127.0.0.1 is categorically unreachable
+        # from outside the host regardless of any firewall rule — there is
+        # nothing here for a firewall class to legitimately describe.
         published_ports: >-
           {{ compose.services.values() | selectattr('ports', 'defined')
              | map(attribute='ports') | flatten
-             | map('regex_replace', ':.*$', '') | map('int') | unique | sort }}
+             | reject('match', '^127\.0\.0\.1:')
+             | map('regex_replace', '^(?:[^:]+:)?([0-9]+):[0-9]+(?:/[a-z]+)?$', '\1') | map('int') | unique | sort }}
         classified_ports: >-
           {{ (docker_published_public_ports + docker_published_restricted_ports
              + (docker_published_restricted_udp_ports | default([])) + [8999])
