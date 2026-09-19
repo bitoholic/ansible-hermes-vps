@@ -22,16 +22,19 @@ is not a bug in either ADR's own logic; it's a network-layer fact both were buil
 
 Two side-findings surfaced during this investigation, explicitly out of this epic's scope but
 recorded here so they aren't lost:
-- `owntracks-ui.<secret-silverbullet-domain>` currently has a public/Cloudflare-proxied DNS record despite being a
-  `tailnet_only` route — independently of this bug, that makes it unreachable via that hostname by
-  anyone at all, since Cloudflare's edge IP never matches the tailnet subnet either. Whether that
-  DNS record should exist, and whether other `tailnet_only` routes should or shouldn't have public
-  DNS records, is an operator/DNS-console question outside this repo's code.
-- Several other affected routes (`monitor`, `adguard`) already have their own DNS records pointed
-  directly at the VPS's Tailscale IP (an operator workaround applied during live debugging, before
-  this fix existed) — this sidesteps the masquerade bug for *that specific* hostname/DNS-record
-  combination, but doesn't fix tailnet-facing access in general (a route reached via a Cloudflare-
-  proxied or public-IP DNS record over the tailnet path would still hit the bug).
+- At the time of the original investigation, `owntracks-ui.<secret-silverbullet-domain>` had a public/Cloudflare-
+  proxied DNS record despite being a `tailnet_only` route — independently of this bug, that made it
+  unreachable via that hostname by anyone at all, since Cloudflare's edge IP never matches the
+  tailnet subnet either. Whether that DNS record should exist at all, and whether other
+  `tailnet_only` routes should or shouldn't have public DNS records, is an operator/DNS-console
+  question outside this repo's code — and remains so regardless of the current record.
+- By the time of this ticket, `monitor`, `adguard`, and `owntracks-ui` all had their own DNS records
+  pointed directly at the VPS's Tailscale IP (an operator workaround applied during live debugging,
+  before this fix existed — `owntracks-ui`'s record was evidently repointed at some point between
+  the original investigation above and this ticket) — this sidesteps the masquerade bug for *that
+  specific* hostname/DNS-record combination, but doesn't fix tailnet-facing access in general (a
+  route reached via a Cloudflare-proxied or public-IP DNS record over the tailnet path would still
+  hit the bug).
 
 ## Decision
 1. **A PROXY-protocol relay, not host networking for Caddy.** Re-architecting Caddy itself to run
