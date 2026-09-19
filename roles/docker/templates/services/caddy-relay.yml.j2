@@ -51,9 +51,9 @@ caddy-relay:
   volumes:
     - "{{ docker_compose_dir }}/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro"
     # Shared with caddy's own container (roles/docker/templates/services/
-    # caddy.yml.j2) — the actual security boundary for the internal listener,
-    # see this file's own header comment and Caddyfile.j2's for the full story.
-    - "{{ caddy_relay_socket_dir }}:/caddy-relay-socket"
+    # caddy.yml.j2) — see Caddyfile.j2's own comment for the full story,
+    # including what this design does and doesn't actually close.
+    - "{{ caddy_relay_socket_dir }}:{{ caddy_relay_socket_container_path }}"
   depends_on:
     - caddy
   restart: unless-stopped

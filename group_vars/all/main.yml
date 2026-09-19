@@ -75,26 +75,26 @@ tailscale_subnet_v6: "fd7a:115c:a1e0::/48"
 
 # Internal Caddy<->caddy-relay link for tailnet-facing traffic (epic 20): a shared
 # Unix domain socket, NOT a TCP port — same host bind-mount-directory pattern as
-# beszel's own hub<->agent socket (beszel_socket_dir), for the same underlying
-# reason (a local, same-host IPC channel needs no network hop at all).
+# beszel's own hub<->agent socket (beszel_socket_dir). Replaced an earlier
+# loopback-TCP-port + IP-allowlist design found, in review, to let ANY
+# host-networked container (e.g. beszel-agent) forge a trusted PROXY header via
+# Docker's own port-publish NAT — see roles/gateway/templates/Caddyfile.j2's own
+# comment for the full rationale, the security boundary this actually provides
+# (and doesn't — see that comment's own caveat), and the Caddyfile syntax this
+# required.
 #
-# This was originally a loopback-only TCP port (127.0.0.1:8543) with an IP
-# `allow`-list as Caddy's PROXY-protocol trust boundary — found, in review, to be
-# a real security hole: ANY host-networked container (beszel-agent already is
-# one) or host-level process can reach a Docker-published 127.0.0.1 port, and
-# Docker's own port-publish NAT rewrites ITS source to the gateway network's
-# bridge address too — the exact same address range the relay's own connection
-# appeared from, so the allow-list couldn't actually distinguish "the relay"
-# from "anything else on the host." A Unix socket has no network-layer identity
-# to spoof at all: only a container with this exact directory bind-mounted can
-# reach the socket file, a boundary Docker's own volume-mount scoping enforces,
-# not an IP check. See roles/gateway/templates/Caddyfile.j2's own comment for
-# the full rationale and the Caddyfile syntax this required (a second, unix-
-# socket-bound site block per gated route — verified against a real Caddy
-# binary that comma-joining a unix-socket address onto a normal hostname
-# address, the original approach, silently mis-parses as a URL host+path
-# instead of a second listener).
+# The three vars below (container-side mount path, socket filename, socket
+# permission) are shared, single-source-of-truth constants — Caddyfile.j2 and
+# haproxy.cfg.j2 both compute the same `unix/<path>/<file>|<perm>` address from
+# them, rather than each hardcoding the literal string. A future permission or
+# path change now can't accidentally desync the two sides (the original design
+# needed a byte-for-byte string match between two independent template files,
+# verified only by a test — this makes a mismatch structurally impossible
+# instead of test-only-enforced).
 caddy_relay_socket_dir: "{{ docker_compose_dir }}/caddy-relay/socket"
+caddy_relay_socket_container_path: /caddy-relay-socket
+caddy_relay_socket_filename: caddy-relay.sock
+caddy_relay_socket_permission: '0666'
 
 # Docker published-port firewall classes (epic 12 #08). Published ports bypass UFW
 # INPUT (Docker DNATs in nat PREROUTING), so access classes are enforced in the

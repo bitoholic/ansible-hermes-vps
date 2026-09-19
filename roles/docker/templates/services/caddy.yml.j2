@@ -39,12 +39,10 @@ caddy:
     # PROXY-protocol-trusting listener defined in Caddyfile.j2's global
     # options binds a socket file here, not a Docker-published TCP port at
     # all. Reachable only by a container that also has this exact directory
-    # bind-mounted (caddy-relay does; nothing else in this stack does) — a
-    # filesystem-scoped boundary, not an IP-based one. See Caddyfile.j2's own
-    # comment for why this replaced an earlier, insecure loopback-TCP-port
-    # design (an IP allow-list couldn't actually distinguish "the relay" from
-    # any other host-networked container, e.g. beszel-agent).
-    - "{{ caddy_relay_socket_dir }}:/caddy-relay-socket"
+    # bind-mounted (caddy-relay does; nothing else in this stack does). See
+    # Caddyfile.j2's own comment for the full rationale, including what this
+    # design does and doesn't actually close.
+    - "{{ caddy_relay_socket_dir }}:{{ caddy_relay_socket_container_path }}"
   depends_on:
     - authelia
   networks:

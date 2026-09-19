@@ -87,8 +87,8 @@ check_in "$HAPROXY_CFG" '^\s*group haproxy\s*$' "haproxy.cfg.j2 must drop to the
 # Unix socket below UNREACHABLE post-chroot at connect() time. Caught before
 # deploying by reasoning through Linux chroot()/connect()-time path
 # resolution, not via a live crash-loop.
-check_in "$HAPROXY_CFG" '^\s*chroot /caddy-relay-socket\s*$' "haproxy.cfg.j2 must chroot into the shared socket directory (not /var/empty, which would make the socket unreachable post-chroot)"
-check_in "$HAPROXY_CFG" 'server caddy unix@/caddy-relay\.sock send-proxy-v2' "haproxy.cfg.j2's backend must forward to Caddy over the shared Unix socket, not a TCP address"
+check_in "$HAPROXY_CFG" '^\s*chroot \{\{ caddy_relay_socket_container_path \}\}\s*$' "haproxy.cfg.j2 must chroot into the shared socket directory (not /var/empty, which would make the socket unreachable post-chroot)"
+check_in "$HAPROXY_CFG" 'server caddy unix@/\{\{ caddy_relay_socket_filename \}\} send-proxy-v2' "haproxy.cfg.j2's backend must forward to Caddy over the shared Unix socket, not a TCP address"
 if grep -qE '^\s*bind :443\s*$' "$HAPROXY_CFG"; then
   echo "FAIL: $HAPROXY_CFG has an unconditional 'bind :443' line — would silently become an unscoped, all-interfaces bind if a tailscale IP fact were ever empty"
   exit 1
@@ -111,7 +111,7 @@ fi
 # since Docker's own port-publish NAT rewrites every such connection's source to
 # the same bridge address range. A Unix socket has no network-layer identity to
 # spoof: only a container with this exact directory bind-mounted can reach it.
-check_in "$RELAY_FRAGMENT" '\{\{ caddy_relay_socket_dir \}\}:/caddy-relay-socket' "caddy-relay must bind-mount the shared socket directory, not publish a TCP port"
+check_in "$RELAY_FRAGMENT" '\{\{ caddy_relay_socket_dir \}\}:\{\{ caddy_relay_socket_container_path \}\}' "caddy-relay must bind-mount the shared socket directory, not publish a TCP port"
 if grep -qE 'ports:' "$RELAY_FRAGMENT"; then
   echo "FAIL: $RELAY_FRAGMENT publishes a Docker port — the internal listener must be a Unix socket only, reachable exclusively via the shared bind-mounted directory"
   exit 1
@@ -128,7 +128,7 @@ if grep -qE '^\s*-\s*"443:443"\s*$' "$CADDY_FRAGMENT"; then
   exit 1
 fi
 check_in "$CADDY_FRAGMENT" 'ansible_default_ipv4\.address' "caddy's 443 publish must be scoped to this VPS's own public IP"
-check_in "$CADDY_FRAGMENT" '\{\{ caddy_relay_socket_dir \}\}:/caddy-relay-socket' "caddy must bind-mount the shared socket directory for the internal PROXY-protocol listener"
+check_in "$CADDY_FRAGMENT" '\{\{ caddy_relay_socket_dir \}\}:\{\{ caddy_relay_socket_container_path \}\}' "caddy must bind-mount the shared socket directory for the internal PROXY-protocol listener"
 if grep -qE 'caddy_proxy_protocol_port' "$CADDY_FRAGMENT"; then
   echo "FAIL: $CADDY_FRAGMENT still references caddy_proxy_protocol_port — the internal listener was redesigned as a Unix socket (no TCP port at all, see caddy_relay_socket_dir)"
   exit 1
@@ -151,13 +151,17 @@ if grep -q '172\.16\.0\.0/12' roles/gateway/templates/Caddyfile.j2; then
   echo "FAIL: roles/gateway/templates/Caddyfile.j2 allows Docker's entire bridge pool (172.16.0.0/12) to present a trusted PROXY header — this was a confirmed auth-bypass vector (any host-networked container, e.g. beszel-agent, or host-level process could forge a source IP and bypass mfa_auth/tailnet_only). The internal listener must be a Unix socket scoped by bind-mount, not an IP allow-list."
   exit 1
 fi
-check_in roles/gateway/templates/Caddyfile.j2 'servers unix//caddy-relay-socket/caddy-relay\.sock\|0666 \{' "Caddyfile.j2's internal listener must be a Unix socket, not a TCP port"
-# relay_socket_bind (not a literal "bind unix..." string in the template source —
-# that only appears in the RENDERED output, already covered by test_gateway_render.yml)
-# must match the servers address above byte-for-byte, including the |0666 suffix —
-# verified empirically that a mismatched suffix makes listener_wrappers silently not
-# apply at all, no error either way.
-check_in roles/gateway/templates/Caddyfile.j2 "set relay_socket_bind = 'unix//caddy-relay-socket/caddy-relay\.sock\|0666'" "gated routes' second site block must bind the shared Unix socket, matching the internal listener's own address byte-for-byte"
+# relay_socket_bind is computed once from the shared caddy_relay_socket_*
+# group_vars and used both for the internal listener's own `servers` address
+# and every gated route's `bind` line — structurally the same value on both
+# sides (no more literal-string byte-for-byte match to drift), see
+# group_vars/all/main.yml's own comment.
+check_in roles/gateway/templates/Caddyfile.j2 "set relay_socket_bind = 'unix/' ~ caddy_relay_socket_container_path ~ '/' ~ caddy_relay_socket_filename ~ '\|' ~ caddy_relay_socket_permission" "Caddyfile.j2 must compute its internal listener's Unix-socket address from the shared caddy_relay_socket_* group_vars, not a hardcoded literal"
+check_in roles/gateway/templates/Caddyfile.j2 'servers \{\{ relay_socket_bind \}\} \{' "Caddyfile.j2's internal listener must be a Unix socket, not a TCP port"
+check_in group_vars/all/main.yml '^caddy_relay_socket_container_path:' "caddy_relay_socket_container_path must be defined in group_vars/all/main.yml"
+check_in group_vars/all/main.yml '^caddy_relay_socket_filename:' "caddy_relay_socket_filename must be defined in group_vars/all/main.yml"
+check_in group_vars/all/main.yml '^caddy_relay_socket_permission:' "caddy_relay_socket_permission must be defined in group_vars/all/main.yml"
+check_in roles/gateway/templates/Caddyfile.j2 'bind_line=relay_socket_bind' "gated routes' second site block must bind the shared Unix socket, via the same relay_socket_bind the internal listener itself uses"
 echo "Caddyfile.j2 internal listener security boundary OK (Unix socket, no Docker bridge pool trust)"
 
 # 5c: a Caddyfile/haproxy.cfg content-only change (no compose-fragment change

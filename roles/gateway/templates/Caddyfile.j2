@@ -1,3 +1,4 @@
+{% set relay_socket_bind = 'unix/' ~ caddy_relay_socket_container_path ~ '/' ~ caddy_relay_socket_filename ~ '|' ~ caddy_relay_socket_permission %}
 {
   # ACME contact (epic 12 #05/#08): Let's Encrypt expiry/abuse notices.
   email {{ secrets.acme_email }}
@@ -25,28 +26,44 @@
   # A Unix domain socket, NOT a TCP port (an earlier version of this listener
   # was a plain port, e.g. :8543, with an IP `allow`-list as the trust
   # boundary) — found, in review, to be a real auth-bypass vector: ANY
-  # host-networked container in this stack
-  # (beszel-agent already is one) or host-level process can reach a Docker-
-  # published 127.0.0.1 port, and Docker's own port-publish NAT rewrites ITS
-  # source to the gateway network's bridge address too (confirmed against
-  # moby/moby#45629) — the exact same range the relay's own connection
+  # host-networked container in this stack (beszel-agent already is one) can
+  # reach a Docker-published 127.0.0.1 port, and Docker's own port-publish NAT
+  # rewrites ITS source to the gateway network's bridge address too (confirmed
+  # against moby/moby#45629) — the exact same range the relay's own connection
   # appeared from, so an IP allow-list could never actually distinguish "the
-  # relay" from "anything else on the host." A Unix socket has no network-
-  # layer identity to spoof at all: only a container with this exact
-  # directory bind-mounted (caddy-relay does; nothing else does) can reach
-  # the socket file — a boundary Docker's own volume-mount scoping enforces,
-  # not an IP check. `allow` below is kept as a narrow, likely-redundant
-  # belt-and-suspenders check (a Unix-socket peer may not even present an IP
-  # for it to evaluate) — the REAL security boundary is the socket's
-  # filesystem/mount scoping, not this list.
+  # relay" from "any other container on the Docker bridge." A Unix socket
+  # closes exactly that vector: only a container with this exact directory
+  # bind-mounted (caddy-relay does; nothing else does) can reach the socket
+  # file at all — a boundary Docker's own volume-mount scoping enforces, not
+  # an IP check. Live-verified against the actual vulnerable container
+  # (beszel-agent): zero overlap in its own mount namespace with this
+  # directory.
+  #
+  # What this does NOT close: `caddy_relay_socket_dir` is a plain bind-mounted
+  # HOST path, not something exclusive to Docker's container boundary — a
+  # process running directly on the VPS's host OS (outside any container)
+  # with filesystem access to that path can still `connect()` to the socket
+  # and forge a header, the `0666` permission on the socket file (see
+  # `caddy_relay_socket_permission` in group_vars/all/main.yml) makes no
+  # distinction by identity. Accepted, out-of-scope risk for this ticket: on
+  # this single-operator personal VPS, a process already executing directly
+  # on the host implies the operator's own trusted code or a fully-compromised
+  # box either way — a strictly stronger attacker than anything container
+  # isolation ever promises to defend against, and not the vector this fix
+  # targets (the confirmed, concretely-exploitable one was an ordinary,
+  # already-deployed, unprivileged Docker container reaching a published port
+  # over the network — no host access needed at all). `allow` below is kept
+  # as a narrow, likely-redundant belt-and-suspenders check regardless (a
+  # Unix-socket peer may not even present an IP for it to evaluate) — the
+  # actual security boundary is the socket's mount scoping, not this list.
   #
   # Getting the mount scoping wrong (e.g. sharing this directory with an
-  # unrelated container) would let anyone with access to the socket forge a
-  # PROXY header claiming a tailnet source IP and fully bypass both mfa_auth
-  # and tailnet_only below — treat this as a security boundary, not a config
-  # nit. `proxy_protocol` must be loaded before `tls` in the wrapper chain
-  # (unwraps the header before the TLS handshake starts), per the module's
-  # own documented requirement.
+  # unrelated container) would let that container forge a PROXY header
+  # claiming a tailnet source IP and fully bypass both mfa_auth and
+  # tailnet_only below — treat this as a security boundary, not a config nit.
+  # `proxy_protocol` must be loaded before `tls` in the wrapper chain (unwraps
+  # the header before the TLS handshake starts), per the module's own
+  # documented requirement.
   #
   # Syntax verified against a real Caddy binary (`caddy adapt`, not just
   # reasoned about): a Unix-socket address comma-joined onto a normal
@@ -56,10 +73,13 @@
   # SEPARATE site block per listener, using the `bind` directive, matching
   # the same hostname for routing. See the per-route rendering below. The
   # `servers` address here must match each route's own `bind` line
-  # BYTE-FOR-BYTE, including the `|0666` permission suffix — verified
-  # empirically that a mismatched suffix makes this listener_wrappers block
-  # silently not apply at all, no error either way.
-  servers unix//caddy-relay-socket/caddy-relay.sock|0666 {
+  # BYTE-FOR-BYTE, including the permission suffix — verified empirically
+  # that a mismatched suffix makes this listener_wrappers block silently not
+  # apply at all, no error either way. Both sides now compute this address
+  # from the same three group_vars (`caddy_relay_socket_container_path`,
+  # `caddy_relay_socket_filename`, `caddy_relay_socket_permission`) instead of
+  # each hardcoding the literal string, so this can't silently desync again.
+  servers {{ relay_socket_bind }} {
     listener_wrappers {
       proxy_protocol {
         allow 127.0.0.1/32 ::1/128
@@ -136,7 +156,6 @@
      login portal) don't gain this second block, since they have no
      source-IP check that tailnet-facing masquerade could ever break. #}
 {% set dns01_hosts = ['matrix', 'owntracks'] %}
-{% set relay_socket_bind = 'unix//caddy-relay-socket/caddy-relay.sock|0666' %}
 {% macro site_block(route, auto_tls, bind_line=none) %}
 {% if auto_tls %}https://{% endif %}{{ route.host }}.{{ secrets.silverbullet_domain }}{% if route.port is defined %}:{{ route.port }}{% endif %} {
 {% if bind_line %}  bind {{ bind_line }}

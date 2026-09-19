@@ -205,17 +205,13 @@
         # unchanged on no match, and the unchanged string still fails
         # `int()`) — both fixed together here, not sequentially.
         #
-        # Loopback-bound entries (127.0.0.1:X:Y, epic 20's internal
-        # PROXY-protocol listener) are excluded from classification entirely,
-        # not just a new class added for them: this check exists to catch
-        # ports Docker's DOCKER-USER-bypasses-UFW behavior makes externally
-        # reachable, and traffic to 127.0.0.1 is categorically unreachable
-        # from outside the host regardless of any firewall rule — there is
-        # nothing here for a firewall class to legitimately describe.
+        # Epic 20's internal PROXY-protocol listener is a Unix socket, not a
+        # published port at all (see Caddyfile.j2's own comment) — no
+        # loopback-port exclusion needed here; every published port in this
+        # stack is meant to be classified.
         published_ports: >-
           {{ compose.services.values() | selectattr('ports', 'defined')
              | map(attribute='ports') | flatten
-             | reject('match', '^127\.0\.0\.1:')
              | map('regex_replace', '^(?:[^:]+:)?([0-9]+):[0-9]+(?:/[a-z]+)?$', '\1') | map('int') | unique | sort }}
         classified_ports: >-
           {{ (docker_published_public_ports + docker_published_restricted_ports
