@@ -107,16 +107,34 @@ fi
 # Security fix (found in review, PR #105): the internal listener is a shared Unix
 # domain socket, NOT a Docker-published TCP port — a loopback TCP port + IP
 # allow-list could never actually distinguish "the relay" from any other
-# host-networked container (beszel-agent already is one) or host-level process,
-# since Docker's own port-publish NAT rewrites every such connection's source to
-# the same bridge address range. A Unix socket has no network-layer identity to
-# spoof: only a container with this exact directory bind-mounted can reach it.
+# host-networked container (beszel-agent already is one) reachable over Docker's
+# own port-publish NAT, which rewrites every such connection's source to the same
+# bridge address range. A Unix socket closes that vector: only a container with
+# this exact directory bind-mounted can reach it (a residual, separate,
+# explicitly-accepted risk from a host-level process with direct filesystem
+# access to the mount path is documented in Caddyfile.j2's own comment — this
+# fix targets the Docker-container vector specifically, not that one).
 check_in "$RELAY_FRAGMENT" '\{\{ caddy_relay_socket_dir \}\}:\{\{ caddy_relay_socket_container_path \}\}' "caddy-relay must bind-mount the shared socket directory, not publish a TCP port"
 if grep -qE 'ports:' "$RELAY_FRAGMENT"; then
   echo "FAIL: $RELAY_FRAGMENT publishes a Docker port — the internal listener must be a Unix socket only, reachable exclusively via the shared bind-mounted directory"
   exit 1
 fi
 echo "caddy-relay compose fragment shape OK"
+
+# 5d: exclusivity — caddy_relay_socket_dir must be bind-mounted by exactly caddy
+# and caddy-relay, nothing else. The security boundary this whole redesign rests
+# on (roles/gateway/templates/Caddyfile.j2's own comment) is "only a container
+# with this exact directory bind-mounted can reach the socket" — a future compose
+# fragment accidentally adding this same mount (or the whole docker_compose_dir)
+# to an unrelated service would silently widen that boundary back open, and
+# nothing else in this test suite would catch it (every existing check only
+# confirms caddy/caddy-relay DO have it, not that no one else does).
+SOCKET_DIR_MOUNT_COUNT=$(grep -rl '{{ caddy_relay_socket_dir }}' roles/docker/templates/services/ | wc -l)
+if [[ "$SOCKET_DIR_MOUNT_COUNT" -ne 2 ]]; then
+  echo "FAIL: caddy_relay_socket_dir is bind-mounted by $SOCKET_DIR_MOUNT_COUNT service template(s), expected exactly 2 (caddy, caddy-relay) — a service other than these two now has access to the internal listener's trust boundary"
+  exit 1
+fi
+echo "caddy-relay socket directory mount exclusivity OK"
 
 # 5: Caddy's own compose fragment — 443 must be scoped to a specific address
 # (ansible_default_ipv4.address), never a bare, unscoped "443:443" — that would

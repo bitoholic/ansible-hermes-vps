@@ -74,23 +74,23 @@ tailscale_subnet: "100.64.0.0/10"
 tailscale_subnet_v6: "fd7a:115c:a1e0::/48"
 
 # Internal Caddy<->caddy-relay link for tailnet-facing traffic (epic 20): a shared
-# Unix domain socket, NOT a TCP port — same host bind-mount-directory pattern as
-# beszel's own hub<->agent socket (beszel_socket_dir). Replaced an earlier
-# loopback-TCP-port + IP-allowlist design found, in review, to let ANY
-# host-networked container (e.g. beszel-agent) forge a trusted PROXY header via
-# Docker's own port-publish NAT — see roles/gateway/templates/Caddyfile.j2's own
-# comment for the full rationale, the security boundary this actually provides
-# (and doesn't — see that comment's own caveat), and the Caddyfile syntax this
-# required.
+# Unix domain socket, same host bind-mount-directory pattern as beszel's own
+# hub<->agent socket (beszel_socket_dir). See roles/gateway/templates/
+# Caddyfile.j2's own comment for the full rationale, the security boundary
+# this design provides (and doesn't), and the Caddyfile syntax it requires.
 #
-# The three vars below (container-side mount path, socket filename, socket
-# permission) are shared, single-source-of-truth constants — Caddyfile.j2 and
-# haproxy.cfg.j2 both compute the same `unix/<path>/<file>|<perm>` address from
-# them, rather than each hardcoding the literal string. A future permission or
-# path change now can't accidentally desync the two sides (the original design
-# needed a byte-for-byte string match between two independent template files,
-# verified only by a test — this makes a mismatch structurally impossible
-# instead of test-only-enforced).
+# The three vars below are shared, single-source-of-truth constants for the
+# in-container mount path, socket filename, and (Caddy-side only — HAProxy's
+# own `unix@` syntax has no equivalent concept) socket permission. Caddyfile.j2
+# builds its `unix/<path>/<file>|<perm>` listener address from all three;
+# haproxy.cfg.j2 uses only the path (to `chroot` into) and filename (its
+# backend's `unix@/<file>` address is a structurally different, shorter form —
+# it never references the permission var at all). Sharing these vars still
+# removes real duplication versus the original design, where the SAME literal
+# path/filename strings were independently hardcoded in both templates and
+# relied on a test to catch a mismatch — a future change to either value now
+# can't desync the two sides, even though the two address forms themselves
+# were never identical.
 caddy_relay_socket_dir: "{{ docker_compose_dir }}/caddy-relay/socket"
 caddy_relay_socket_container_path: /caddy-relay-socket
 caddy_relay_socket_filename: caddy-relay.sock
