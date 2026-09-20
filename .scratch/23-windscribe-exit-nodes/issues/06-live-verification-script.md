@@ -11,7 +11,9 @@
 - [ ] It verifies the tunnel firewall's forward rules are exactly the expected ones and that IPv6 forwarding is denied
 - [ ] It verifies the return-path rule is present for both address families
 - [ ] It verifies the host's default route and rule count match a recorded baseline and that no ports are published for the feature
-- [ ] It runs only read-only commands, prints no credentials, and states plainly that it cannot verify the phone experience or an active tunnel-down test (those are attended, #07)
+- [ ] It verifies the trust boundary: from inside each pair, the VPS's own tailnet address and other tailnet devices are unreachable, and the pair is attached to no network other than its own dedicated one
+- [ ] It verifies the firewall interplay for the pairs: the `DOCKER-USER` chain holds no entries specific to them, and each tunnel is up — showing the container-bridge early return lets the tunnel's UDP egress through without any per-pair rule
+- [ ] It runs only read-only commands, prints no credentials, takes the target host from an argument, the environment or epic 22's wrapper in script mode, and states plainly that it cannot verify the phone experience or an active tunnel-down test (those are attended, #07)
 
 ## Notes
 

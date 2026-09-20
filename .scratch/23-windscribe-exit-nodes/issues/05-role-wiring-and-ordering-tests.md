@@ -8,7 +8,7 @@
 **Status:** ready-for-agent
 
 - [ ] The role is tagged and included in the skip-tags validation and in the README's skippable-roles list
-- [ ] It is wired with the existing ordering conventions, and the role-ordering and role-duplication tests are updated and pass
+- [ ] It is wired with the existing ordering conventions, and the role-ordering and role-duplication tests are updated and pass, including that the exit-node role runs ahead of the compose role so its credential files exist when the compose role validates the file
 - [ ] A list-tasks check shows the role executes once per run
 - [ ] Skipping the role leaves the rest of the stack unaffected
 

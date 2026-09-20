@@ -8,10 +8,10 @@
 **Status:** ready-for-agent
 
 - [ ] The script runs only read-only commands on the VPS (a documented allowlist) and changes nothing
-- [ ] It verifies: the `DOCKER-USER` rules for both families equal the rendering; the boot firewall unit is enabled and active; every expected container is running; restart policies are as declared; Docker, Tailscale and UFW are enabled; the host resolves names; the public ingress ports answer; the tailnet-gated routes answer from the tailnet
+- [ ] It verifies: the `DOCKER-USER` rules for both families equal the rendering; the boot firewall unit is enabled and active; every expected container is running; restart policies are as declared; Docker, Tailscale and UFW are enabled; the host resolves names (with AdGuard up — stopping and pausing it are attended drill steps, not something a read-only script can do); the public ingress ports answer; the tailnet-gated routes answer from the tailnet
 - [ ] It includes an outside-in probe of the restricted ports that reports *inconclusive* — never *pass* — when the operator's route to the VPS is not a plain internet path (for example when the workstation's traffic goes through another VPN)
-- [ ] It prints nothing sensitive and takes the target host as an argument or from the environment
-- [ ] The reboot-drill procedure is documented: pre-flight (provider console access verified, an alternate tailnet path to the host verified, a baseline captured), the reboot, post-boot verification, the stop-AdGuard-and-resolve check, and what to do if locked out (via the console)
+- [ ] It prints nothing sensitive and takes the target host as an argument or from the environment (run through epic 22's wrapper in script mode, the encrypted store supplies it — this ticket does not wait for epic 22)
+- [ ] The reboot-drill procedure is documented: pre-flight (provider console access verified, an alternate tailnet path to the host verified, a baseline captured), the reboot, post-boot verification, the stop-AdGuard and pause-AdGuard resolve checks, the Docker-restart check, late-dependency observation, enabling the fail-closed coupling, and what to do if locked out (via the console)
 - [ ] The procedure states the bounds under test (relay convergence, front door up, rules live)
 
 ## Notes

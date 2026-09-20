@@ -14,6 +14,7 @@
 - [ ] The versions of gluetun and Tailscale that were validated are recorded for pinning
 - [ ] The server-list update policy is decided (periodic updater versus a bump cadence), with evidence of its effect
 - [ ] Evidence shows the host's default route and rule count identical before, during and after
+- [ ] The trust boundary is examined: with the recommended tailnet access-control rules in place, a probe from inside the throwaway pair to the VPS's own tailnet address and to another tailnet device is refused; the pair is on a dedicated Docker network, not `gateway` or `internal`, and cannot reach Authelia or Hermes over the Docker network
 - [ ] The throwaway pair is fully torn down and no key material is left behind
 - [ ] Host-reboot survival is deferred, by statement, to the epic's attended validation and epic 21's drill
 

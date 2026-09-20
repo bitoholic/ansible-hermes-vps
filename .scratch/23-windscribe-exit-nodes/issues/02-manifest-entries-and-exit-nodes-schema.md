@@ -9,7 +9,7 @@
 
 - [ ] Required manifest entries exist for the Windscribe credential set (private key, IPv4 address, preshared key) and the exit-node Tailscale auth key; the names-only environment template is regenerated and the sync check passes
 - [ ] An `exit_nodes` list holds a `name`, a Windscribe `region` (a country name) and a `city` per entry, initially London and Warsaw
-- [ ] Schema-driven validation rejects duplicate names, disallowed characters, and empty region or city — each with a negative case that fails fast at deploy time with a message naming the offending entry
+- [ ] Schema-driven validation rejects duplicate names, names that are not lowercase letters, digits and hyphens (starting and ending with a letter or digit, at most 20 characters, so `<host>-ws-<name>` is always a valid DNS label), and empty region or city — each with a negative case that fails fast at deploy time with a message naming the offending entry
 - [ ] A missing credential fails fast, naming the secret only
 - [ ] The existing resolver tests pass unchanged
 

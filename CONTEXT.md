@@ -34,7 +34,7 @@ _Avoid_: gateway (that's the role); reverse proxy
 
 ### Exit nodes & egress
 
-**Exit node**: A Tailscale node that tailnet clients can route all their internet traffic through, so that traffic egresses from the node instead of from the client's own network. This repo runs two kinds: the plain VPS exit node (egress from the VPS's own public IP) and Windscribe exit nodes.
+**Exit node**: A Tailscale node that tailnet clients can route all their internet traffic through, so that traffic egresses from the node instead of from the client's own network. This repo runs Windscribe exit nodes, and optionally a plain exit node on the VPS's own Tailscale node (egress from the VPS's own public IP).
 _Avoid_: VPN (too generic), proxy
 
 **Windscribe exit node**: An exit node whose egress is a Windscribe WireGuard tunnel to a chosen city, so sites see a Windscribe IP instead of the VPS's or the client's. One exists per exit location.
