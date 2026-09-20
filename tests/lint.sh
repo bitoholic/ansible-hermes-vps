@@ -22,7 +22,7 @@ fi
 
 ansible-playbook --syntax-check site.yml >/tmp/hermes-syntax.log
 ansible-playbook --syntax-check tests/test_playbook.yml >/tmp/hermes-test-syntax.log
-ansible-lint site.yml tests/test_playbook.yml tests/test_resolver.yml tests/test_docker_user_rules.yml
+ansible-lint site.yml tests/test_playbook.yml tests/test_resolver.yml tests/test_docker_user_rules.yml tests/test_boot_ordering.yml
 
 # Single-seam contract: only the `secrets` resolver role may read credentials from the
 # environment. Any other `lookup('env', …)` for a secret is a regression against the seam.
@@ -92,6 +92,13 @@ python3 scripts/generate-env.py --check
 # tests/test_docker_compose.yml; this script proves the guard has teeth (missing / 'no' / on-failure / a
 # multi-service fragment with one gap / empty all fail) and pins the three services found live.
 ./tests/check-restart-policies.sh
+
+# Boot ordering, single-owner host DNS (staged) and the runtime-state audit (epic 21 ticket #04): Docker after
+# tailscaled by an ordering-only drop-in, the resolv.conf repoint decision table (a working resolver is left
+# exactly as found unless the switch is on or the file would be broken), the resolver drop-in's fallback order,
+# and docs/reboot-resilience.md covering every enabled service with stated bounds. Real systemd ordering, Tailscale
+# releasing resolv.conf and the stopped/hung DNS delays are operator-validated in the attended drill (#06).
+./tests/check-boot-ordering.sh
 
 # AdGuard DNS-serving (epic 18 ticket #05): the host-level systemd-resolved handover's
 # sequencing contract (must run after the docker stack starts, wait -> drop-in ->

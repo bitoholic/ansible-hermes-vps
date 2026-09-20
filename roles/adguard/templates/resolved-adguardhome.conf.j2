@@ -1,0 +1,11 @@
+{#- Managed by Ansible (adguard role) - do not edit by hand.
+   systemd-resolved drop-in for the AdGuard DNS handover (epic 18 #05; epic 21 #04).
+    - DNSStubListener=no frees host port 53 so AdGuard's container can bind it (always).
+    - DNS= lists AdGuard first. When host_dns_resolver_owner_enabled is on, the public fallbacks follow as
+      ORDINARY servers: FallbackDNS= is ignored while any DNS= is set, and the C library walks nameservers in
+      order (reading only the first three), so order is what makes the fallback work.
+   These are Jinja comments on purpose: with the switch OFF the rendered file is byte-identical to the drop-in
+   this role has always written, so a routine deploy leaves it exactly as found (no rewrite, no resolved restart). -#}
+[Resolve]
+DNS={{ (['127.0.0.1'] + (host_dns_fallback_servers | default([]) if (host_dns_resolver_owner_enabled | bool) else [])) | join(' ') }}
+DNSStubListener=no

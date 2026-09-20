@@ -1,0 +1,12 @@
+# Managed by Ansible (tailscale role) - do not edit by hand.
+# Boot ordering (epic 21 #04): start Docker after the Tailscale daemon so the caddy-relay, which binds
+# this VPS's Tailscale address, usually finds it on the first try.
+#
+# ORDERING ONLY — deliberately no Requires=/Wants=/BindsTo=/PartOf=. A Tailscale outage (daemon stopped,
+# failed, or the tailnet unreachable) must never be able to keep Docker, and with it the whole public
+# stack, from starting. After= only sequences the two when both are being started in the same boot: if
+# tailscaled is stopped or fails, Docker starts anyway; if it is merely slow, Docker waits for its start
+# job to finish (bounded by systemd's start timeout). The caddy-relay's restart policy covers the case
+# where the daemon is up but tailscale0 has no address yet (docs/reboot-resilience.md).
+[Unit]
+After=tailscaled.service

@@ -1,0 +1,87 @@
+---
+# Render + truth-table harness for epic 21 ticket #04 (boot ordering and single-owner host DNS).
+#  1. Renders the ordering-only docker.service drop-in (tailscale role) and the systemd-resolved drop-in
+#     (adguard role) into `render_dir`, with host_dns_resolver_owner_enabled taken from `render_owner_enabled`.
+#  2. Evaluates the REAL `adguard_resolv_conf_repoint_needed` expression against synthetic host states, so
+#     the staged-rollout promise ("disabled = a working resolver is left exactly as found") is asserted as
+#     behavior, not as task text.
+#
+#   ansible-playbook tests/test_boot_ordering.yml -e render_dir=/tmp/out [-e render_owner_enabled=true]
+# (a separate variable, so extra-vars can't override the per-case values the decision table sets.)
+- name: Render boot-ordering artifacts and check the repoint decision table
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars_files:
+    - ../roles/adguard/defaults/main.yml
+    - ../group_vars/all/main.yml
+  tasks:
+    - name: Ensure render directory exists
+      ansible.builtin.file:
+        path: "{{ render_dir }}"
+        state: directory
+        mode: '0755'
+
+    - name: Render the ordering-only docker.service drop-in
+      ansible.builtin.template:
+        src: "{{ playbook_dir }}/../roles/tailscale/templates/docker-after-tailscaled.conf.j2"
+        dest: "{{ render_dir }}/docker-after-tailscaled.conf"
+        mode: '0644'
+
+    - name: Render the systemd-resolved drop-in
+      ansible.builtin.template:
+        src: "{{ playbook_dir }}/../roles/adguard/templates/resolved-adguardhome.conf.j2"
+        dest: "{{ render_dir }}/resolved-adguardhome.conf"
+        mode: '0644'
+      vars:
+        host_dns_resolver_owner_enabled: "{{ render_owner_enabled | default(false) }}"
+
+    # Decision table for whether the resolv.conf repoint runs. `stat` mirrors ansible.builtin.stat's result
+    # for /etc/resolv.conf (follow: false).
+    - name: The repoint runs only when owner mode is on or the current file would be broken by the stub being off
+      ansible.builtin.assert:
+        that:
+          - (adguard_resolv_conf_repoint_needed | bool) == item.expect
+        fail_msg: "{{ item.name }}: expected repoint={{ item.expect }}, got {{ adguard_resolv_conf_repoint_needed | bool }}"
+        quiet: true
+      vars:
+        host_dns_resolver_owner_enabled: "{{ item.owner }}"
+        adguard_resolv_conf_stat: "{{ {'stat': item.stat} }}"
+        adguard_resolv_conf_names_stub: "{{ {'rc': item.names_stub | default(1)} }}"
+      loop_control:
+        label: "{{ item.name }}"
+      loop:
+        - name: disabled + Tailscale-generated regular file (the live host) -> leave as found
+          owner: false
+          stat: {exists: true, islnk: false}
+          expect: false
+        - name: disabled + symlink to the resolver's stub file (a fresh host) -> repoint (else DNS breaks)
+          owner: false
+          stat: {exists: true, islnk: true, lnk_source: /run/systemd/resolve/stub-resolv.conf}
+          expect: true
+        - name: disabled + symlink to the non-stub file (already handed over) -> leave as found
+          owner: false
+          stat: {exists: true, islnk: true, lnk_source: /run/systemd/resolve/resolv.conf}
+          expect: false
+        - name: disabled + missing file -> repoint
+          owner: false
+          stat: {exists: false}
+          expect: true
+        - name: disabled + REGULAR file that still names the disabled stub address (127.0.0.53) -> repoint (else no DNS)
+          owner: false
+          stat: {exists: true, islnk: false}
+          names_stub: 0
+          expect: true
+        - name: disabled + regular file NOT naming the stub (e.g. Tailscale's) -> leave as found
+          owner: false
+          stat: {exists: true, islnk: false}
+          names_stub: 1
+          expect: false
+        - name: enabled + Tailscale-generated regular file -> take ownership
+          owner: true
+          stat: {exists: true, islnk: false}
+          expect: true
+        - name: enabled + already the non-stub symlink -> still requested (the link task is then a no-op)
+          owner: true
+          stat: {exists: true, islnk: true, lnk_source: /run/systemd/resolve/resolv.conf}
+          expect: true

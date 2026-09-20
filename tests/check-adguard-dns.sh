@@ -86,8 +86,11 @@ echo "docker_enabled_services guard OK (handover and verification both skip clea
 # /etc/resolv.conf repointed, THEN restarted (Pi-hole's documented order:
 # repointing after the restart leaves a window pointing at the dead stub
 # symlink; DNS= in the drop-in is only honored through the non-stub file).
-DROPIN_LINE="$(line_of "$DNS_TASKS" 'DNSStubListener=no')"
-REPOINT_LINE="$(line_of "$DNS_TASKS" 'dest: /etc/resolv\.conf')"
+# The drop-in's content moved into a template (epic 21 #04, so the staged fallback list can be rendered
+# and tested); the TASK that deploys it is what carries the ordering, its content is asserted below.
+RESOLVED_TPL=roles/adguard/templates/resolved-adguardhome.conf.j2
+DROPIN_LINE="$(line_of "$DNS_TASKS" 'src: resolved-adguardhome\.conf\.j2')"
+REPOINT_LINE="$(line_of "$DNS_TASKS" 'dest: /etc/resolv\.conf$')"
 RESTART_LINE="$(line_of "$DNS_TASKS" 'state: restarted')"
 for pair in "DROPIN_LINE:the resolved.conf drop-in" "REPOINT_LINE:the resolv.conf repoint" "RESTART_LINE:the systemd-resolved restart"; do
   name="${pair##*:}"; var="${pair%%:*}"
@@ -99,7 +102,8 @@ fi
 if (( RESTART_LINE <= REPOINT_LINE )); then
   echo "FAIL: the systemd-resolved restart must come after the resolv.conf repoint (Pi-hole's documented order)"; exit 1
 fi
-check_in "$DNS_TASKS" 'DNS=127\.0\.0\.1' "DNS=127.0.0.1 in the drop-in"
+check_in "$RESOLVED_TPL" 'DNSStubListener=no' "DNSStubListener=no in the drop-in template"
+check_in "$RESOLVED_TPL" "^DNS=.*'127\\.0\\.0\\.1'" "AdGuard (127.0.0.1) as the first DNS= server in the drop-in template (the rendered bytes are pinned by tests/check-boot-ordering.sh)"
 check_in "$DNS_TASKS" '/run/systemd/resolve/resolv\.conf' "repoint target (the non-stub file)"
 echo "DNS handover task sequencing OK (drop-in -> repoint -> restart)"
 

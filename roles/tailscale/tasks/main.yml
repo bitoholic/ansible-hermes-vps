@@ -59,10 +59,16 @@
   failed_when: false
 
 # Idempotent: only bring the node up if it is not already in the Running state.
+# The host-DNS preference (epic 21 #04) is restated EXPLICITLY in both switch states. Enabling ownership sets
+# the node to --accept-dns=false, a non-default preference; `tailscale up` refuses to change settings without
+# restating every non-default flag. Restating it only while the switch is on would let a later re-login FAIL
+# after the switch is turned back off (the preference would still be false), so both values are written.
 - name: Bring up Tailscale (login via auth key)
   tags: [tailscale]
   ansible.builtin.command:
-    cmd: "tailscale up --authkey={{ secrets.tailscale_authkey }} --hostname={{ inventory_hostname }}"
+    cmd: >-
+      tailscale up --authkey={{ secrets.tailscale_authkey }} --hostname={{ inventory_hostname }}
+      --accept-dns={{ 'false' if (host_dns_resolver_owner_enabled | default(false) | bool) else 'true' }}
   when: >-
     tailscale_status is not defined or
     tailscale_status.rc != 0 or
@@ -242,10 +248,8 @@
     mode: '0644'
   notify: Reload systemd for the Hermes firewall units
 
-# Staged rollout (epic 21 spec): the fail-closed coupling — docker.service Requires= the boot
-# unit — ships DISABLED. An untested fail-closed unit shipped by a routine deploy could take the
-# stack down; the attended reboot drill (ticket #06) enables it after the unit has been observed
-# working. Disabling it later removes the drop-in again, so the variable is the single switch.
+# Boot ordering (epic 21 #04): Docker after the Tailscale daemon — ordering only, never a dependency, so
+# a Tailscale outage can't keep Docker from starting. Installed unconditionally (it cannot stop anything).
 - name: Ensure the docker.service drop-in directory exists
   tags: [tailscale]
   ansible.builtin.file:
@@ -255,6 +259,20 @@
     group: root
     mode: '0755'
 
+- name: Order Docker after the Tailscale daemon (ordering only)
+  tags: [tailscale]
+  ansible.builtin.template:
+    src: docker-after-tailscaled.conf.j2
+    dest: /etc/systemd/system/docker.service.d/20-hermes-after-tailscaled.conf
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Reload systemd for the Hermes firewall units
+
+# Staged rollout (epic 21 spec): the fail-closed coupling — docker.service Requires= the boot
+# unit — ships DISABLED. An untested fail-closed unit shipped by a routine deploy could take the
+# stack down; the attended reboot drill (ticket #06) enables it after the unit has been observed
+# working. Disabling it later removes the drop-in again, so the variable is the single switch.
 - name: Install the fail-closed coupling drop-in (only when tailscale_docker_user_firewall_fail_closed is true)
   tags: [tailscale]
   ansible.builtin.template:

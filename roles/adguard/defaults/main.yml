@@ -14,3 +14,18 @@ adguard_gateway_publish:
     upstream: adguard:3000
     mfa: false
     tailnet_only: true
+
+# Whether the resolv.conf repoint below must run (epic 21 #04). It is a variable, not an inline `when:`
+# string, so tests can evaluate its truth table against synthetic host states. It runs when (a) the
+# operator has enabled host-DNS ownership (host_dns_resolver_owner_enabled), or (b) the CURRENT
+# resolv.conf would be BROKEN by the stub listener being off — missing, a symlink to the resolver
+# daemon's stub file (a fresh host's default), or a regular file that still names the stub address
+# (127.0.0.53). A working resolver configuration written by something else (e.g. Tailscale's own file on
+# the live host) is left exactly as found, which ends the deploy-versus-Tailscale overwrite fight for
+# routine runs.
+adguard_resolv_conf_repoint_needed: >-
+  {{ (host_dns_resolver_owner_enabled | default(false) | bool)
+     or not (adguard_resolv_conf_stat.stat.exists | default(false))
+     or ((adguard_resolv_conf_stat.stat.islnk | default(false))
+         and ('stub-resolv.conf' in (adguard_resolv_conf_stat.stat.lnk_source | default(''))))
+     or ((adguard_resolv_conf_names_stub.rc | default(1)) == 0) }}
