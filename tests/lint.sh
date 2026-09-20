@@ -176,3 +176,9 @@ if ! grep -q "Protected roles: secrets, users, ssh_hardening, common" site.yml; 
   exit 1
 fi
 echo "role skip-tags guard OK"
+
+# Live verification script and the reboot-drill procedure (epic 21 ticket #05): the script is read-only over a
+# documented allowlist, multiplexes one SSH connection (UFW rate-limits new connections), and reports
+# INCONCLUSIVE - never PASS - for anything it cannot support. Exercised against a fake ssh; the real VPS
+# check is operator-run (scripts/verify-live.sh, drill in #06).
+./tests/check-live-verification.sh

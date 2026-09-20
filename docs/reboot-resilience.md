@@ -115,4 +115,83 @@ Everything the playbook configures that lives only in memory or depends on start
 
 ## Reboot drill
 
-*(Added by epic 21 ticket #05 — the read-only live verification script and the attended procedure.)*
+An **attended** procedure: the operator is present, reboots the production VPS on purpose, and proves — with
+`scripts/verify-live.sh` and without re-running the playbook — that it came back correct. The read-only script
+cannot reboot, stop or pause anything; those steps are the operator's, listed below. Results go in epic 21
+ticket #06.
+
+> **Mind SSH's rate limit.** UFW rate-limits SSH (`limit 22/tcp`): 6 new connections per 30 s per source
+> address, and blocked attempts *extend* the block. Opening a fresh connection per command locks *you* out for
+> a while (found on the verification script's first live run — it now reuses one multiplexed connection). For
+> the manual steps below, work in **one** SSH session (or `ssh -o ControlMaster=auto -o ControlPath=… -o
+> ControlPersist=60`), and never loop reconnect attempts: wait ~40 s, then try once.
+
+### Bounds under test
+
+| What | Bound |
+|---|---|
+| Restricted-port rules live | before any published port (Docker preserves the pre-loaded chain). A post-boot check cannot prove *ordering*: `verify-live.sh` proves the rules are loaded and correct, and step 4's `journalctl` shows the firewall unit finished before Docker started |
+| Public front door (Caddy + Authelia) answers | ≤ **3 min** after boot |
+| Every enabled container `running` | ≤ **5 min** after boot |
+| `caddy-relay` bound | ≤ **2 min** after boot |
+| Host lookup with AdGuard **stopped** | ≈ 0 s extra |
+| Host lookup with AdGuard **paused (hung)** | ≤ ~5 s extra per lookup |
+
+### Pre-flight — every item must be true before rebooting
+
+1. **Provider console reachable.** Open the provider's VNC/serial console and log in once. SSH does not depend on
+   anything in this epic (`ssh.socket` + UFW), but the console is the last resort.
+2. **An alternate SSH path over the tailnet.** From this workstation (on the tailnet) `ssh <tailscale-ip>` works —
+   SSH listens on all addresses and UFW allows the tailnet interface.
+3. **Baseline captured — before anything is deployed.** Run `scripts/verify-live.sh <host>` and keep the output
+   (before the new code is deployed it is *expected* to FAIL on the pieces this epic adds — that is the "before"
+   picture), plus `uptime`. The script prints no address, host or domain and reports rule drift as counts only, so its
+   output is safe to keep; `sudo iptables -S DOCKER-USER` is *not* (it contains the Syncplay friend's address) — keep
+   that off shared surfaces.
+4. **Then deploy the code with both staged switches OFF, reviewed.** Deploy with `--check --diff` first and
+   read it before applying. (Until epic 22 lands its redaction, `--diff` can print rendered secret files — keep
+   that output off shared surfaces.) This is step 0 below.
+5. **A quiet time, the operator present, and this page open.**
+
+### Procedure
+
+| # | Step | Verify |
+|---|---|---|
+| 0 | Deploy with the switches off: `tailscale_docker_user_firewall_fail_closed: false`, `host_dns_resolver_owner_enabled: false` | `verify-live.sh` passes on everything except (still-unchecked) reboot behavior |
+| 1 | **Reboot** (`sudo reboot`). Note the time; then poll SSH *no faster than every 40 s* | `verify-live.sh` **without** running the playbook: chain matches, unit active, all containers up. Record the times against the bounds above. If it exits `ABORT` (status 2) the host was unreachable — it made one attempt on purpose; wait ~40 s and run it once more |
+| 1b | **Late-dependency observation** (right after step 1, once SSH is back): `docker ps --format '{{.Names}} {{.Status}}'`, `docker inspect -f '{{.Name}} restarts={{.RestartCount}}' $(docker ps -aq)`, and `docker logs --since 10m hermes-agent` | for each row of the late-dependency table: did it converge within its bound, and by which mechanism (internal retry vs. a restart-policy retry — a non-zero `RestartCount` means the latter)? **This is where `hermes-agent`'s retry behavior is finally observed.** Record anything outside its bound |
+| 2 | **AdGuard stopped:** in your *existing* SSH session run it as **one subshell that ignores a hangup**, so a dropped connection does not skip the restart (the restart policy does not restart a container you stopped; a plain `a; b; c` line *is* cut short when the session drops): `( trap '' HUP; docker stop adguard; time getent hosts example.com; docker start adguard )`. If the session drops anyway, reconnect by the Tailscale address and run `docker start adguard`. With ownership *off* this shows today's dependency — record it. AdGuard is also the tailnet's DNS server, so while it is stopped new connections *by hostname* may fail: stay in the open session, and use the Tailscale address for anything new | expect the lookup to fail or stall (the finding this epic fixes); record it |
+| 3 | **Docker restart** (quiet time): `sudo systemctl restart docker` | `verify-live.sh`: chain still matches; containers return |
+| 4 | **Enable the fail-closed coupling:** set `tailscale_docker_user_firewall_fail_closed: true`, deploy (`--tags tailscale`), **reboot** | `verify-live.sh` shows *fail-closed coupling: ENABLED*; `journalctl -b -u hermes-docker-user-firewall -u docker` shows the firewall unit finished before Docker started |
+| 5 | **Enable single-owner host DNS:** set `host_dns_resolver_owner_enabled: true`, deploy (`--tags tailscale,adguard`) | `getent hosts example.com` works; `resolv.conf` owner reads *systemd-resolved* |
+| 6 | **AdGuard stopped again**, then **paused (hung)** — again as a hangup-proof subshell each, in the open session: `( trap '' HUP; docker stop adguard; time getent hosts example.com; docker start adguard )`, then `( trap '' HUP; docker pause adguard; time getent hosts example.com; docker unpause adguard )`. If the session drops, reconnect by the Tailscale address and run `docker start adguard` / `docker unpause adguard` | stopped ≈ 0 s extra, paused ≤ ~5 s extra; the host resolves in both |
+| 7 | **Reboot once more** with both switches on | `verify-live.sh` clean; host DNS still owned by resolved; bounds met |
+
+Enable **one** switch at a time; if a step fails, roll back that switch before continuing.
+
+### If something goes wrong
+
+- **SSH is independent of all of this.** It does not depend on Docker, Tailscale, the firewall unit or the DNS
+  change. If SSH fails, suspect the rate limit first (wait ~40 s, try once), then use the tailnet address, then the
+  provider console (`systemctl status ssh.socket ufw`).
+- **Only DNS is broken** (lookups fail): from the console or SSH — `sudo ln -sf /run/systemd/resolve/resolv.conf
+  /etc/resolv.conf && sudo systemctl restart systemd-resolved`, or as a last resort write
+  `nameserver 9.9.9.9` into `/etc/resolv.conf`. Then set `host_dns_resolver_owner_enabled: false`, and
+  `sudo tailscale set --accept-dns=true` to give Tailscale its ownership back.
+- **Docker will not start with the fail-closed coupling on:** that is the coupling doing its job — the firewall
+  rules did not load, so Docker refused to publish ports without them. Read `journalctl -u
+  hermes-docker-user-firewall`. **Starting Docker anyway exposes the restricted ports** (3000, 8008, 8642, 9119,
+  8090, 3001, 53) to the internet until the rules are in, because Docker publishes them regardless of UFW. Safe
+  order: (1) load the rules by hand first — `sudo /usr/local/sbin/hermes-docker-user-rules apply` (it is atomic and fails
+  without changing anything if the rendering is invalid), then `sudo systemctl start docker`; if that cannot be made to work, (2) remove the
+  coupling drop-in (`sudo rm /etc/systemd/system/docker.service.d/10-hermes-firewall-fail-closed.conf && sudo
+  systemctl daemon-reload`), start Docker, and **immediately** `docker stop` every container that publishes a
+  restricted port (UFW rules do not help — Docker bypasses UFW), leaving them stopped until
+  `scripts/verify-live.sh` shows the chain matches. Set the variable to `false` until the cause is fixed.
+- **A container did not come back:** `docker ps -a`, `docker logs <name>`; restart policies retry on their own
+  (backoff up to 60 s) — only intervene if it has not converged within its bound.
+
+### Results
+
+Record each run in ticket #06: the time of each bound, the `verify-live.sh` output (nothing in it is secret —
+tailnet routes print as `<label>.<domain>`), the stopped/paused lookup timings, and any deviation.
