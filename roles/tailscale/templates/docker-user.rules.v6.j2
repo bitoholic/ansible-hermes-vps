@@ -1,0 +1,26 @@
+# Managed by Ansible (tailscale role) - do not edit by hand.
+# DOCKER-USER rules, IPv6: the same classes as IPv4 with the tailnet ULA prefix as the trusted
+# source (epic 12 #08 / epic 21 #02). Syncplay's allowlist is IPv4-only, so it is dropped outright
+# here. See docker-user.rules.v4.j2 for how these files are loaded and why they are atomic.
+*filter
+:DOCKER-USER - [0:0]
+-A DOCKER-USER -i br+ -m comment --comment "docker bridge traffic is not host-ingress" -j RETURN
+-A DOCKER-USER -i docker+ -m comment --comment "docker bridge traffic is not host-ingress" -j RETURN
+-A DOCKER-USER -m conntrack --ctstate RELATED,ESTABLISHED -m comment --comment "accept established forwarded flows" -j ACCEPT
+-A DOCKER-USER -p tcp -m tcp --dport 8999 -m comment --comment "syncplay allowlist is IPv4-only" -j DROP
+{% for port in docker_published_restricted_ports %}
+-A DOCKER-USER -s {{ tailscale_subnet_v6 }} -p tcp -m tcp --dport {{ port }} -m comment --comment "tailscale-only service" -j ACCEPT
+{% endfor %}
+{% for port in docker_published_restricted_ports %}
+-A DOCKER-USER -p tcp -m tcp --dport {{ port }} -m comment --comment "tailscale-only service deny" -j DROP
+{% endfor %}
+{% for port in docker_published_restricted_udp_ports | default([]) %}
+-A DOCKER-USER -s {{ tailscale_subnet_v6 }} -p udp -m udp --dport {{ port }} -m comment --comment "tailscale-only service (udp)" -j ACCEPT
+{% endfor %}
+{% for port in docker_published_restricted_udp_ports | default([]) %}
+-A DOCKER-USER -p udp -m udp --dport {{ port }} -m comment --comment "tailscale-only service deny (udp)" -j DROP
+{% endfor %}
+{% for port in docker_published_public_ports %}
+-A DOCKER-USER -p tcp -m tcp --dport {{ port }} -m comment --comment "public ingress (Caddy)" -j ACCEPT
+{% endfor %}
+COMMIT

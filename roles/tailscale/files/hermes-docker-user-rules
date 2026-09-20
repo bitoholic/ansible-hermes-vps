@@ -1,0 +1,56 @@
+#!/bin/sh
+# hermes-docker-user-rules — the single loader for the DOCKER-USER firewall rules (epic 21 #02).
+#
+# Used by BOTH the Ansible deploy and the boot firewall unit, so there is exactly one way the rules
+# reach the kernel. The rules themselves are rendered from the shared port-class variables into
+# two restore-format files (one per IP family).
+#
+#   apply   validate BOTH files first (a bad file changes nothing), then load each family with
+#           iptables-restore --noflush, which replaces only the declared DOCKER-USER chain in one
+#           atomic transaction; Docker's chains and UFW are never touched. The two families are two
+#           transactions, so if the second fails after both validated, the first stays applied.
+#           Idempotent; safe to run at any time.
+#   test    syntax-check both files without loading anything.
+#   status  print the live DOCKER-USER chain for both families in a stable form (used by deploys to
+#           detect drift, e.g. the chain emptied by a reboot while the rendered files are unchanged).
+#
+# HERMES_FIREWALL_DIR overrides where the rendered files live (default below; used by tests).
+set -eu
+
+DIR="${HERMES_FIREWALL_DIR:-/etc/hermes-vps/firewall}"
+V4="$DIR/docker-user.v4.rules"
+V6="$DIR/docker-user.v6.rules"
+
+usage() { echo "usage: $0 apply|test|status" >&2; }
+
+case "${1:-}" in
+  status)
+    # A missing chain is simply "empty" (fresh host / after a reboot). Any OTHER failure (no iptables, no
+    # permission) must surface: swallowing it would give identical empty snapshots before and after an
+    # apply, and the deploy would report "nothing changed" while hiding the failure.
+    for fam in "iptables ipv4" "ip6tables ipv6"; do
+      set -- $fam
+      echo "# $2"
+      if out="$($1 -S DOCKER-USER 2>&1)"; then
+        printf '%s\n' "$out"
+      else
+        case "$out" in *"No chain"*|*"does not exist"*) : ;; *) echo "hermes-docker-user-rules: $1 -S failed: $out" >&2; exit 1 ;; esac
+      fi
+    done
+    ;;
+  test|apply)
+    for f in "$V4" "$V6"; do
+      [ -r "$f" ] || { echo "hermes-docker-user-rules: cannot read $f" >&2; exit 1; }
+    done
+    # Validate both families before changing either, so a bad file can never leave one family
+    # updated and the other not.
+    iptables-restore --noflush --test < "$V4"
+    ip6tables-restore --noflush --test < "$V6"
+    if [ "$1" = apply ]; then
+      iptables-restore --noflush < "$V4"
+      ip6tables-restore --noflush < "$V6"
+    fi
+    ;;
+  *)
+    usage; exit 2 ;;
+esac

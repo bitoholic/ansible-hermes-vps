@@ -1,0 +1,27 @@
+# Managed by Ansible (tailscale role) - do not edit by hand.
+# Boot firewall unit (epic 21 #02): loads the DOCKER-USER rules before Docker starts any
+# container, and again on every Docker (re)start, so a reboot or a Docker restart can never leave
+# the published-port classes unenforced. It touches only the DOCKER-USER chain — never UFW, the
+# INPUT chain or sshd — and is independent of SSH access.
+#
+# TO RELOAD THE RULES run `{{ tailscale_docker_user_firewall_loader }} apply` (or a deploy) — do NOT
+# `systemctl restart` this unit: with the fail-closed coupling enabled, docker.service Requires= this unit, so
+# restarting it restarts Docker and every container.
+#
+# Why "Before=docker.service" is enough: the epic 21 spike showed Docker PRESERVES a
+# pre-populated DOCKER-USER chain across daemon start and restart (both IP families), so rules
+# loaded first are simply there when the first container publishes a port — no exposure window.
+[Unit]
+Description=Load Hermes VPS DOCKER-USER firewall rules
+Documentation=man:iptables-restore(8)
+Before=docker.service
+PartOf=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+Environment=HERMES_FIREWALL_DIR={{ tailscale_docker_user_firewall_dir }}
+ExecStart={{ tailscale_docker_user_firewall_loader }} apply
+
+[Install]
+WantedBy=multi-user.target docker.service

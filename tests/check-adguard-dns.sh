@@ -20,7 +20,6 @@ echo "== AdGuard DNS-serving guard =="
 DNS_TASKS=roles/adguard/tasks/free_host_dns_port.yml
 ADGUARD_MAIN=roles/adguard/tasks/main.yml
 DOCKER_MAIN=roles/docker/tasks/main.yml
-TS_TASKS=roles/tailscale/tasks/main.yml
 ADGUARD_FRAGMENT=roles/docker/templates/services/adguard.yml.j2
 
 # check_in/entry_has: shared helpers, see tests/support/yaml_block_assertions.sh
@@ -136,14 +135,14 @@ echo "early-phase/late-phase separation OK"
 check_in group_vars/all/main.yml '^docker_published_restricted_udp_ports:' "docker_published_restricted_udp_ports defined"
 entry_has group_vars/all/main.yml '^docker_published_restricted_udp_ports:' '  - 53' "53 in docker_published_restricted_udp_ports"
 entry_has group_vars/all/main.yml '^docker_published_restricted_ports:' '  - 53' "53 in docker_published_restricted_ports (TCP, for DNS's TCP fallback)"
-for rule in "DOCKER-USER v4 - restricted UDP ports from Tailscale subnet" \
-            "DOCKER-USER v4 - restricted UDP ports denied for everyone else" \
-            "DOCKER-USER v6 - restricted UDP ports from Tailscale ULA" \
-            "DOCKER-USER v6 - restricted UDP ports denied for everyone else"; do
-  check_in "$TS_TASKS" "$rule" "rule: $rule"
+# The UDP class is rendered by the per-family DOCKER-USER rules templates (epic 21 #02 replaced the
+# per-rule tasks); what those rules DO is asserted on the rendered output in
+# tests/check-docker-user-firewall.sh, so here we pin that both families still render the class.
+for tpl in roles/tailscale/templates/docker-user.rules.v4.j2 roles/tailscale/templates/docker-user.rules.v6.j2; do
+  check_in "$tpl" 'docker_published_restricted_udp_ports' "UDP class rendered by $tpl"
+  check_in "$tpl" 'p udp -m udp --dport' "a UDP rule in $tpl"
+  check_in "$tpl" 'tailscale-only service deny \(udp\)' "the UDP deny-everyone-else rule in $tpl"
 done
-check_in "$TS_TASKS" 'protocol: udp' "at least one protocol: udp rule"
-check_in "$TS_TASKS" 'docker_published_restricted_udp_ports' "UDP rules iterating docker_published_restricted_udp_ports"
 echo "UDP restricted-port firewall contract OK"
 
 # 6: the compose fragment publishes DNS on both protocols.

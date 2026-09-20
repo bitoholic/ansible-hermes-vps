@@ -1,0 +1,9 @@
+# Managed by Ansible (tailscale role) - do not edit by hand.
+# Fail-closed coupling (epic 21 #02, STAGED: only installed when
+# tailscale_docker_user_firewall_fail_closed is true — shipped disabled and enabled by the attended drill).
+# With this in place Docker (and therefore every Docker-published port) does not start unless the
+# DOCKER-USER rules loaded: a broken ruleset then yields an outage the operator notices instead of
+# an exposure they don't. SSH, sshd and UFW do not depend on Docker and are unaffected.
+[Unit]
+Requires=hermes-docker-user-firewall.service
+After=hermes-docker-user-firewall.service

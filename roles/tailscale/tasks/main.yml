@@ -137,8 +137,8 @@
 # Cleanup for the 8448 -> 8443 move (epic 19, #02, discovered on the first real
 # deploy of this migration): this repo's UFW rate-limit rules are ensured
 # PRESENT by the loop above, not declaratively rebuilt from a single source of
-# truth the way the DOCKER-USER chain is (that chain is flushed and rebuilt
-# from scratch every run; plain `ufw` rules aren't, since many unrelated rules
+# truth the way the DOCKER-USER chain is (that chain is atomically replaced from the rendered rules
+# on every run; plain `ufw` rules aren't, since many unrelated rules
 # from other tasks/roles share the same firewall — a full flush-and-rebuild of
 # every UFW rule isn't this fix's scope). Without this, a host that was ever
 # deployed before this ticket keeps an orphaned rate-limit rule for a port
@@ -180,233 +180,134 @@
     direction: outgoing
     policy: "{{ common_ufw_default_outgoing_policy | lower }}"  # noqa: args[module]
 
-# --- Docker published ports (epic 12, #08) ------------------------------------------
-# Docker-published ports bypass UFW entirely: DNAT happens in nat PREROUTING and
-# Docker's own FORWARD rules ACCEPT the traffic before UFW's INPUT is ever
-# consulted. The supported enforcement point is the DOCKER-USER chain (processed
-# before Docker's rules). This role is the single firewall owner, so it owns that
-# chain too.
+# --- Docker published ports (epic 12, #08; boot-persistent and atomic since epic 21, #02) -------
+# Docker-published ports bypass UFW entirely: DNAT happens in nat PREROUTING and Docker's own
+# FORWARD rules ACCEPT the traffic before UFW's INPUT is ever consulted. The supported
+# enforcement point is the DOCKER-USER chain (processed before Docker's rules). This role is the
+# single firewall owner, so it owns that chain too.
 #
-# Declarative rebuild: the chain is flushed and rebuilt on every run (end state
-# identical each time; no duplicate/clobbered rules). Traffic from Docker bridge
-# networks (container-to-container, e.g. caddy -> conduit:8008) RETURNs early so
-# Docker's own forwarding applies — only host-uplink traffic is classified by port.
+# One source, one rendering: the port classes (group_vars/all/main.yml) are rendered ONCE per IP
+# family into restore-format files, and ONE loader (hermes-docker-user-rules) puts them in the
+# kernel — both this deploy and the boot firewall unit call it, so the two can never disagree.
+# The load is atomic (iptables-restore --noflush replaces only the declared DOCKER-USER chain in
+# one transaction; Docker's chains, UFW and sshd are never touched), which removes the window the
+# old flush-then-append sequence opened on every deploy. Port classes: public (80/443/8443),
+# Tailscale-only TCP, Tailscale-only UDP (adguard-dns 53), and syncplay 8999 (syncplay_allowed_ips).
+# NOTE: 1:1 host:container mappings only — post-DNAT dport == original dport.
 #
-# Port classes (group_vars/all/main.yml): public (80/443/8443), Tailscale-only TCP
-# (3000, conduit 8008, 8642, 9119, beszel 8090, adguard-ui 3001, adguard-dns 53),
-# Tailscale-only UDP (epic 18 #05: adguard-dns 53 — the first UDP restricted
-# service; the mechanism below was TCP-only until this), and syncplay 8999
-# (syncplay_allowed_ips). NOTE: 1:1 host:container mappings only — post-DNAT
-# dport == original dport.
-# The rules are not persisted across reboot; the deployment model restores them
-# by playbook run (Docker recreates the empty chain at daemon start).
-- name: Reset the DOCKER-USER chain (declarative rebuild)
+# Why a boot unit at all: kernel rules are lost at reboot and Docker recreates the chain empty, so
+# the old "restored by playbook run" model left every restricted port unenforced until an operator
+# noticed (found live: chain empty ~23 h after boot). The epic 21 spike showed Docker preserves a
+# pre-populated chain across daemon start and restart, hence Before=docker.service closes the window.
+- name: Ensure the DOCKER-USER firewall directory exists
   tags: [tailscale]
-  ansible.builtin.iptables:
-    chain: DOCKER-USER
-    chain_management: true
-    flush: true
+  ansible.builtin.file:
+    path: "{{ tailscale_docker_user_firewall_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0750'
 
-- name: DOCKER-USER v4 - container networks return to Docker's own rules
+- name: Render the DOCKER-USER rules for each IP family
   tags: [tailscale]
-  ansible.builtin.iptables:
-    chain: DOCKER-USER
-    in_interface: "{{ item }}"
-    jump: RETURN
-    comment: "docker bridge traffic is not host-ingress"
+  ansible.builtin.template:
+    src: "docker-user.rules.{{ item }}.j2"
+    dest: "{{ tailscale_docker_user_firewall_dir }}/docker-user.{{ item }}.rules"
+    owner: root
+    group: root
+    mode: '0640'
+    # A file that does not parse is never installed: were it left on disk, a later boot could load a broken
+    # ruleset (or, with the fail-closed coupling still off, leave Docker up with an empty chain).
+    validate: "{{ 'ip6tables-restore' if item == 'v6' else 'iptables-restore' }} --noflush --test %s"
   loop:
-    - br+
-    - docker+
+    - v4
+    - v6
 
-- name: DOCKER-USER v4 - established/related accepted
+- name: Install the shared DOCKER-USER loader
   tags: [tailscale]
-  ansible.builtin.iptables:
-    chain: DOCKER-USER
-    ctstate: [ESTABLISHED, RELATED]
-    jump: ACCEPT
-    comment: "accept established forwarded flows"
+  ansible.builtin.copy:
+    src: hermes-docker-user-rules
+    dest: "{{ tailscale_docker_user_firewall_loader }}"
+    owner: root
+    group: root
+    mode: '0755'
 
-- name: DOCKER-USER v4 - syncplay allowed IPs
+- name: Install the boot firewall unit
   tags: [tailscale]
-  ansible.builtin.iptables:
-    chain: DOCKER-USER
-    source: "{{ item }}"
-    protocol: tcp
-    destination_port: 8999
-    jump: ACCEPT
-    comment: "syncplay friend access"
-  loop: "{{ syncplay_allowed_ips | default([]) }}"
+  ansible.builtin.template:
+    src: hermes-docker-user-firewall.service.j2
+    dest: /etc/systemd/system/hermes-docker-user-firewall.service
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Reload systemd for the Hermes firewall units
 
-- name: DOCKER-USER v4 - syncplay denied for everyone else
+# Staged rollout (epic 21 spec): the fail-closed coupling — docker.service Requires= the boot
+# unit — ships DISABLED. An untested fail-closed unit shipped by a routine deploy could take the
+# stack down; the attended reboot drill (ticket #06) enables it after the unit has been observed
+# working. Disabling it later removes the drop-in again, so the variable is the single switch.
+- name: Ensure the docker.service drop-in directory exists
   tags: [tailscale]
-  ansible.builtin.iptables:
-    chain: DOCKER-USER
-    protocol: tcp
-    destination_port: 8999
-    jump: DROP
-    comment: "syncplay IP allowlist (empty list = fully blocked)"
+  ansible.builtin.file:
+    path: /etc/systemd/system/docker.service.d
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
 
-- name: DOCKER-USER v4 - restricted ports from Tailscale subnet
+- name: Install the fail-closed coupling drop-in (only when tailscale_docker_user_firewall_fail_closed is true)
   tags: [tailscale]
-  ansible.builtin.iptables:
-    chain: DOCKER-USER
-    source: "{{ tailscale_subnet }}"
-    protocol: tcp
-    destination_port: "{{ item }}"
-    jump: ACCEPT
-    comment: "tailscale-only service"
-  loop: "{{ docker_published_restricted_ports }}"
+  ansible.builtin.template:
+    src: docker-fail-closed.conf.j2
+    dest: /etc/systemd/system/docker.service.d/10-hermes-firewall-fail-closed.conf
+    owner: root
+    group: root
+    mode: '0644'
+  when: tailscale_docker_user_firewall_fail_closed | bool
+  notify: Reload systemd for the Hermes firewall units
 
-- name: DOCKER-USER v4 - restricted ports denied for everyone else
+- name: Remove the fail-closed coupling drop-in while the coupling is disabled
   tags: [tailscale]
-  ansible.builtin.iptables:
-    chain: DOCKER-USER
-    protocol: tcp
-    destination_port: "{{ item }}"
-    jump: DROP
-    comment: "tailscale-only service deny"
-  loop: "{{ docker_published_restricted_ports }}"
+  ansible.builtin.file:
+    path: /etc/systemd/system/docker.service.d/10-hermes-firewall-fail-closed.conf
+    state: absent
+  when: not (tailscale_docker_user_firewall_fail_closed | bool)
+  notify: Reload systemd for the Hermes firewall units
 
-# Epic 18, #05: mirrors the TCP restricted-port pair above, protocol: udp — the
-# first UDP-restricted service (AdGuard's DNS). A separate list/rule pair rather
-# than teaching the existing one a protocol parameter: two protocols is not
-# enough live cases to justify a generic per-protocol mechanism (same reasoning
-# epic 13 already applied to the gateway route schema).
-#
-# `| default([])` here (unlike the established TCP list above, which has never
-# had one): docker_published_restricted_udp_ports is a brand-new variable, so
-# any isolated invocation of this role that doesn't load group_vars/all/main.yml
-# (a bespoke test playbook, a future refactor) would otherwise hard-fail on an
-# undefined var the moment this ticket merged — not a pre-existing, already-
-# accepted constraint the way the TCP list's lack of a default is. Caught in
-# review; don't "fix" this back into matching the TCP list's style.
-- name: DOCKER-USER v4 - restricted UDP ports from Tailscale subnet
+# NOTE: flushing handlers here also runs any handler queued by EARLIER roles in the same play (for example
+# ssh_hardening's sshd restart) at this point rather than at the end of the play. That is safe here — the
+# firewall's SSH allow rules above are already in place — but it is a side effect worth knowing about.
+- name: Apply pending systemd unit changes before enabling the boot unit
   tags: [tailscale]
-  ansible.builtin.iptables:
-    chain: DOCKER-USER
-    source: "{{ tailscale_subnet }}"
-    protocol: udp
-    destination_port: "{{ item }}"
-    jump: ACCEPT
-    comment: "tailscale-only service (udp)"
-  loop: "{{ docker_published_restricted_udp_ports | default([]) }}"
+  ansible.builtin.meta: flush_handlers
 
-- name: DOCKER-USER v4 - restricted UDP ports denied for everyone else
+# A deploy HEALS an unchanged artifact: the original fault was "rendered files unchanged, live
+# chain empty" (after a reboot), so this compares the LIVE chain before and after loading rather
+# than trusting that a file changed or that the boot unit reports itself started. It always loads
+# (atomic, idempotent) and reports "changed" only when the live chain actually differed.
+- name: Load the DOCKER-USER rules atomically (heals a drifted or emptied chain)
   tags: [tailscale]
-  ansible.builtin.iptables:
-    chain: DOCKER-USER
-    protocol: udp
-    destination_port: "{{ item }}"
-    jump: DROP
-    comment: "tailscale-only service deny (udp)"
-  loop: "{{ docker_published_restricted_udp_ports | default([]) }}"
+  ansible.builtin.shell:
+    cmd: |
+      set -eu
+      _before="$({{ tailscale_docker_user_firewall_loader }} status)"
+      {{ tailscale_docker_user_firewall_loader }} apply
+      _after="$({{ tailscale_docker_user_firewall_loader }} status)"
+      if [ "$_before" != "$_after" ]; then echo CHANGED; fi
+    executable: /bin/sh
+  environment:
+    HERMES_FIREWALL_DIR: "{{ tailscale_docker_user_firewall_dir }}"
+  register: tailscale_docker_user_rules_load
+  changed_when: "'CHANGED' in tailscale_docker_user_rules_load.stdout"
+  when: not ansible_check_mode
 
-- name: DOCKER-USER v4 - public ingress ports
+- name: Enable the boot firewall unit and start it so it reports active
   tags: [tailscale]
-  ansible.builtin.iptables:
-    chain: DOCKER-USER
-    protocol: tcp
-    destination_port: "{{ item }}"
-    jump: ACCEPT
-    comment: "public ingress (Caddy)"
-  loop: "{{ docker_published_public_ports }}"
-
-- name: Reset the DOCKER-USER chain for IPv6 (declarative rebuild)
-  tags: [tailscale]
-  ansible.builtin.iptables:
-    chain: DOCKER-USER
-    chain_management: true
-    flush: true
-    ip_version: ipv6
-
-- name: DOCKER-USER v6 - container networks return to Docker's own rules
-  tags: [tailscale]
-  ansible.builtin.iptables:
-    chain: DOCKER-USER
-    ip_version: ipv6
-    in_interface: "{{ item }}"
-    jump: RETURN
-    comment: "docker bridge traffic is not host-ingress"
-  loop:
-    - br+
-    - docker+
-
-- name: DOCKER-USER v6 - established/related accepted
-  tags: [tailscale]
-  ansible.builtin.iptables:
-    chain: DOCKER-USER
-    ip_version: ipv6
-    ctstate: [ESTABLISHED, RELATED]
-    jump: ACCEPT
-    comment: "accept established forwarded flows"
-
-- name: DOCKER-USER v6 - syncplay denied (allowlist is IPv4-only)
-  tags: [tailscale]
-  ansible.builtin.iptables:
-    chain: DOCKER-USER
-    ip_version: ipv6
-    protocol: tcp
-    destination_port: 8999
-    jump: DROP
-    comment: "syncplay allowlist is IPv4-only"
-
-- name: DOCKER-USER v6 - restricted ports from Tailscale ULA
-  tags: [tailscale]
-  ansible.builtin.iptables:
-    chain: DOCKER-USER
-    ip_version: ipv6
-    source: "{{ tailscale_subnet_v6 }}"
-    protocol: tcp
-    destination_port: "{{ item }}"
-    jump: ACCEPT
-    comment: "tailscale-only service"
-  loop: "{{ docker_published_restricted_ports }}"
-
-- name: DOCKER-USER v6 - restricted ports denied for everyone else
-  tags: [tailscale]
-  ansible.builtin.iptables:
-    chain: DOCKER-USER
-    ip_version: ipv6
-    protocol: tcp
-    destination_port: "{{ item }}"
-    jump: DROP
-    comment: "tailscale-only service deny"
-  loop: "{{ docker_published_restricted_ports }}"
-
-# Epic 18, #05: v6 mirror of the v4 restricted-UDP pair above.
-- name: DOCKER-USER v6 - restricted UDP ports from Tailscale ULA
-  tags: [tailscale]
-  ansible.builtin.iptables:
-    chain: DOCKER-USER
-    ip_version: ipv6
-    source: "{{ tailscale_subnet_v6 }}"
-    protocol: udp
-    destination_port: "{{ item }}"
-    jump: ACCEPT
-    comment: "tailscale-only service (udp)"
-  loop: "{{ docker_published_restricted_udp_ports | default([]) }}"
-
-- name: DOCKER-USER v6 - restricted UDP ports denied for everyone else
-  tags: [tailscale]
-  ansible.builtin.iptables:
-    chain: DOCKER-USER
-    ip_version: ipv6
-    protocol: udp
-    destination_port: "{{ item }}"
-    jump: DROP
-    comment: "tailscale-only service deny (udp)"
-  loop: "{{ docker_published_restricted_udp_ports | default([]) }}"
-
-- name: DOCKER-USER v6 - public ingress ports
-  tags: [tailscale]
-  ansible.builtin.iptables:
-    chain: DOCKER-USER
-    ip_version: ipv6
-    protocol: tcp
-    destination_port: "{{ item }}"
-    jump: ACCEPT
-    comment: "public ingress (Caddy)"
-  loop: "{{ docker_published_public_ports }}"
+  ansible.builtin.systemd:
+    name: hermes-docker-user-firewall.service
+    enabled: true
+    state: started
+  when: not ansible_check_mode
 
 - name: Enable UFW
   tags: [tailscale]

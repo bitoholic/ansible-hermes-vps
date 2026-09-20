@@ -22,7 +22,7 @@ fi
 
 ansible-playbook --syntax-check site.yml >/tmp/hermes-syntax.log
 ansible-playbook --syntax-check tests/test_playbook.yml >/tmp/hermes-test-syntax.log
-ansible-lint site.yml tests/test_playbook.yml tests/test_resolver.yml
+ansible-lint site.yml tests/test_playbook.yml tests/test_resolver.yml tests/test_docker_user_rules.yml
 
 # Single-seam contract: only the `secrets` resolver role may read credentials from the
 # environment. Any other `lookup('env', …)` for a secret is a regression against the seam.
@@ -79,6 +79,13 @@ python3 scripts/generate-env.py --check
 # Caddyfile renders the mfa_auth bypass matcher, and the tailscale role defines the ufw allow
 # rules. Live ufw/Tailscale behavior is operator-validated on the VPS (guarded/skipped in CI).
 ./tests/check-tailscale.sh
+
+# Boot-persistent, atomic DOCKER-USER rules + the boot firewall unit (epic 21 ticket #02): asserts on
+# the RENDERED rules' behavior (port classification for both IP families, blast radius limited to the
+# DOCKER-USER chain, byte-stable rendering), the boot unit's ordering, the staged fail-closed coupling,
+# and — when podman and the disposable epic-21 image exist — the shared loader inside that container.
+# Surviving a real reboot / Docker restart is operator-validated in the attended drill (ticket #06).
+./tests/check-docker-user-firewall.sh
 
 # AdGuard DNS-serving (epic 18 ticket #05): the host-level systemd-resolved handover's
 # sequencing contract (must run after the docker stack starts, wait -> drop-in ->

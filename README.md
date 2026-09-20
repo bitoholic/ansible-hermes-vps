@@ -11,6 +11,7 @@ This repository provisions a personal "second brain" + agent stack on a bare Ubu
 | `users` | Creates the dedicated `llm_wiki` system user/group that owns all persistent data |
 | `ssh_hardening` | Disables password auth, disables root login, deploys `AllowUsers` |
 | `common` | Installs base hardening packages, enables unattended-upgrades, configures UFW |
+| `tailscale` | Installs Tailscale and owns the host perimeter: UFW rules and the `DOCKER-USER` chain that enforces the published-port classes (public / tailnet-only / Syncplay allowlist). The chain is loaded atomically from one rendering, by the same loader at deploy time and by a boot firewall unit (see [Firewall persistence](#-firewall-persistence-across-reboots)) |
 | `docker` | Installs Docker Engine + Compose plugin, owns the consolidated `docker-compose.yml` at `/opt/hermes-vps`, and brings up the full stack (Caddy, Authelia, SilverBullet, Conduit, signal-cli, hermes-agent) on the `gateway` and `internal` networks |
 | `authelia` + `silverbullet` | Caddy reverse proxy → Authelia (MFA forward-auth) → SilverBullet wiki, bound to `127.0.0.1` |
 | `gateway` | The single writer of the ingress Caddyfile; renders one site block per entry in `gateway_routes` (`group_vars/all/gateway.yml`), wrapping each in the shared `mfa_auth` snippet unless `mfa: false`. |
@@ -132,6 +133,16 @@ Tracked from the last infrastructure audit. Don't consider this deploy-ready unt
 
 - [ ] **Delegated subagents share the container filesystem.** The single `hermes-agent` container mounts `hermes_home:/opt/data`; `delegate_task` children get isolated git worktrees (`worktree_isolation: true`) but otherwise share the same bind mount, so a child can read the wiki and the agent's `.env`. Filesystem sandboxing per child is out of scope.
 - [x] ~~The GitHub token was embedded directly in the wiki's git remote URL (persists in `.git/config` in plaintext).~~ Closed: the clone now uses a token-less URL and git authenticates via a credential helper / askpass that reads `GITHUB_TOKEN` from the environment (see `roles/backup/files/git-credential-env`). The token value is never written to `.git/config` or any remote URL.
+
+## 🔒 Firewall persistence across reboots
+
+Docker-published ports bypass UFW, so who may reach them is decided by rules in the `DOCKER-USER` chain. Kernel rules are lost at reboot, so (epic 21) the `tailscale` role installs a **boot firewall unit** (`hermes-docker-user-firewall.service`) that loads those rules *before* Docker starts and again on every Docker (re)start. Docker preserves a pre-existing chain, so there is no window in which a published port is live without its rule. Deploys load the very same rendering through the same loader, atomically, and heal a chain that was emptied behind their back (a reboot) even when no file changed.
+
+- **Change a port class** in `group_vars/all/main.yml` (`docker_published_public_ports`, `docker_published_restricted_ports`, `docker_published_restricted_udp_ports`, `syncplay_allowed_ips`) — one edit, both IP families.
+- **Fail-closed coupling (staged):** `tailscale_docker_user_firewall_fail_closed` (default `false`) makes `docker.service` *require* the boot unit so Docker does not start if the rules could not be loaded. It ships disabled (no drop-in is installed) and is enabled by the attended reboot drill once the unit has been observed working. What is *always* live is the unit's own wiring — `Before=`, `PartOf=` and `WantedBy=docker.service` (a `docker.service.wants` link) — so a Docker start pulls the unit in and a Docker restart re-runs the loader; that is not a hard dependency.
+- **`--skip-tags tailscale`** skips *updating* the rules and unit; it never removes an already-installed unit, so a provisioned host stays protected.
+- The unit and loader touch only the `DOCKER-USER` chain — never UFW, the INPUT chain or sshd.
+- **To reload the rules by hand** run `sudo /usr/local/sbin/hermes-docker-user-rules apply` (atomic and idempotent) — or just deploy. Do **not** `systemctl restart hermes-docker-user-firewall`: with the fail-closed coupling on, `docker.service` requires that unit, so restarting it restarts Docker and every container.
 
 ## 📝 Notes
 

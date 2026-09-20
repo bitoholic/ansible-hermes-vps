@@ -1,0 +1,44 @@
+---
+# Render harness for the DOCKER-USER firewall artifacts (epic 21, ticket #02).
+# Renders the very templates the tailscale role deploys — rules for both IP families, the boot
+# firewall unit and the fail-closed docker.service drop-in — into `render_dir`, from the shared
+# group_vars plus per-scenario overrides, so tests/check-docker-user-firewall.sh can assert on
+# WHAT THE RULES DO (port classification) instead of on how Ansible tasks are spelled.
+#
+#   ansible-playbook tests/test_docker_user_rules.yml -e render_dir=/tmp/out [-e '{"syncplay_allowed_ips": []}']
+- name: Render DOCKER-USER firewall artifacts
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars_files:
+    - ../roles/tailscale/defaults/main.yml
+    - ../group_vars/all/main.yml
+  vars:
+    tailscale_role_templates: "{{ playbook_dir }}/../roles/tailscale/templates"
+  tasks:
+    - name: Ensure render directory exists
+      ansible.builtin.file:
+        path: "{{ render_dir }}"
+        state: directory
+        mode: '0755'
+
+    - name: Render the rules for each IP family
+      ansible.builtin.template:
+        src: "{{ tailscale_role_templates }}/docker-user.rules.{{ item }}.j2"
+        dest: "{{ render_dir }}/docker-user.{{ item }}.rules"
+        mode: '0644'
+      loop:
+        - v4
+        - v6
+
+    - name: Render the boot firewall unit
+      ansible.builtin.template:
+        src: "{{ tailscale_role_templates }}/hermes-docker-user-firewall.service.j2"
+        dest: "{{ render_dir }}/hermes-docker-user-firewall.service"
+        mode: '0644'
+
+    - name: Render the fail-closed docker.service drop-in
+      ansible.builtin.template:
+        src: "{{ tailscale_role_templates }}/docker-fail-closed.conf.j2"
+        dest: "{{ render_dir }}/docker-fail-closed.conf"
+        mode: '0644'

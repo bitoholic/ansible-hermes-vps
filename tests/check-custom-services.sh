@@ -91,34 +91,26 @@ if ! grep -A 8 'Allow and rate-limit Syncplay from allowed IPs' roles/tailscale/
 fi
 echo "ufw syncplay per-IP limit OK"
 
-# 3b: DOCKER-USER contract (epic 12 #08) — the real enforcement layer for published
-# ports. Declared in the tailscale role (single firewall owner); live iptables state
-# is operator-validated on the VPS. Pins the declarative contract here.
+# 3b: DOCKER-USER contract (epic 12 #08; boot-persistent and atomic since epic 21 #02) — the real
+# enforcement layer for published ports. Declared in the tailscale role (single firewall owner) as
+# per-family rules TEMPLATES rendered from the shared port-class variables and loaded by one loader.
+# What the rendered rules DO (port classification, syncplay allowlist, blast radius) is asserted on the
+# rendered output in tests/check-docker-user-firewall.sh; this block pins that the classes are still
+# wired to those templates. Live iptables state is operator-validated on the VPS.
 TS_TASKS=roles/tailscale/tasks/main.yml
-if ! grep -q 'chain: DOCKER-USER' "$TS_TASKS"; then
-  echo "FAIL: tailscale role does not manage the DOCKER-USER chain"; exit 1
-fi
-if ! grep -q 'declarative rebuild' "$TS_TASKS"; then
-  echo "FAIL: DOCKER-USER chain is not rebuilt declaratively"; exit 1
-fi
-if ! grep -q 'in_interface: "{{ item }}"' "$TS_TASKS" || ! grep -q 'br+' "$TS_TASKS"; then
-  echo "FAIL: docker bridge traffic must RETURN early (container-to-container flows)"; exit 1
-fi
-if ! grep -q 'destination_port: 8999' "$TS_TASKS"; then
-  echo "FAIL: DOCKER-USER has no 8999 (syncplay) rules"; exit 1
-fi
-if ! grep -q 'syncplay_allowed_ips | default' "$TS_TASKS"; then
-  echo "FAIL: DOCKER-USER syncplay allow rule does not iterate syncplay_allowed_ips"; exit 1
-fi
-if ! grep -q 'destination_port: "{{ item }}"' "$TS_TASKS" || ! grep -q 'docker_published_restricted_ports' "$TS_TASKS"; then
-  echo "FAIL: DOCKER-USER restricted-port rules missing"; exit 1
-fi
-if ! grep -q 'docker_published_public_ports' "$TS_TASKS"; then
-  echo "FAIL: DOCKER-USER public-port rules missing"; exit 1
-fi
-if ! grep -q 'tailscale_subnet_v6' "$TS_TASKS"; then
-  echo "FAIL: DOCKER-USER v6 rules missing (published ports are dual-stack)"; exit 1
-fi
+TPL4=roles/tailscale/templates/docker-user.rules.v4.j2
+TPL6=roles/tailscale/templates/docker-user.rules.v6.j2
+for f in "$TPL4" "$TPL6"; do
+  [[ -f "$f" ]] || { echo "FAIL: missing $f (the DOCKER-USER rules template)"; exit 1; }
+  grep -q 'docker_published_restricted_ports' "$f" || { echo "FAIL: $f does not render the restricted-port class"; exit 1; }
+  grep -q 'docker_published_public_ports' "$f" || { echo "FAIL: $f does not render the public-port class"; exit 1; }
+  grep -q ':DOCKER-USER - \[0:0\]' "$f" || { echo "FAIL: $f does not declare the DOCKER-USER chain (atomic replace)"; exit 1; }
+done
+grep -q 'br+' "$TPL4" || { echo "FAIL: docker bridge traffic must RETURN early (container-to-container flows)"; exit 1; }
+grep -q -- '--dport 8999' "$TPL4" || { echo "FAIL: DOCKER-USER has no 8999 (syncplay) rules"; exit 1; }
+grep -q 'syncplay_allowed_ips | default' "$TPL4" || { echo "FAIL: DOCKER-USER syncplay allow rule does not iterate syncplay_allowed_ips"; exit 1; }
+grep -q 'tailscale_subnet_v6' "$TPL6" || { echo "FAIL: DOCKER-USER v6 rules missing (published ports are dual-stack)"; exit 1; }
+grep -q 'docker-user.rules' "$TS_TASKS" || { echo "FAIL: tailscale role does not deploy the DOCKER-USER rules"; exit 1; }
 if ! grep -q '^docker_published_restricted_ports:' group_vars/all/main.yml || \
    ! grep -q '^docker_published_public_ports:' group_vars/all/main.yml; then
   echo "FAIL: published-port classes not defined in group_vars/all/main.yml"; exit 1

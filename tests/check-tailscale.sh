@@ -8,7 +8,10 @@
 #   3. The tailscale role defines the ufw allow rules (22/80/443 + Tailscale interface) and
 #      default-deny incoming.
 # Live run (guarded by TAILSCALE_LIVE=1): runs the tailscale role twice against the real host
-#   and asserts the second run is fully idempotent (operator-validated on the VPS).
+#   and asserts the second run is fully idempotent, then EMPTIES the DOCKER-USER chain (the state a
+#   reboot leaves, with the rendered rules files unchanged) and asserts a third run heals it
+#   (epic 21 #02; operator-validated on the VPS).
+# The rules' behavior itself is asserted on the rendered output in tests/check-docker-user-firewall.sh.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -62,9 +65,10 @@ echo "tailscale ufw rules OK"
 echo "tailscale access guard OK"
 
 # Live idempotency run — operator-validated on the VPS only.
-# The DOCKER-USER chain is declaratively rebuilt each run (flush + re-add), so
-# tasks report changed every run by design. Idempotency is therefore asserted on
-# the END STATE: `iptables -S DOCKER-USER` must be identical across runs.
+# The DOCKER-USER chain is loaded atomically from the rendered rules on every run (epic 21 #02), so
+# idempotency is asserted on the END STATE: `iptables -S DOCKER-USER` must be identical across runs,
+# and a chain emptied behind the deploy's back (a reboot) must be healed by the next run even though
+# no rendered file changed.
 # The temp playbook lives at the repo root so root group_vars (port classes,
 # subnet constants, allowlist) resolve — a /tmp playbook runs without them.
 if [[ "${TAILSCALE_LIVE:-}" == "1" ]] && command -v ansible-playbook >/dev/null 2>&1; then
@@ -90,6 +94,14 @@ YML
   V6_RUN2="$(ip6tables -S DOCKER-USER 2>&1)"
   if [[ "$V4_RUN1" == "$V4_RUN2" && "$V6_RUN1" == "$V6_RUN2" ]]; then
     echo "tailscale live run OK (DOCKER-USER ruleset identical across runs)"
+    # Heal case: simulate a reboot (chain emptied, files unchanged) and re-run.
+    iptables -F DOCKER-USER; ip6tables -F DOCKER-USER
+    ansible-playbook "$PB" >/dev/null 2>&1 || { echo "FAIL: tailscale role failed on the heal run"; cleanup; exit 1; }
+    if [[ "$(iptables -S DOCKER-USER 2>&1)" == "$V4_RUN1" && "$(ip6tables -S DOCKER-USER 2>&1)" == "$V6_RUN1" ]]; then
+      echo "tailscale live heal OK (an emptied DOCKER-USER chain is restored by a deploy)"
+    else
+      echo "FAIL: a deploy did not heal an emptied DOCKER-USER chain"; cleanup; exit 1
+    fi
   else
     echo "FAIL: DOCKER-USER ruleset drifted between live runs"
     diff <(echo "$V4_RUN1") <(echo "$V4_RUN2") || true

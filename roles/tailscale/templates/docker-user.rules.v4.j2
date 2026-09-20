@@ -1,0 +1,36 @@
+# Managed by Ansible (tailscale role) - do not edit by hand.
+# DOCKER-USER rules, IPv4 (epic 12 #08, made boot-persistent and atomic by epic 21 #02).
+#
+# Loaded by the shared loader with `iptables-restore --noflush`: declaring the chain below
+# replaces ITS contents in one atomic transaction and touches nothing else, so a deploy never
+# leaves the chain half-built or empty (the old flush-then-append sequence did, every run) and
+# Docker's own chains are never disturbed. The same rendering is loaded at boot by the boot
+# firewall unit; the port classes come from group_vars/all/main.yml, the single place to edit.
+#
+# Order matters: bridge and established traffic first, then Syncplay, restricted tailnet-only
+# classes (accept from the tailnet, then drop everyone else), and public ports last.
+*filter
+:DOCKER-USER - [0:0]
+-A DOCKER-USER -i br+ -m comment --comment "docker bridge traffic is not host-ingress" -j RETURN
+-A DOCKER-USER -i docker+ -m comment --comment "docker bridge traffic is not host-ingress" -j RETURN
+-A DOCKER-USER -m conntrack --ctstate RELATED,ESTABLISHED -m comment --comment "accept established forwarded flows" -j ACCEPT
+{% for ip in syncplay_allowed_ips | default([]) %}
+-A DOCKER-USER -s {{ ip }} -p tcp -m tcp --dport 8999 -m comment --comment "syncplay friend access" -j ACCEPT
+{% endfor %}
+-A DOCKER-USER -p tcp -m tcp --dport 8999 -m comment --comment "syncplay IP allowlist (empty list = fully blocked)" -j DROP
+{% for port in docker_published_restricted_ports %}
+-A DOCKER-USER -s {{ tailscale_subnet }} -p tcp -m tcp --dport {{ port }} -m comment --comment "tailscale-only service" -j ACCEPT
+{% endfor %}
+{% for port in docker_published_restricted_ports %}
+-A DOCKER-USER -p tcp -m tcp --dport {{ port }} -m comment --comment "tailscale-only service deny" -j DROP
+{% endfor %}
+{% for port in docker_published_restricted_udp_ports | default([]) %}
+-A DOCKER-USER -s {{ tailscale_subnet }} -p udp -m udp --dport {{ port }} -m comment --comment "tailscale-only service (udp)" -j ACCEPT
+{% endfor %}
+{% for port in docker_published_restricted_udp_ports | default([]) %}
+-A DOCKER-USER -p udp -m udp --dport {{ port }} -m comment --comment "tailscale-only service deny (udp)" -j DROP
+{% endfor %}
+{% for port in docker_published_public_ports %}
+-A DOCKER-USER -p tcp -m tcp --dport {{ port }} -m comment --comment "public ingress (Caddy)" -j ACCEPT
+{% endfor %}
+COMMIT

@@ -1,0 +1,9 @@
+---
+# DOCKER-USER firewall (epic 21 #02). The port classes themselves live in group_vars/all/main.yml.
+tailscale_docker_user_firewall_dir: /etc/hermes-vps/firewall
+tailscale_docker_user_firewall_loader: /usr/local/sbin/hermes-docker-user-rules
+
+# Staged rollout: the fail-closed coupling (docker.service Requires= the boot firewall unit) ships
+# DISABLED so a routine deploy can't put an untested fail-closed unit on production. The attended
+# reboot drill (epic 21 #06) enables it after the unit has been observed working.
+tailscale_docker_user_firewall_fail_closed: false
