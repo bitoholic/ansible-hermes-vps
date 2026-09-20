@@ -15,7 +15,7 @@
 - [ ] Tailscale runs in nftables mode; the tunnel's firewall permits only forwarding from the Tailscale interface into the tunnel, established return traffic, and masquerade out of the tunnel; no IPv6 forwarding is accepted
 - [ ] The return-path routing rule exists for both address families and persists across container recreation per #01
 - [ ] **The server-list update policy #01 decided is implemented** (for example gluetun's periodic updater at the chosen period, or the documented bump cadence with its mechanism)
-- [ ] Tailscale state persists per node, the hostname is `<host>-ws-<name>`, and the node is tagged for auto-approval
+- [ ] Tailscale state persists per node, the hostname is `<prefix>-ws-<name>` using the validated prefix from #02, and the node is tagged for auto-approval
 - [ ] The compose role supports a list-driven fragment declaring several services, generically; the stack start step addresses the rendered service set; existing services are unaffected
 - [ ] Render tests assert all of the above, and the consolidated compose passes validation
 - [ ] Nothing in the role modifies host routing (asserted)

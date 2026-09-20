@@ -8,7 +8,7 @@
 **Status:** ready-for-agent
 
 - [ ] README manual post-deploy steps cover: generating the dedicated Windscribe config, creating the Tailscale tag and auto-approver, creating the key, and approving nodes when no auto-approver exists
-- [ ] **The tailnet access-control rules are documented as required, not optional:** members may use the tagged nodes as exit nodes; the tagged nodes are a source for nothing — with the reason (everything on the VPS trusts every tailnet source, and these are third-party images with elevated network capability)
+- [ ] **The tailnet access-control rules are documented as required, not optional:** members may use the tagged nodes as exit nodes; the tagged nodes are a source for nothing — with the reason (everything on the VPS trusts every tailnet source, and these are third-party images with elevated network capability), and the **safe-rollout procedure**: confirm an alternate path first, save the current policy, preview with the policy test facility, apply, re-verify, roll back on any failure
 - [ ] **Auth-key expiry is documented:** Tailscale auth keys expire (at most 90 days), already-registered nodes keep working because their identity persists, and adding a location or re-registering a node after expiry needs a fresh key (or an OAuth client that mints them); the rotation steps are in the runbook
 - [ ] **A version-bump procedure is documented** for gluetun and Tailscale (which to change, how to validate a bump against the recovery and kill-switch checks, how to roll back), and the server-list update policy is described
 - [ ] Documented: how to switch location on Android, and how to add a location (one list entry)

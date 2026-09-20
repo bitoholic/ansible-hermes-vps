@@ -10,6 +10,7 @@
 - [ ] Required manifest entries exist for the Windscribe credential set (private key, IPv4 address, preshared key) and the exit-node Tailscale auth key; the names-only environment template is regenerated and the sync check passes
 - [ ] An `exit_nodes` list holds a `name`, a Windscribe `region` (a country name) and a `city` per entry, initially London and Warsaw
 - [ ] Schema-driven validation rejects duplicate names, names that are not lowercase letters, digits and hyphens (starting and ending with a letter or digit, at most 20 characters, so `<host>-ws-<name>` is always a valid DNS label), and empty region or city — each with a negative case that fails fast at deploy time with a message naming the offending entry
+- [ ] **The hostname prefix is derived and validated:** a dedicated variable for the `<prefix>` half of each tailnet hostname defaults to the target's first DNS label (the target is in practice a fully-qualified name, and could be an IP address) and is validated like a location name — lowercase letters, digits and hyphens, at most 20 characters, never an IP address — with negative cases (an IP target, an over-long or dotted value) that fail fast at deploy time with a clear message
 - [ ] A missing credential fails fast, naming the secret only
 - [ ] The existing resolver tests pass unchanged
 

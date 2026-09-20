@@ -9,11 +9,11 @@
 
 - [ ] The operator's workstation key and an offline break-glass key are generated (the break-glass private key stored offline, per the runbook), and both public keys are added as recipients
 - [ ] The existing `.env` is imported; the digest-based round-trip verification passes; nothing is printed
-- [ ] The structural guard (#03) is switched from tolerant to mandatory and passes
+- [ ] With the store and the recipient configuration now committed, the structural guard (#03) applies its full checks automatically (no manual switch) and passes; deleting the store while the recipient configuration remains is confirmed to fail it
 - [ ] A first real check-mode deployment through the wrapper succeeds on the operator's workstation, and the operator confirms no sensitive value appeared in its output
 - [ ] Any other workstation is onboarded by generating its own key and having an existing workstation add its public key
 - [ ] The plaintext `.env` is removed from every workstation, **with the limits stated**: overwriting tools are unreliable on SSDs and copy-on-write filesystems, and hand-synced copies may exist elsewhere (backups, sync tools, shell history, other machines) — the operator lists where copies may have gone and rotates any credential whose exposure can't be ruled out
-- [ ] An agent-run deployment through the wrapper is confirmed to complete without any secret in the transcript
+- [ ] An agent-run deployment through the wrapper, under the agent's real sandbox with the wrapper's exemption from #08 in place, is confirmed to complete — decrypting the store and reaching the VPS — without any secret in the transcript
 
 ## Notes
 

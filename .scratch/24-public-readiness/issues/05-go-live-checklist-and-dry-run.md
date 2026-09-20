@@ -8,9 +8,10 @@
 **Status:** ready-for-human
 
 - [ ] The export is dry-run into a scratch private repository; the audit over its full history is green; a fresh clone in an empty directory is audited and is green
+- [ ] The standard lint run passes in the fresh clone of the export
 - [ ] The export is confirmed to contain **neither the encrypted secrets file nor the SOPS recipient configuration**, in the dry run and again on the fresh clone (the audit fails the export if either is present)
 - [ ] Secret scanning and push protection are enabled on the target repository, and the licence file is verified as intended
-- [ ] The commit identity and author name of the dry-run repository are checked to match the ADR's decision
+- [ ] **The operator supplies the public repository's author name and email** (recorded in the ADR's identity field from #04), and the dry-run repository's commits are checked to carry exactly that identity and nothing from the existing history's author names
 - [ ] The operator has read the threat-model note and decides whether to publish
 - [ ] If the operator publishes, they flip visibility manually, and an unauthenticated fetch of the public repository is audited afterwards
 - [ ] Results are recorded; if the operator does not publish, the epic ends at ready-to-flip

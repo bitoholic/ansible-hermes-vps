@@ -7,7 +7,7 @@
 
 **Status:** ready-for-agent
 
-- [ ] The denylist is derived at run time from the decrypted secret set (through epic 22's wrapper in script mode), an optional extra-terms entry held in the same encrypted store — a declared extra under epic 22's name-set rule — and the resolved address of the target host; nothing sensitive is committed to define the check
+- [ ] The denylist is derived at run time from the decrypted secret set (through epic 22's wrapper in script mode), the audit extra-terms entry — the declared extra whose name epic 22 #03 fixed, read from the store, with its accepted format (terms separated by newlines or commas) documented — and the resolved address of the target host; nothing sensitive is committed to define the check, and an absent extra-terms entry is not an error
 - [ ] It scans every tracked file at the current commit, every blob in the full history across all refs, commit messages, and author and committer names and emails; values are matched literally and in JSON-escaped and URL-encoded forms, with the same minimum length as redaction
 - [ ] **History is read binary-safe:** the git-crypt key header is a binary blob that a text-only search silently skips, so blobs are inspected with a method that does not skip binary content
 - [ ] Generic rules cover credential shapes, host addresses in the tailnet CGNAT range (but **not** the range's own CIDR notation, a functional value), git-crypt key-file headers and age secret keys

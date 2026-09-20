@@ -7,11 +7,11 @@
 
 **Status:** ready-for-agent
 
-- [ ] The **name-set rule** is defined once and used by this guard: every *required* manifest name is present in the store; every name present is a manifest name or a *declared extra*; declared extras are listed in exactly one place (initially the target host); optional manifest entries with defaults may be absent
+- [ ] The **name-set rule** is defined once and used by this guard: every *required* manifest name is present in the store; every name present is a manifest name or a *declared extra*; **declared extras are listed in exactly one place — the generator's existing operator-extras list** — and this ticket adds the audit extra-terms entry there (its name fixed here and used by epic 24's audit) alongside the target host; optional manifest entries with defaults may be absent
 - [ ] When the encrypted secrets file is tracked, the guard asserts it carries SOPS metadata, every value is encrypted, and its names satisfy the name-set rule
 - [ ] No other tracked file matches a plaintext-secrets pattern; `.env` is untracked and ignored
 - [ ] Negative fixtures demonstrate each failure: a cleartext value, a missing required name, an undeclared extra name, and a tracked plaintext-secrets-looking file; a fixture proves an absent *optional* name and a declared extra both pass
-- [ ] The guard tolerates the store not yet existing (before the migration) and becomes mandatory once the migration ticket (#09) completes
+- [ ] **The mandatory state is derived, not switched by hand:** when the SOPS recipient configuration is present the store must be present and valid, and a missing store is a failure; when neither is present (before the migration, and in a fresh clone of a public export, which deliberately has neither) the guard applies only its store-independent checks — no plaintext secrets file tracked, `.env` untracked — and the standard lint run passes; the migration ticket (#09) therefore needs no manual flip, and a negative case shows that deleting the store while the recipient configuration remains fails
 - [ ] The guard runs in the standard lint run and needs no key
 
 ## Notes

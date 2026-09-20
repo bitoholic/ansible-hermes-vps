@@ -9,6 +9,7 @@
 
 - [ ] Editing the store opens the decrypted values in the operator's editor with plaintext held only in memory and re-encrypts on save
 - [ ] A check reports names missing (required) or undeclared, per the name-set rule, by name only
+- [ ] The audit extra-terms entry (a declared extra) can be edited and checked like any other name, including being absent
 - [ ] A guided fill prompts for missing required values with hidden input, echoes nothing, and writes no plaintext file
 - [ ] Recipients can be added and removed, and the data key rotated
 - [ ] A new workstation's key can be initialised with safe permissions, printing only its public key

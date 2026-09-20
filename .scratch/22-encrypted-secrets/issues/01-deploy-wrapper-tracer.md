@@ -8,10 +8,11 @@
 **Status:** ready-for-agent
 
 - [ ] A throwaway age key and a fixture encrypted store are generated at test time; no real key or secret is needed to run the test
-- [ ] The wrapper decrypts into the child process's environment only; no plaintext file is created at any point (asserted)
+- [ ] The wrapper decrypts into the child process's environment only; no plaintext file is created at any point — including by Ansible itself — asserted by searching the working tree, the temporary directory and every location Ansible could log or cache to for the fixture values after a run
 - [ ] The `secrets` resolver receives the fixture values, proving the seam's contract works unchanged — the existing resolver test and the single-seam lint check pass untouched
 - [ ] **Vetted invocation shapes only:** the wrapper runs only the repository's own playbook and passes through a fixed set of flags (check mode, diff, tags, skip-tags, limits, verbosity, start-at-task); it **refuses** extra-variable injection, ad-hoc modules, other playbooks and paths outside the repository, each shown by a negative test
 - [ ] **Script mode:** the wrapper can run a registered operator script (an allowlist kept in one place) with the same decrypted environment and the same redaction, so scripts get the target host from the store; an unregistered script is refused
+- [ ] **Ansible's own file writes are pinned off:** the wrapper points Ansible at a pinned configuration, clears inherited `ANSIBLE_*` settings it does not set itself, and refuses to run if the effective configuration would make Ansible write a log file, callback-plugin output or a persistent fact cache to disk; negative tests show each is refused (an inherited environment setting, a setting in the repository's own configuration file, and a callback that logs), because both the configuration file and the environment are editable by an agent and Ansible's own writes bypass the redactor
 - [ ] The target host is read from the store
 - [ ] The store is read from a configurable location that defaults to this repository's, so the working repository and the secrets' home can be split later without a rewrite (tested with the store at a non-default path)
 - [ ] The exit status equals the child's, and output streams live rather than arriving at the end
