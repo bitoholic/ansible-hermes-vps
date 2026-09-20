@@ -13,7 +13,7 @@
 - [ ] The obsolete ignore entry for the dead git-crypt key file is removed or generalized so its identifying name is not left in the tree
 - [ ] The audit's tree scan, run through the wrapper against the real store, is clean, with no allowlist entry that lacks a written reason
 - [ ] All existing tests pass with their fixtures updated
-- [ ] The full-history scan is run and its counts reported in this ticket's notes for the record; history is left untouched (it stays dirty in the private archive by design)
+- [ ] The full-history scan is run and its counts reported in this ticket's notes for the record; history is left untouched (it stays as it is in this private repository, by design)
 
 ## Notes
 

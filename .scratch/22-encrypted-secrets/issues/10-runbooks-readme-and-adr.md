@@ -12,7 +12,7 @@
 - [ ] Runbooks cover: onboarding a workstation (with per-OS tool installation), retiring a workstation, responding to a suspected key leak (remove the recipient, rotate the data key, and rotate the underlying credentials), and using the break-glass key
 - [ ] The documentation states that removing a recipient does not protect secrets already in git history, and the plaintext-removal limits from #09
 - [ ] A short procedure explains how a later epic adds a secret (one manifest entry plus one value, and a declared extra only if it is not a manifest credential)
-- [ ] A new ADR (ADR-0007) records the SOPS + age choice against git-crypt and ansible-vault, the public-repository considerations (a random age key, not a password; visible names are acceptable), Tier 1 and its honest limit, the redaction design and its limits, and **names the deviation from the repository's previously written standards and why**
+- [ ] A new ADR (ADR-0007) records the SOPS + age choice against git-crypt and ansible-vault, the considerations of a private repository that may have a public export (the store stays in this private repository and is never exported; a random age key, not a password; visible names are acceptable), Tier 1 and its honest limit, the redaction design and its limits, and **names the deviation from the repository's previously written standards and why**
 - [ ] The documentation is consistent with the generated environment template and the sync check
 
 ## Notes

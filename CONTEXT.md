@@ -65,4 +65,4 @@ _Avoid_: iptables persistence (that means snapshotting the whole ruleset, which 
 
 **output redaction**: Replacing every decrypted value with a mask in everything a command prints, so deployments can be run and observed (including by an agent) without secrets reaching a terminal transcript.
 
-**public-readiness audit**: The repeatable scan of the working tree, full git history, and commit metadata for the operator's identifying values (derived from the decrypted secrets at run time, never listed in the repo) and for credential-shaped strings. It gates any decision to make the repository public.
+**public-readiness audit**: The repeatable scan of the working tree, full git history, and commit metadata for the operator's identifying values (derived from the decrypted secrets at run time, never listed in the repo) and for credential-shaped strings. It gates publishing any public version of the repository. The encrypted secrets file stays in the private repository and is never part of a public export.

@@ -8,7 +8,7 @@
 **Status:** ready-for-human
 
 - [ ] The export is dry-run into a scratch private repository; the audit over its full history is green; a fresh clone in an empty directory is audited and is green
-- [ ] The committed SOPS configuration's recipient list is reviewed: only keys the operator still controls, including the break-glass key (if the ADR excluded the store from the export, confirm the exported tree contains no store and no store-related recipient list)
+- [ ] The export is confirmed to contain **neither the encrypted secrets file nor the SOPS recipient configuration**, in the dry run and again on the fresh clone (the audit fails the export if either is present)
 - [ ] Secret scanning and push protection are enabled on the target repository, and the licence file is verified as intended
 - [ ] The commit identity and author name of the dry-run repository are checked to match the ADR's decision
 - [ ] The operator has read the threat-model note and decides whether to publish

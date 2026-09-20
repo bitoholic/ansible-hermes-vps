@@ -13,6 +13,7 @@
 - [ ] **Vetted invocation shapes only:** the wrapper runs only the repository's own playbook and passes through a fixed set of flags (check mode, diff, tags, skip-tags, limits, verbosity, start-at-task); it **refuses** extra-variable injection, ad-hoc modules, other playbooks and paths outside the repository, each shown by a negative test
 - [ ] **Script mode:** the wrapper can run a registered operator script (an allowlist kept in one place) with the same decrypted environment and the same redaction, so scripts get the target host from the store; an unregistered script is refused
 - [ ] The target host is read from the store
+- [ ] The store is read from a configurable location that defaults to this repository's, so the working repository and the secrets' home can be split later without a rewrite (tested with the store at a non-default path)
 - [ ] The exit status equals the child's, and output streams live rather than arriving at the end
 - [ ] Preflight verifies: SOPS and age installed; the operator's key present and not group- or world-readable; the encrypted store valid; required manifest names present — failures name missing secrets by name only and exit non-zero before anything runs
 - [ ] A committed SOPS configuration scopes recipients to the store's path and is shaped to accept one key per workstation plus a break-glass key; the key source is configurable so a hardware-backed key can be adopted later without a rewrite
