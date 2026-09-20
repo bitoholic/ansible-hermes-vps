@@ -105,6 +105,15 @@
         path: "{{ docker_compose_dir }}/docker-compose.yml"
       register: rendered_compose
 
+    # Epic 21 ticket #03: every RENDERED service must survive a reboot or a crash. caddy, authelia and
+    # silverbullet had no restart policy and stayed down after a reboot until a manual deploy. The guard
+    # inspects the rendered service set (not the fragment files), so list-driven fragments that render
+    # several services from one template are covered service by service.
+    - name: Every rendered service declares a restart policy that survives a reboot
+      ansible.builtin.command:
+        cmd: "python3 {{ playbook_dir }}/support/assert_restart_policies.py {{ docker_compose_dir }}/docker-compose.yml"
+      changed_when: false
+
     # Epic 19 ticket #01: Caddy now builds from a local Dockerfile (with the
     # Cloudflare DNS plugin compiled in, for ticket #02's DNS-01 challenges)
     # instead of pulling a stock image. Epic 19 ticket #02: 8443, not 8448

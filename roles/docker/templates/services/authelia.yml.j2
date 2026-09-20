@@ -1,6 +1,8 @@
 authelia:
   image: authelia/authelia:latest
   container_name: authelia
+  # Restart policy (epic 21 #03): authelia had none, so after a reboot the front door's MFA provider stayed down.
+  restart: unless-stopped
   user: "{{ wiki_volume_uid }}:{{ wiki_volume_gid }}"
   environment:
     - PUID={{ wiki_volume_uid }}

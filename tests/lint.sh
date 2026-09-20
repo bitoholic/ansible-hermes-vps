@@ -87,6 +87,12 @@ python3 scripts/generate-env.py --check
 # Surviving a real reboot / Docker restart is operator-validated in the attended drill (ticket #06).
 ./tests/check-docker-user-firewall.sh
 
+# Restart policies (epic 21 ticket #03): every RENDERED compose service must survive a reboot or a crash
+# (caddy/authelia/silverbullet stayed down after a reboot). The guard runs over the rendered service set inside
+# tests/test_docker_compose.yml; this script proves the guard has teeth (missing / 'no' / on-failure / a
+# multi-service fragment with one gap / empty all fail) and pins the three services found live.
+./tests/check-restart-policies.sh
+
 # AdGuard DNS-serving (epic 18 ticket #05): the host-level systemd-resolved handover's
 # sequencing contract (must run after the docker stack starts, wait -> drop-in ->
 # repoint -> restart order, kept out of the role's early-phase tasks), the UDP

@@ -8,6 +8,9 @@ caddy:
     context: "{{ docker_compose_dir }}/caddy"
     dockerfile: Dockerfile
   container_name: caddy
+  # Restart policy (epic 21 #03): caddy had none, so after a reboot every public hostname stayed dark until a
+  # manual deploy started it. The guard in tests/support/assert_restart_policies.py covers every rendered service.
+  restart: unless-stopped
   # 8443, not 8448 (epic 19, #02): Cloudflare's proxy allowlist includes 8443,
   # not 8448 — see roles/conduit/defaults/main.yml's own comment for the full
   # rationale. Both matrix and owntracks (the two SNI-sharers on this port)

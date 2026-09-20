@@ -1,6 +1,8 @@
 silverbullet:
   image: "{{ silverbullet_image }}"
   container_name: silverbullet
+  # Restart policy (epic 21 #03): silverbullet had none, so after a reboot the wiki stayed down until a redeploy.
+  restart: unless-stopped
   user: "{{ wiki_volume_uid }}:{{ wiki_volume_gid }}"
   environment:
     - SB_USER={{ secrets.silverbullet_admin_username }}:{{ secrets.silverbullet_admin_password }}
