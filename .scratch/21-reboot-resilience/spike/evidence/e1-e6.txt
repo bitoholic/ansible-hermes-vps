@@ -1,0 +1,75 @@
+
+==== environment (differences from the production VPS are disclosed in the ticket notes) ====
+Docker version 29.8.1, build 4a63305
+iptables v1.8.11 (nf_tables)
+ip6tables v1.8.11 (nf_tables)
+kernel: 7.2.5-200.fc44.x86_64  (VPS runs its own kernel; this is the workstation's)
+storage driver: vfs (nesting)  |  ip_forward at start: 1
+
+==== E1  fresh daemon start, no pre-existing chain: what does Docker create? ====
+  v4 DOCKER-USER after start:
+    -N DOCKER-USER
+  v6 DOCKER-USER after start:
+    -N DOCKER-USER
+  v4 FORWARD hooks:
+    -P FORWARD ACCEPT
+    -A FORWARD -j DOCKER-USER
+    -A FORWARD -j DOCKER-FORWARD
+  v6 FORWARD hooks:
+    -P FORWARD ACCEPT
+    -A FORWARD -j DOCKER-USER
+    -A FORWARD -j DOCKER-FORWARD
+
+==== E2  chain pre-populated BEFORE daemon start (simulates loading rules before docker.service) ====
+  before start (v4):
+    -N DOCKER-USER
+    -A DOCKER-USER -p tcp -m tcp --dport 61001 -m comment --comment spike-marker-A -j DROP
+    -A DOCKER-USER -p tcp -m tcp --dport 61002 -m comment --comment spike-marker-B -j ACCEPT
+  after start (v4):
+    -N DOCKER-USER
+    -A DOCKER-USER -p tcp -m tcp --dport 61001 -m comment --comment spike-marker-A -j DROP
+    -A DOCKER-USER -p tcp -m tcp --dport 61002 -m comment --comment spike-marker-B -j ACCEPT
+  after start (v6):
+    -N DOCKER-USER
+    -A DOCKER-USER -p tcp -m tcp --dport 61001 -m comment --comment spike-marker-A -j DROP
+    -A DOCKER-USER -p tcp -m tcp --dport 61002 -m comment --comment spike-marker-B -j ACCEPT
+  iptables markers surviving daemon START: 2/2
+  ip6tables markers surviving daemon START: 2/2
+  FORWARD jump to DOCKER-USER present (v4)? 1
+
+==== E3  daemon RESTART with populated chain (also: FORWARD jump neither duplicated nor lost) ====
+  after daemon STOP (v4 markers): 2/2
+  iptables markers surviving daemon RESTART: 2/2
+  iptables FORWARD jumps to DOCKER-USER after restart: 1 (want exactly 1)
+  ip6tables markers surviving daemon RESTART: 2/2
+  ip6tables FORWARD jumps to DOCKER-USER after restart: 1 (want exactly 1)
+
+==== E4  network create / container run with populated chain — does Docker modify DOCKER-USER? ====
+  image pulled
+  v4 DOCKER-USER after container start:
+    -N DOCKER-USER
+    -A DOCKER-USER -p tcp -m tcp --dport 61001 -m comment --comment spike-marker-A -j DROP
+    -A DOCKER-USER -p tcp -m tcp --dport 61002 -m comment --comment spike-marker-B -j ACCEPT
+  E4b: daemon RESTART while a restart-policy container is RUNNING (chain must still be intact)
+    iptables markers: 2/2, FORWARD jumps: 1, container running again: 1
+    ip6tables markers: 2/2, FORWARD jumps: 1, container running again: 1
+
+==== E5  iptables-restore --noflush: scope (replaces ONLY the declared chain) and idempotence ====
+  restore ok
+  DOCKER-USER after restore:
+    -N DOCKER-USER
+    -A DOCKER-USER -i br+ -m comment --comment "bridge return" -j RETURN
+    -A DOCKER-USER -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+    -A DOCKER-USER -p tcp -m tcp --dport 8081 -m comment --comment new-rule -j ACCEPT
+  old markers gone (replaced, not appended): 0 (want 0)
+  Docker's own DOCKER chain untouched: yes
+  FORWARD jump intact: 1
+  run twice -> identical chain?
+    identical
+
+==== E6  probe test: is a canary rule ever observed absent while the chain is being replaced? ====
+  300 --noflush replacements: 0 probes found the canary absent (want 0)
+  for contrast, flush-then-append (the CURRENT role behavior):
+  300 flush+append cycles: 300 probes found the canary absent (a count of failed probes, not of cycles)
+
+==== done (E7, the exposure-window measurement, lives in e7-window.sh) ====

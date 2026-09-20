@@ -1,0 +1,63 @@
+
+==== setup: daemon + a restart-policy container publishing 8082 ====
+  container started (restart policy: unless-stopped)
+  DNAT for 8082 present (baseline)
+
+==== running 10 cycles per wiring, alternating A/B (A = load rules right after daemon readiness; B = load before the daemon starts) ====
+
+==== raw per-cycle results (lead_ms > 0: rules landed that long BEFORE the port went live; < 0: the port was live that long WITHOUT its rule) ====
+cycle,wiring,safe,rules_before_port,jump_before_port,lead_ms,detail
+1,A,NO,NO,yes,-876.7,N=y F=y
+1,B,yes,yes,yes,1948.3,N=y F=y
+2,A,NO,NO,yes,-572.3,N=y F=y
+2,B,yes,yes,yes,1942.7,N=y F=y
+3,A,NO,NO,yes,-806.2,N=y F=y
+3,B,yes,yes,yes,1959.7,N=y F=y
+4,A,NO,NO,yes,-845.9,N=y F=y
+4,B,yes,yes,yes,1961.5,N=y F=y
+5,A,NO,NO,yes,-616.9,N=y F=y
+5,B,yes,yes,yes,2014.7,N=y F=y
+6,A,NO,NO,yes,-557.8,N=y F=y
+6,B,yes,yes,yes,1960.7,N=y F=y
+7,A,NO,NO,yes,-1332.4,N=y F=y
+7,B,yes,yes,yes,2027.2,N=y F=y
+8,A,NO,NO,yes,-859.1,N=y F=y
+8,B,yes,yes,yes,2098.4,N=y F=y
+9,A,NO,NO,yes,-712.4,N=y F=y
+9,B,yes,yes,yes,2101.5,N=y F=y
+10,A,NO,NO,yes,-469.6,N=y F=y
+10,B,yes,yes,yes,2056.8,N=y F=y
+
+==== sample: raw event order for cycle 1 ====
+--- cycle 1, wiring A: events in the order the kernel reported them (us since first) ---
+  #  30 + 2197192us  R rule in DOCKER-USER          add rule ip filter DOCKER-USER tcp dport 8082  counter packets 0 bytes 0 drop
+  #  17 +  658048us  J FORWARD->DOCKER-USER jump    insert rule ip filter FORWARD counter packets 0 bytes 0 jump DOCKER-USER
+  #  25 + 1320536us  N nat DNAT                     add rule ip nat DOCKER iifname != "docker0" tcp dport 8082 counter packets 0 bytes 0 dnat to 172.17.0.2:80
+  #  26 + 1352711us  F filter accept                insert rule ip filter DOCKER ip daddr 172.17.0.2 iifname != "docker0" oifname "docker0" tcp dport 80 counter p
+  #  27 + 2107197us  Q API answered (docker info)   READY-RETURNED (docker info answered)
+     dockerd log: time="2026-09-20T16:46:14.807767282Z" level=info msg="Loading containers: start."
+     dockerd log: time="2026-09-20T16:46:14.814834202Z" level=info msg="Restoring containers: start."
+     dockerd log: time="2026-09-20T16:46:16.638116826Z" level=info msg="Loading containers: done."
+     dockerd log: time="2026-09-20T16:46:17.221290426Z" level=info msg="Daemon has completed initialization"
+     dockerd log: time="2026-09-20T16:46:17.221644178Z" level=info msg="API listen on /var/run/docker.sock"
+--- cycle 1, wiring B: events in the order the kernel reported them (us since first) ---
+  #   2 +   51868us  R rule in DOCKER-USER          add rule ip filter DOCKER-USER tcp dport 8082  counter packets 0 bytes 0 drop
+  #  23 + 1392775us  J FORWARD->DOCKER-USER jump    insert rule ip filter FORWARD counter packets 0 bytes 0 jump DOCKER-USER
+  #  31 + 2000213us  N nat DNAT                     add rule ip nat DOCKER iifname != "docker0" tcp dport 8082 counter packets 0 bytes 0 dnat to 172.17.0.2:80
+  #  32 + 2027090us  F filter accept                insert rule ip filter DOCKER ip daddr 172.17.0.2 iifname != "docker0" oifname "docker0" tcp dport 80 counter p
+  #  33 + 2549493us  Q API answered (docker info)   READY-RETURNED (docker info answered)
+     dockerd log: time="2026-09-20T16:46:31.650138048Z" level=info msg="Loading containers: start."
+     dockerd log: time="2026-09-20T16:46:31.657047709Z" level=info msg="Restoring containers: start."
+     dockerd log: time="2026-09-20T16:46:33.416281037Z" level=info msg="Loading containers: done."
+     dockerd log: time="2026-09-20T16:46:33.772025373Z" level=info msg="Daemon has completed initialization"
+     dockerd log: time="2026-09-20T16:46:33.772400184Z" level=info msg="API listen on /var/run/docker.sock"
+
+==== summary ====
+A: rules loaded AFTER daemon readiness (ExecStartPost-style)
+  cycles with data: 10/10   UNSAFE cycles (port live before rule or before FORWARD jump): 10
+  lead over the port (ms): min -1332.4  median -759.3  max -469.6
+B: rules loaded BEFORE the daemon (Before=docker.service)
+  cycles with data: 10/10   UNSAFE cycles (port live before rule or before FORWARD jump): 0
+  lead over the port (ms): min 1942.7  median 1988.1  max 2101.5
+
+==== done ====

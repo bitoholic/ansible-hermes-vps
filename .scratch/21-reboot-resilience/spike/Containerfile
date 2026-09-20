@@ -1,0 +1,16 @@
+# Disposable Docker daemon for epic 21 ticket #01 — matches the production VPS:
+# Ubuntu 26.04 (resolute), docker-ce 29.8.1, iptables v1.8.11 (nf_tables), firewall backend "iptables".
+# Runs rootless-privileged under podman: the container's own network namespace gives it a
+# private DOCKER-USER chain, so nothing here can touch the workstation's or the VPS's firewall.
+FROM docker.io/library/ubuntu:26.04
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update -qq && apt-get install -y -qq --no-install-recommends \
+      ca-certificates curl gnupg iptables nftables iproute2 kmod procps netcat-openbsd python3 >/dev/null
+RUN install -m0755 -d /etc/apt/keyrings \
+ && curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc \
+ && echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu resolute stable" > /etc/apt/sources.list.d/docker.list \
+ && apt-get update -qq \
+ && apt-get install -y -qq --no-install-recommends \
+      docker-ce=5:29.8.1-1~ubuntu.26.04~resolute \
+      docker-ce-cli=5:29.8.1-1~ubuntu.26.04~resolute \
+      containerd.io=2.3.5-1~ubuntu.26.04~resolute >/dev/null
