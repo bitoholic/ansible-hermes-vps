@@ -1,0 +1,541 @@
+#!/usr/bin/env python3
+"""The deploy wrapper: the only supported way to run Ansible against the VPS.
+
+    scripts/deploy [FLAGS]                    run this repository's site.yml
+    scripts/deploy --script NAME [ARG ...]    run a registered operator script (scripts/registered-scripts.conf)
+
+It decrypts the SOPS + age store into the child process's ENVIRONMENT only (never a file), runs the child,
+streams its output live through the redactor (scripts/hermes_redact.py), and returns the child's exit status.
+
+Vetted invocation shapes only — this is deliberate. The child receives every decrypted secret in its
+environment, so a wrapper that forwarded arbitrary arguments would be a general way to run arbitrary code with
+those secrets (and to defeat redaction by re-encoding a value). Therefore:
+  * playbook mode runs ONLY this repository's site.yml, with a fixed set of pass-through flags:
+    --check/-C  --diff/-D  --tags/-t  --skip-tags  --limit/-l  --start-at-task  -v..-vvvvvv
+    and REFUSES extra variables, ad-hoc modules, inventories, connections, other playbooks and anything else;
+  * script mode runs ONLY scripts listed in scripts/registered-scripts.conf.
+
+Ansible's own file writes bypass any redactor, so the wrapper also pins Ansible's configuration: it refuses to
+run when the effective configuration would make Ansible write a log file, callback output or a persistent
+fact cache to disk, and it puts Ansible's local temp directory on a private, wrapper-owned directory that is
+removed when the run ends.
+
+Exit status: the child's own status; 64 = the invocation was refused; 78 = preflight / configuration failure.
+
+What this does NOT protect against (documented Tier 1 limit): someone who can edit this wrapper, a role or the
+playbook and then run it. See docs and ADR-0007.
+
+Configuration (optional): HERMES_SECRETS_STORE (store path), HERMES_SECRETS_KEY_FILE (age identity file);
+SOPS_AGE_KEY_CMD is honoured for a hardware-backed key (Tier 2) with no change here.
+"""
+import os
+import sys
+
+# Python puts this script's directory FIRST on sys.path. This process holds the decrypted values, so a file added to
+# scripts/ (json.py, tempfile.py, ...) must not be able to shadow the standard library: move the directory to the END,
+# where the hermes_* modules are still found but nothing else can be overridden — and never write bytecode there.
+_HERE = os.path.dirname(os.path.realpath(__file__))
+sys.dont_write_bytecode = True
+sys.path[:] = [p for p in sys.path if os.path.realpath(p or os.getcwd()) != _HERE]
+sys.path.append(_HERE)
+
+import json  # noqa: E402
+import re  # noqa: E402
+import shutil  # noqa: E402
+import signal  # noqa: E402
+import subprocess  # noqa: E402
+import tempfile  # noqa: E402
+import threading  # noqa: E402
+import time  # noqa: E402
+import configparser  # noqa: E402
+
+import hermes_redact  # noqa: E402
+import hermes_secrets as hs  # noqa: E402
+
+EX_REFUSED = 64
+EX_CONFIG = 78
+
+PLAYBOOK = "site.yml"
+
+# Ansible settings that would make Ansible write output the redactor never sees.
+# Callbacks are allowlisted by ansible.builtin name ONLY: a name from any other collection (ansible.posix.*,
+# community.general.*) can be shadowed by a collection placed next to the playbook, and would then run repository code.
+ALLOWED_STDOUT_CALLBACKS = {
+    "default", "ansible.builtin.default", "minimal", "ansible.builtin.minimal", "oneline", "ansible.builtin.oneline",
+}
+ALLOWED_ENABLED_CALLBACKS = {"timer", "ansible.builtin.timer"}   # notification callbacks that only print
+# Directories Ansible auto-loads code from when they sit next to the playbook or inside a role. Any of them in the
+# tree runs repository code inside the process that holds the decrypted environment without a role or playbook edit.
+PLUGIN_DIR_NAMES = {
+    "callback_plugins", "vars_plugins", "action_plugins", "filter_plugins", "lookup_plugins", "connection_plugins", "shell_plugins",
+    "strategy_plugins", "inventory_plugins", "cache_plugins", "test_plugins", "become_plugins", "terminal_plugins",
+    "httpapi_plugins", "netconf_plugins", "cliconf_plugins", "doc_fragments", "library", "module_utils",
+    "collections", "ansible_collections",
+}
+ALLOWED_FACT_CACHE = {"memory", "ansible.builtin.memory"}
+# Inherited ANSIBLE_* variables that are refused outright (rather than merely cleared): each one is an attempt to
+# make Ansible write to disk or load a plugin from outside the pinned configuration.
+REFUSED_ENV_HINTS = ("LOG_PATH", "CACHE", "FACT_CACHING", "CALLBACK", "LOCAL_TEMP", "CONFIG")
+
+VERBOSITY_RE = re.compile(r"^-v{1,6}$")
+TAGS_RE = re.compile(r"^[A-Za-z0-9_.,-]+$")
+LIMIT_RE = re.compile(r"^[A-Za-z0-9_.,:*!&-]+$")
+HOST_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]*$")
+SCRIPT_ARG_RE = re.compile(r"^[A-Za-z0-9_.:/@=,+-]*$")
+
+
+class Refused(Exception):
+    """The invocation is not one of the vetted shapes."""
+
+
+# ---------------------------------------------------------------------------------------------
+# Argument policy
+# ---------------------------------------------------------------------------------------------
+def parse_playbook_args(argv):
+    """Return the Ansible flags to pass through, or raise Refused."""
+    out = []
+    i = 0
+    value_flags = {
+        "--tags": ("--tags", TAGS_RE), "-t": ("--tags", TAGS_RE),
+        "--skip-tags": ("--skip-tags", TAGS_RE),
+        "--limit": ("--limit", LIMIT_RE), "-l": ("--limit", LIMIT_RE),
+        "--start-at-task": ("--start-at-task", None),
+    }
+    while i < len(argv):
+        arg = argv[i]
+        if arg in ("--check", "-C"):
+            out.append("--check")
+        elif arg in ("--diff", "-D"):
+            out.append("--diff")
+        elif VERBOSITY_RE.fullmatch(arg):
+            out.append(arg)
+        else:
+            flag, sep, inline = arg.partition("=")
+            if flag in value_flags:
+                canonical, pattern = value_flags[flag]
+                if sep:
+                    value = inline
+                else:
+                    i += 1
+                    if i >= len(argv):
+                        raise Refused("%s needs a value" % flag)
+                    value = argv[i]
+                if pattern is not None:
+                    if value.startswith("-") or not pattern.fullmatch(value):
+                        raise Refused("%s: value %r is not an accepted shape" % (flag, value))
+                else:  # --start-at-task: a task name
+                    if (not value or value.startswith("-") or len(value) > 200
+                            or any(ord(c) < 32 for c in value)):
+                        raise Refused("--start-at-task: value is not an accepted task name")
+                out += [canonical, value]
+            elif arg.startswith("-"):
+                raise Refused("%r is not a vetted flag (allowed: --check --diff --tags --skip-tags --limit "
+                              "--start-at-task -v); extra variables, ad-hoc modules and other options are refused" % flag)
+            else:
+                raise Refused("%r: only this repository's %s can be run (other playbooks and paths are refused)"
+                              % (arg, PLAYBOOK))
+        i += 1
+    return out
+
+
+def parse_script_args(argv, registry):
+    """Return (script relative path, args) for `--script NAME [ARG ...]`, or raise Refused."""
+    if not argv:
+        raise Refused("--script needs the name of a registered script")
+    name = argv[0]
+    if name not in registry:
+        known = ", ".join(sorted(registry)) or "(none registered)"
+        raise Refused("%r is not a registered script (registered: %s)" % (name, known))
+    args = argv[1:]
+    for a in args:
+        if not SCRIPT_ARG_RE.fullmatch(a):
+            raise Refused("script argument %r contains characters that are not accepted" % a)
+    return registry[name], args
+
+
+# ---------------------------------------------------------------------------------------------
+# Environment and Ansible configuration pinning
+# ---------------------------------------------------------------------------------------------
+def base_environment(environ):
+    """The inherited environment with Ansible's settings and the key source removed.
+
+    Returns (env, cleared_names). An inherited ANSIBLE_* setting that could make Ansible write to disk
+    is refused rather than silently cleared (raise Refused).
+    """
+    env, cleared = {}, []
+    for name, value in environ.items():
+        if name.startswith(("ANSIBLE_", "_ANSIBLE_")):
+            if any(h in name for h in REFUSED_ENV_HINTS):
+                raise Refused("the inherited environment sets %s, which could make Ansible write output "
+                              "outside the redactor's sight or load code outside the pinned configuration; unset it" % name)
+            cleared.append(name)
+            continue
+        if name in (hs.ENV_KEY_FILE, hs.ENV_KEY_CMD, "SOPS_AGE_KEY_FILE", "SOPS_AGE_KEY", hs.ENV_STORE):
+            continue  # the key source and store location are for the wrapper, not the playbook
+        env[name] = value
+    return env, sorted(cleared)
+
+
+# The pinned ansible.cfg is parsed DIRECTLY and only an allowlist of sections and keys is accepted. A denylist over
+# `ansible-config dump` cannot see everything (plugin-level options such as [ssh_connection] ssh_executable are not in
+# that dump at all) and a config file can load or execute code (vars_plugins, vault_password_file, *_executable,
+# library, a roles_path outside the repository ...). What the real ansible.cfg uses is what is allowed.
+CFG_ALLOWED = {
+    "defaults": {"inventory", "roles_path", "collections_paths", "collections_path", "retry_files_enabled",
+                 "stdout_callback", "callbacks_enabled", "deprecation_warnings", "host_key_checking", "forks",
+                 "timeout", "gathering", "nocows", "display_skipped_hosts"},
+    "privilege_escalation": {"become", "become_method", "become_user", "become_ask_pass"},
+}
+# Search paths are pinned EXACTLY, not "anywhere inside the repository": any other in-repo directory (for example under
+# .scratch, which the tree walk skips) could hold roles or collections that shadow the real ones and run repository code.
+CFG_PATH_VALUES = {
+    "roles_path": {"./roles", "roles"},
+    "collections_paths": {"~/.ansible/collections", "/usr/share/ansible/collections"},
+    "collections_path": {"~/.ansible/collections", "/usr/share/ansible/collections"},
+}
+
+
+def cfg_allowlist_problems(root):
+    """Problems with the repository's ansible.cfg: it must be a regular, readable file; any section/key not on the
+    allowlist, and any search path other than the pinned values, is refused. Fails closed: if the file is missing,
+    is not a regular file (Ansible would read <dir>/ansible.cfg) or cannot be read, Ansible would fall back to other
+    configuration files (~/.ansible.cfg, /etc/ansible/ansible.cfg) that this check never saw."""
+    path = os.path.join(root, "ansible.cfg")
+    if not os.path.isfile(path):
+        return ["ansible.cfg is missing or is not a regular file (Ansible would then read other configuration)"]
+    parser = configparser.RawConfigParser(strict=False)
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            parser.read_file(fh)
+    except (configparser.Error, OSError, UnicodeError) as exc:
+        return ["ansible.cfg cannot be read or parsed (%s)" % type(exc).__name__]
+    problems = []
+    for section in parser.sections():
+        allowed = CFG_ALLOWED.get(section)
+        if allowed is None:
+            problems.append("ansible.cfg has a [%s] section, which is not on the allowlist" % section)
+            continue
+        for key, value in parser.items(section):
+            if key not in allowed:
+                problems.append("ansible.cfg sets %s in [%s], which is not on the allowlist (it can load or run code, "
+                                "or write output the redactor never sees)" % (key, section))
+            elif key in CFG_PATH_VALUES:
+                for entry in [e.strip() for e in value.split(":") if e.strip()]:
+                    if entry not in CFG_PATH_VALUES[key]:
+                        problems.append("ansible.cfg %s entry %r is not one of the pinned locations (%s)"
+                                        % (key, entry, ", ".join(sorted(CFG_PATH_VALUES[key]))))
+    return problems
+
+
+def ansible_tool(name):
+    """Resolve an Ansible tool from the same directory as ansible-playbook, so the configuration we inspect is the
+    configuration of the Ansible that will run (two installs on PATH could otherwise differ)."""
+    pb = shutil.which("ansible-playbook")
+    if pb:
+        sibling = os.path.join(os.path.dirname(os.path.realpath(pb)), name)
+        if os.path.exists(sibling):
+            return sibling
+        sibling = os.path.join(os.path.dirname(pb), name)
+        if os.path.exists(sibling):
+            return sibling
+    return shutil.which(name) or name
+
+
+def effective_collections_path(root, env):
+    """The collections search path Ansible would use with this environment (before any ANSIBLE_HOME pin).
+
+    ANSIBLE_HOME is pinned to an empty directory (so no user plugin of any type auto-loads), but the default
+    collections path is derived from it; without pinning the collections path to its previous value, a
+    workstation with galaxy-installed collections in ~/.ansible/collections would lose them.
+    """
+    try:
+        proc = subprocess.run([ansible_tool("ansible-config"), "dump", "--format", "json"], cwd=root, env=env,
+                              capture_output=True, text=True, encoding="utf-8")
+        for entry in json.loads(proc.stdout):
+            if entry.get("name") == "COLLECTIONS_PATHS" and entry.get("value"):
+                value = entry["value"]
+                return ":".join(str(v) for v in value) if isinstance(value, list) else str(value)
+    except (OSError, ValueError):
+        pass
+    return None
+
+
+def effective_config_problems(root, env, pins):
+    """Inspect the configuration Ansible would actually use and name every setting that writes to disk.
+
+    `pins` (a dict) is filled with the VALIDATED callback settings, which the caller then puts in the environment
+    (env beats the config file), so what runs is exactly what was checked.
+    """
+    problems = cfg_allowlist_problems(root)
+    pins.update({"ANSIBLE_STDOUT_CALLBACK": "default"})   # ANSIBLE_CALLBACKS_ENABLED only if the config sets it (empty is invalid)
+    for dirpath, dirnames, _files in os.walk(root):
+        dirnames[:] = [d for d in dirnames if d not in (".git", ".scratch", ".ansible", "node_modules")]
+        for name in sorted(PLUGIN_DIR_NAMES.intersection(dirnames) | PLUGIN_DIR_NAMES.intersection(_files)):
+            # (a directory, a symlink to one — os.walk lists but never visits those — or a file of that name)
+            problems.append("a %s entry exists in %s (Ansible auto-loads code from it into the process that holds the "
+                            "decrypted environment)" % (name, os.path.relpath(dirpath, root) if dirpath != root else "."))
+
+    try:
+        proc = subprocess.run([ansible_tool("ansible-config"), "dump", "--only-changed", "--format", "json"],
+                              cwd=root, env=env, capture_output=True, text=True, encoding="utf-8")
+        entries = json.loads(proc.stdout)
+    except (OSError, ValueError) as exc:
+        return problems + ["cannot inspect the effective Ansible configuration (%s)" % type(exc).__name__]
+    if proc.returncode != 0:
+        detail = (proc.stderr or "").strip().splitlines()[-1:] or ["no detail"]
+        return problems + ["cannot inspect the effective Ansible configuration (ansible-config failed: %s)" % detail[0][:200]]
+
+    def as_list(value):
+        if isinstance(value, list):
+            return [str(v) for v in value]
+        return [p.strip() for p in str(value).split(",") if p.strip()]
+
+    for entry in entries:
+        name, value = entry.get("name"), entry.get("value")
+        if name is None:
+            continue
+        if name == "DEFAULT_LOG_PATH" and value:
+            problems.append("the Ansible configuration sets a log file (log_path): it would hold task output the redactor never sees")
+        elif name == "CACHE_PLUGIN" and str(value) not in ALLOWED_FACT_CACHE:
+            problems.append("the Ansible configuration enables a persistent fact cache (%s)" % value)
+        elif name in ("CALLBACKS_ENABLED", "DEFAULT_CALLBACK_WHITELIST"):
+            bad = [c for c in as_list(value) if c not in ALLOWED_ENABLED_CALLBACKS]
+            if bad:
+                problems.append("the Ansible configuration enables callback(s) that are not on the print-only allowlist "
+                                "(ansible.builtin names only): " + ", ".join(bad))
+            else:
+                pins["ANSIBLE_CALLBACKS_ENABLED"] = ",".join(as_list(value))
+        elif name == "DEFAULT_STDOUT_CALLBACK" and str(value) not in ALLOWED_STDOUT_CALLBACKS:
+            problems.append("the Ansible configuration selects stdout callback %r, which is not on the allowlist" % value)
+        elif name == "DEFAULT_STDOUT_CALLBACK":
+            pins["ANSIBLE_STDOUT_CALLBACK"] = str(value)
+        elif name == "DEFAULT_CALLBACK_PLUGIN_PATH" and value:
+            problems.append("the Ansible configuration adds a callback plugin path")
+    return problems
+
+
+# ---------------------------------------------------------------------------------------------
+# Running the child with live, redacted output
+# ---------------------------------------------------------------------------------------------
+def pump(fd, sink, redactor):
+    """Copy child output to `sink` through the redactor, live. If the consumer goes away (e.g. `| head`)
+    keep draining and discarding, so the child never blocks on a full pipe."""
+    broken = False
+
+    def write(data):
+        nonlocal broken
+        if broken or not data:
+            return
+        try:
+            sink.write(data)
+            sink.flush()
+        except (BrokenPipeError, ValueError, OSError):
+            broken = True
+
+    failed = False
+    while True:
+        chunk = os.read(fd, 4096)
+        if not chunk:
+            break
+        if failed:
+            continue      # keep draining so the child never blocks; nothing more is printed
+        try:
+            write(redactor.feed(chunk))
+        except Exception:
+            failed = True
+            write(b"deploy: output redaction failed; the rest of this stream is withheld\n")
+    if not failed:
+        try:
+            write(redactor.finish())
+        except Exception:
+            write(b"deploy: output redaction failed; the tail of this stream is withheld\n")
+
+
+def _sink(stream):
+    """The binary side of stdout/stderr, or /dev/null if the caller closed it (checked BEFORE the child starts)."""
+    buffer = getattr(stream, "buffer", None) if stream is not None else None
+    return buffer if buffer is not None else open(os.devnull, "wb")
+
+
+def run_child(cmd, cwd, env, secret_values):
+    out_sink, err_sink = _sink(sys.stdout), _sink(sys.stderr)
+    proc = None
+
+    def forward(signum, _frame):
+        if proc is None:                      # arrived before the child existed: stop cleanly (scratch is removed)
+            raise SystemExit(128 + signum)
+        try:
+            proc.send_signal(signum)
+        except OSError:
+            pass
+
+    # SIGINT is not forwarded: a terminal's ^C already reaches the child (same process group), and forwarding
+    # it again would deliver it twice. TERM/HUP/QUIT are forwarded so the child stops and the scratch directory
+    # is removed; SIGKILL cannot be handled (a leftover scratch directory then holds only what Ansible had in
+    # flight, and is in the per-user runtime directory).
+    old = {s: signal.signal(s, forward) for s in (signal.SIGTERM, signal.SIGHUP, signal.SIGQUIT)}
+    try:
+        proc = subprocess.Popen(cmd, cwd=cwd, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    except BaseException:
+        for s, handler in old.items():
+            signal.signal(s, handler)
+        raise
+    threads = [
+        threading.Thread(target=pump, daemon=True,
+                         args=(proc.stdout.fileno(), out_sink, hermes_redact.StreamRedactor(secret_values))),
+        threading.Thread(target=pump, daemon=True,
+                         args=(proc.stderr.fileno(), err_sink, hermes_redact.StreamRedactor(secret_values))),
+    ]
+    for t in threads:
+        t.start()
+    try:
+        while True:
+            try:
+                status = proc.wait()
+                break
+            except KeyboardInterrupt:
+                continue   # ^C also reaches the child (same process group); keep waiting so we report its status
+    finally:
+        # A grandchild that inherited the pipes can keep them open after the child has exited; do not wait forever.
+        deadline = time.monotonic() + 5
+        for t in threads:
+            t.join(timeout=max(0.0, deadline - time.monotonic()))
+        for s, handler in old.items():
+            signal.signal(s, handler)
+    return 128 - status if status < 0 else status
+
+
+MAX_SCRATCH_PARENT = 45   # ssh control sockets: <dir>/<10 hex>+<17> must stay under the 108-byte unix socket limit
+
+
+def private_scratch():
+    """A 0700 directory for Ansible's local temp and connection sockets, removed when the run ends.
+
+    Prefers the per-user runtime directory (a tmpfs), then /dev/shm, so rendered content never touches persistent
+    storage — but only a parent whose path is short enough for ssh's control-socket path (a longer one would
+    make every deployment fail); /tmp is the last resort.
+    """
+    parent = None
+    for candidate in (os.environ.get("XDG_RUNTIME_DIR"), "/dev/shm", "/tmp"):
+        if (candidate and len(candidate) <= MAX_SCRATCH_PARENT and os.path.isdir(candidate)
+                and os.access(candidate, os.W_OK)):
+            parent = candidate
+            break
+    path = tempfile.mkdtemp(prefix="hermes-deploy-", dir=parent)
+    os.chmod(path, 0o700)
+    for sub in ("tmp", "cp", "home", "no-callbacks"):
+        os.makedirs(os.path.join(path, sub), mode=0o700)
+    return path
+
+
+# ---------------------------------------------------------------------------------------------
+def main(argv):
+    root = hs.REPO_ROOT
+    if argv and argv[0] in ("-h", "--help"):
+        print(__doc__)
+        return 0
+
+    try:
+        registry = hs.load_registry(root)
+        if argv and argv[0] == "--script":
+            script, script_args = parse_script_args(argv[1:], registry)
+            mode = "script"
+        else:
+            playbook_flags = parse_playbook_args(argv)
+            mode = "playbook"
+    except Refused as exc:
+        print("deploy: refused: %s" % exc, file=sys.stderr)
+        return EX_REFUSED
+    except hs.SecretsError as exc:
+        print("deploy: %s" % exc, file=sys.stderr)
+        return EX_CONFIG
+
+    if os.path.exists(os.path.join(root, ".env")):
+        print("deploy: warning: a plaintext .env exists in the repository; the wrapper ignores it. "
+              "Remove it once the encrypted store is in use.", file=sys.stderr)
+
+    if os.environ.get(hs.ENV_KEY_CMD):
+        print("deploy: note: the age key comes from SOPS_AGE_KEY_CMD (%s)"
+              % os.path.basename((os.environ[hs.ENV_KEY_CMD].split() or ["?"])[0]), file=sys.stderr)
+    values, problems = hs.preflight(root)
+    if problems:
+        for p in problems:
+            print("deploy: preflight: %s" % p, file=sys.stderr)
+        return EX_CONFIG
+
+    host = values.get("TARGET_HOST", "")
+    if not HOST_RE.fullmatch(host):
+        print("deploy: preflight: TARGET_HOST in the store is not a plain hostname or address", file=sys.stderr)
+        return EX_CONFIG
+
+    try:
+        env, cleared = base_environment(os.environ)
+    except Refused as exc:
+        print("deploy: refused: %s" % exc, file=sys.stderr)
+        return EX_REFUSED
+    if cleared:
+        print("deploy: note: ignoring inherited Ansible settings (names only): " + ", ".join(cleared), file=sys.stderr)
+
+    scratch = None
+    try:
+        if mode == "playbook":
+            if not os.path.isfile(os.path.join(root, PLAYBOOK)):
+                print("deploy: preflight: %s not found in %s" % (PLAYBOOK, root), file=sys.stderr)
+                return EX_CONFIG
+            env["ANSIBLE_CONFIG"] = os.path.join(root, "ansible.cfg")
+            pins = {}
+            cfg_problems = effective_config_problems(root, env, pins)   # inspected WITHOUT the secrets in the environment
+            if cfg_problems:
+                for p in cfg_problems:
+                    print("deploy: refused: %s" % p, file=sys.stderr)
+                return EX_REFUSED
+            collections_path = effective_collections_path(root, env)
+            if not collections_path:
+                print("deploy: refused: cannot determine Ansible's collections path (needed to pin the environment)", file=sys.stderr)
+                return EX_REFUSED
+            scratch = private_scratch()
+            # Pinned through the environment (which beats ansible.cfg) rather than only checked for, so a setting we
+            # did not think of cannot re-enable a write: Ansible's local temp and control sockets live in the scratch
+            # directory; ANSIBLE_HOME points at an empty directory so no plugin of ANY type is auto-loaded from the
+            # user's ~/.ansible (a callback there could log task results); callback plugins are pinned to an empty
+            # directory; retry files (which would hold the target host) are off.
+            env["ANSIBLE_LOCAL_TEMP"] = os.path.join(scratch, "tmp")
+            env["ANSIBLE_SSH_CONTROL_PATH_DIR"] = os.path.join(scratch, "cp")
+            env.update(pins)                                            # the validated callback settings, pinned
+            env["ANSIBLE_HOME"] = os.path.join(scratch, "home")
+            env["ANSIBLE_COLLECTIONS_PATH"] = collections_path      # what it was before ANSIBLE_HOME moved
+            env["TMPDIR"] = os.path.join(scratch, "tmp")
+            env["ANSIBLE_CALLBACK_PLUGINS"] = os.path.join(scratch, "no-callbacks")
+            env["ANSIBLE_RETRY_FILES_ENABLED"] = "false"
+            # The target host is passed as a one-host inventory argument (ANSIBLE_INVENTORY does not take the
+            # `host,` form). It is a hostname, not a credential, but it is visible in the process list to local
+            # users — documented; every secret VALUE stays out of the arguments.
+            cmd = [ansible_tool("ansible-playbook"), "-i", host + ",", PLAYBOOK] + playbook_flags
+        else:
+            path = os.path.join(root, script)
+            if not os.path.realpath(path).startswith(os.path.realpath(root) + os.sep):
+                print("deploy: refused: registered script %s resolves outside the repository" % script, file=sys.stderr)
+                return EX_REFUSED
+            if not os.path.isfile(path):
+                print("deploy: refused: registered script %s is not present in this checkout" % script, file=sys.stderr)
+                return EX_REFUSED
+            if not os.access(path, os.X_OK):
+                print("deploy: refused: registered script %s is not executable" % script, file=sys.stderr)
+                return EX_REFUSED
+            cmd = [path] + script_args
+
+        env.update(values)
+        env["PYTHONUNBUFFERED"] = "1"
+        # Redaction (ticket #02) masks every value of at least the minimum length in the output streams.
+        try:
+            return run_child(cmd, root, env, list(values.values()))
+        except OSError as exc:
+            print("deploy: cannot start %s: %s" % (os.path.basename(cmd[0]), exc.strerror or type(exc).__name__), file=sys.stderr)
+            return EX_CONFIG
+    finally:
+        if scratch:
+            shutil.rmtree(scratch, ignore_errors=True)
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

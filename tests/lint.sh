@@ -20,6 +20,16 @@ if ! command -v ansible-lint >/dev/null 2>&1; then
   exit 1
 fi
 
+# SOPS and age (epic 22) are required like ansible-lint: the encrypted-secrets tests must run, never skip
+# silently. Install: age from your distribution; sops from https://github.com/getsops/sops/releases
+# (see the onboarding runbook in the README).
+for tool in sops age age-keygen; do
+  if ! command -v "$tool" >/dev/null 2>&1; then
+    echo "$tool is not installed (required by the encrypted-secrets tests; install age and sops, see the README's onboarding section)" >&2
+    exit 1
+  fi
+done
+
 ansible-playbook --syntax-check site.yml >/tmp/hermes-syntax.log
 ansible-playbook --syntax-check tests/test_playbook.yml >/tmp/hermes-test-syntax.log
 ansible-lint site.yml tests/test_playbook.yml tests/test_resolver.yml tests/test_docker_user_rules.yml tests/test_boot_ordering.yml
@@ -182,3 +192,8 @@ echo "role skip-tags guard OK"
 # INCONCLUSIVE - never PASS - for anything it cannot support. Exercised against a fake ssh; the real VPS
 # check is operator-run (scripts/verify-live.sh, drill in #06).
 ./tests/check-live-verification.sh
+
+# Deploy wrapper (epic 22 ticket #01): decrypts the SOPS + age store into the child's environment only, runs only
+# vetted invocation shapes, pins Ansible's own file writes off, streams live and returns the child's status. Run as
+# a black box against a fixture tree with a throwaway key (no real key or secret is ever needed).
+./tests/check-deploy-wrapper.sh
