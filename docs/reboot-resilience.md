@@ -2,7 +2,7 @@
 
 How the VPS comes back after a reboot (or a Docker restart) without anyone re-running the playbook, what
 each part depends on, and the bounds the [reboot drill](#reboot-drill) asserts. Background and decisions:
-the epic 21 spec (`.scratch/21-reboot-resilience/spec.md`) and its ADR.
+the epic 21 spec (`.scratch/21-reboot-resilience/spec.md`) and [ADR-0006](adr/0006-boot-time-firewall-persistence.md).
 
 ## Boot sequence
 
@@ -11,7 +11,7 @@ the epic 21 spec (`.scratch/21-reboot-resilience/spec.md`) and its ADR.
 2. **`tailscaled`** starts (enabled at boot).
 3. **`hermes-docker-user-firewall.service`** loads the `DOCKER-USER` rules for both IP families — *before*
    Docker starts (`Before=docker.service`). Docker preserves a pre-existing chain across daemon start and
-   restart (epic 21 spike), so no published port is ever live without its rule. It is `PartOf=docker.service`
+   restart (epic 21 spike), so no published port is ever live without its rule *by design* (measured in the spike; real systemd ordering is verified by the drill). It is `PartOf=docker.service`
    and `WantedBy=docker.service`, so every Docker (re)start re-runs the loader first.
 4. **`docker.service`** starts, ordered **after** `tailscaled.service` (ordering only — a stopped or failed
    Tailscale can never keep Docker from starting; a merely slow one delays Docker by at most systemd's start
@@ -166,6 +166,7 @@ ticket #06.
 | 5 | **Enable single-owner host DNS:** set `host_dns_resolver_owner_enabled: true`, deploy (`--tags tailscale,adguard`) | `getent hosts example.com` works; `resolv.conf` owner reads *systemd-resolved* |
 | 6 | **AdGuard stopped again**, then **paused (hung)** — again as a hangup-proof subshell each, in the open session: `( trap '' HUP; docker stop adguard; time getent hosts example.com; docker start adguard )`, then `( trap '' HUP; docker pause adguard; time getent hosts example.com; docker unpause adguard )`. If the session drops, reconnect by the Tailscale address and run `docker start adguard` / `docker unpause adguard` | stopped ≈ 0 s extra, paused ≤ ~5 s extra; the host resolves in both |
 | 7 | **Reboot once more** with both switches on | `verify-live.sh` clean; host DNS still owned by resolved; bounds met |
+| 8 | **Docker restart again, with the coupling on** (quiet time): `sudo systemctl restart docker`. The unit is `PartOf=` Docker and Docker `Requires=` the unit, so this exercises the mutual dependency step 3 could not | `verify-live.sh`: chain still matches and the containers return; `journalctl -u hermes-docker-user-firewall -u docker` shows the unit re-ran before Docker came back |
 
 Enable **one** switch at a time; if a step fails, roll back that switch before continuing.
 
