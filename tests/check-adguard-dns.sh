@@ -89,7 +89,7 @@ echo "docker_enabled_services guard OK (handover and verification both skip clea
 # The drop-in's content moved into a template (epic 21 #04, so the staged fallback list can be rendered
 # and tested); the TASK that deploys it is what carries the ordering, its content is asserted below.
 RESOLVED_TPL=roles/adguard/templates/resolved-adguardhome.conf.j2
-DROPIN_LINE="$(line_of "$DNS_TASKS" 'src: resolved-adguardhome\.conf\.j2')"
+DROPIN_LINE="$(line_of "$DNS_TASKS" 'src: .*resolved-adguardhome\.conf\.j2')"
 REPOINT_LINE="$(line_of "$DNS_TASKS" 'dest: /etc/resolv\.conf$')"
 RESTART_LINE="$(line_of "$DNS_TASKS" 'state: restarted')"
 for pair in "DROPIN_LINE:the resolved.conf drop-in" "REPOINT_LINE:the resolv.conf repoint" "RESTART_LINE:the systemd-resolved restart"; do

@@ -58,6 +58,40 @@ echo "resolver drop-in OK (AdGuard first; fallbacks ordered and only when enable
 # ---- 4. handover tasks --------------------------------------------------------------------------
 H=roles/adguard/tasks/free_host_dns_port.yml
 grep -q 'tailscale set --accept-dns=false' "$H" || fail "handover does not tell Tailscale to stop managing host DNS"
+# Task files that site.yml includes by RAW PATH run outside any role: Ansible does not search the role's templates/ or
+# files/ directory for them, so a bare file name is "not found" — which the real deploy found (check mode, 2026-09-24) and
+# no render test saw. Resolve every template/copy source of such a file exactly the way Ansible would.
+python3 - <<'PY' || exit 1
+import os, re, sys, yaml
+from jinja2 import Environment
+root = os.getcwd()
+site = open("site.yml").read()
+files = sorted(set(re.findall(r"include_tasks:\s*(roles/\S+\.yml)", site)))
+assert files, "site.yml no longer includes any task file by raw path (update this guard)"
+def walk(tasks):
+    for t in tasks or []:
+        yield t
+        for k in ("block", "rescue", "always"):
+            if k in t:
+                yield from walk(t[k])
+bad = []
+for f in files:
+    d = os.path.dirname(f)
+    for t in walk(yaml.safe_load(open(f))):
+        for module, sub in (("ansible.builtin.template", "templates"), ("ansible.builtin.copy", "files"),
+                            ("template", "templates"), ("copy", "files")):
+            args = t.get(module)
+            if not isinstance(args, dict) or "src" not in args:
+                continue
+            src = Environment().from_string(str(args["src"])).render(playbook_dir=root, role_path="")
+            dirs = [os.path.join(root, d, sub), os.path.join(root, d), os.path.join(root, sub), root]
+            found = os.path.isfile(src) if os.path.isabs(src) else any(os.path.isfile(os.path.join(x, src)) for x in dirs)
+            if not found:
+                bad.append("%s: %s src %r is not found where Ansible searches for a raw-path include" % (f, module, args["src"]))
+if bad:
+    print("\n".join(bad)); sys.exit(1)
+print("raw-path task files (%s): every template/copy source resolves" % ", ".join(files))
+PY
 python3 - "$H" <<'PY' || exit 1
 import sys,yaml
 tasks=yaml.safe_load(open(sys.argv[1]))

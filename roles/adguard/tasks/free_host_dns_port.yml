@@ -48,7 +48,10 @@
 - name: Disable systemd-resolved's stub listener so AdGuard can bind port 53
   tags: [adguard]
   ansible.builtin.template:
-    src: resolved-adguardhome.conf.j2
+    # This file is included by RAW PATH from site.yml (not as a role), so Ansible does not search the role's
+    # templates/ directory — a bare file name is "not found" (caught by the live check-mode run; the boot-ordering
+    # guard now resolves every template/copy source of these raw-path includes the way Ansible would).
+    src: "{{ playbook_dir }}/roles/adguard/templates/resolved-adguardhome.conf.j2"
     dest: /etc/systemd/resolved.conf.d/adguardhome.conf
     mode: '0644'
   register: adguard_resolved_dropin
