@@ -324,6 +324,7 @@ else info "resolv.conf owner: other"; fi
 section "reachability from this workstation"
 # probe <ip> <port> <timeout>: 0 if a TCP connection succeeds. Needs `timeout`; without it every probe would report
 # "closed", so its absence makes the probes INCONCLUSIVE instead (see below).
+UNROUTABLE_CONTROL="203.0.113.1"   # RFC 5737 TEST-NET-3: never a real host (the negative control for the outside-in probe)
 TIMEOUT_BIN="${HERMES_VERIFY_TIMEOUT_BIN:-timeout}"   # a test may point this at a command that does not exist
 probe() { "$TIMEOUT_BIN" "$3" bash -c "exec 3<>/dev/tcp/$1/$2" 2>/dev/null; }
 if [[ "$SKIP_LOCAL" == 1 ]]; then skip "workstation-side probes disabled (HERMES_VERIFY_SKIP_LOCAL=1)"
@@ -348,10 +349,20 @@ else
     elif ! rports=$(restricted_ports 2>&1) || [[ -z "$rports" ]]; then
       bad "cannot read the restricted ports from group_vars/all/main.yml — none was probed"
     else
-      leaked=""; probed=0
-      for p in $rports; do probed=$((probed+1)); probe "$pub" "$p" 4 && leaked="$leaked $p"; done
-      if [[ -z "$leaked" ]]; then ok "none of the $probed restricted TCP ports is reachable from the public internet (plain path via $dev; public ports answered)"
-      else bad "restricted TCP port(s) reachable from the internet:$leaked"; fi
+      # NEGATIVE CONTROL: a network that intercepts TCP (a router redirecting port 53 to its own resolver, a captive
+      # portal, a transparent proxy) answers on ANY address. So every restricted port is also probed on an address that
+      # cannot be a real host (RFC 5737 TEST-NET-3); if that answers too, the answer says nothing about the VPS and that
+      # port is reported INCONCLUSIVE — never a leak, never a pass.
+      leaked=""; intercepted=""; probed=0; verified=0
+      for p in $rports; do
+        probed=$((probed+1))
+        if probe "$pub" "$p" 4; then
+          if probe "$UNROUTABLE_CONTROL" "$p" 4; then intercepted="$intercepted $p"; else leaked="$leaked $p"; fi
+        else verified=$((verified+1)); fi
+      done
+      [[ -n "$leaked" ]] && bad "restricted TCP port(s) reachable from the internet:$leaked"
+      [[ -n "$intercepted" ]] && inc "restricted TCP port(s)$intercepted answer on an address that cannot be a real host too: this network intercepts them, so their outside-in result means nothing — run from another connection"
+      [[ -z "$leaked" && $verified -gt 0 ]] && ok "$verified of $probed restricted TCP ports verified unreachable from the public internet (plain path via $dev; public ports answered; unroutable-address control used)"
     fi
     info "restricted UDP ports (DNS 53) are not probed: an unanswered UDP probe cannot tell closed from filtered"
   fi

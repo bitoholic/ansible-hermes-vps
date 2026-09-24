@@ -109,8 +109,12 @@ mkdir -p "$TMP/bin" "$TMP/sysfs/eth0" "$TMP/sysfs/wg-vpn"
 echo 1 > "$TMP/sysfs/eth0/type"; echo 65534 > "$TMP/sysfs/wg-vpn/type"
 cat > "$TMP/bin/timeout" <<'F'
 #!/usr/bin/env bash
-port="${*: -1}"; port="${port##*/}"; port="${port%\"}"
-[[ " $FAKE_OPEN_PORTS " == *" $port "* ]]
+arg="${*: -1}"; port="${arg##*/}"; port="${port%\"}"; ip="${arg#*/dev/tcp/}"; ip="${ip%%/*}"
+if [[ "$ip" == 203.0.113.1 ]]; then   # the unroutable control address: only an INTERCEPTING network answers there
+  [[ " ${FAKE_INTERCEPT_PORTS:-} " == *" $port "* ]]
+else
+  [[ " $FAKE_OPEN_PORTS ${FAKE_INTERCEPT_PORTS:-} " == *" $port "* ]]
+fi
 F
 cat > "$TMP/bin/ip" <<'F'
 #!/usr/bin/env bash
@@ -229,7 +233,7 @@ echo "unreadable config fails loudly; nothing-checked is never a pass"
 runl healthy
 [[ $RC -eq 0 ]] || { echo "$OUT" >&2; fail "healthy with local probes must pass (rc=$RC)"; }
 NRP=$(python3 -c 'import yaml;print(len(yaml.safe_load(open("group_vars/all/main.yml"))["docker_published_restricted_ports"]))')
-grep -q "PASS         none of the $NRP restricted TCP ports is reachable" <<<"$OUT" || { echo "$OUT" >&2; fail "the restricted probe must report how many ports it probed"; }
+grep -q "PASS         $NRP of $NRP restricted TCP ports verified unreachable" <<<"$OUT" || { echo "$OUT" >&2; fail "the restricted probe must report how many ports it probed"; }
 for l in adguard monitor owntracks-ui; do grep -q "PASS         tailnet route $l\.<domain> answers (200)" <<<"$OUT" || fail "tailnet route $l was not probed"; done
 runl healthy FAKE_OPEN_PORTS="80 443 8443 3000"
 [[ $RC -ne 0 ]] && grep -q 'restricted TCP port(s) reachable from the internet: 3000' <<<"$OUT" || { echo "$OUT" >&2; fail "an exposed restricted port must FAIL the run"; }
@@ -237,6 +241,14 @@ for rp in $(python3 -c 'import yaml;d=yaml.safe_load(open("group_vars/all/main.y
   runl healthy FAKE_OPEN_PORTS="80 443 8443 $rp"
   [[ $RC -ne 0 ]] && grep -q "restricted TCP port(s) reachable from the internet: $rp" <<<"$OUT" || { echo "$OUT" >&2; fail "an exposed restricted port $rp must FAIL (every one is probed, including the templated conduit port)"; }
 done
+# a network that intercepts a port (answers on ANY address) makes that port INCONCLUSIVE — not a leak, not a pass
+runl healthy FAKE_INTERCEPT_PORTS="53"
+[[ $RC -eq 0 ]] && grep -q 'INCONCLUSIVE restricted TCP port(s) 53 answer on an address that cannot be a real host too' <<<"$OUT" \
+  && grep -q 'PASS.*6 of 7 restricted TCP ports verified' <<<"$OUT" && ! grep -q 'FAIL.*restricted' <<<"$OUT" || { echo "$OUT" >&2; fail "an intercepted port must be INCONCLUSIVE, the others verified (rc=$RC)"; }
+runl healthy FAKE_INTERCEPT_PORTS="53" FAKE_OPEN_PORTS="80 443 8443 3000"
+[[ $RC -ne 0 ]] && grep -q 'restricted TCP port(s) reachable from the internet: 3000' <<<"$OUT" && grep -q 'INCONCLUSIVE restricted TCP port(s) 53' <<<"$OUT" || { echo "$OUT" >&2; fail "a real leak must still FAIL next to an intercepted port (rc=$RC)"; }
+runl healthy FAKE_INTERCEPT_PORTS="3000 8008 8642 9119 8090 3001 53"
+grep -q 'PASS.*restricted' <<<"$OUT" && { echo "$OUT" >&2; fail "with every port intercepted there must be no restricted-port PASS"; }
 runl healthy FAKE_OPEN_PORTS="80 443"
 [[ $RC -ne 0 ]] && grep -q 'FAIL         public ingress port 8443 does not answer' <<<"$OUT" || fail "a dead public port must FAIL"
 runl healthy FAKE_OPEN_PORTS=""
