@@ -3,7 +3,9 @@
 tailscale_docker_user_firewall_dir: /etc/hermes-vps/firewall
 tailscale_docker_user_firewall_loader: /usr/local/sbin/hermes-docker-user-rules
 
-# Staged rollout: the fail-closed coupling (docker.service Requires= the boot firewall unit) ships
-# DISABLED so a routine deploy can't put an untested fail-closed unit on production. The attended
-# reboot drill (epic 21 #06) enables it after the unit has been observed working.
-tailscale_docker_user_firewall_fail_closed: false
+# The fail-closed coupling (docker.service Requires= the boot firewall unit): Docker refuses to start if the
+# rules could not be loaded. It shipped DISABLED (staged) and was enabled by the attended reboot drill
+# (epic 21 #06, 2026-09-24): after three real reboots and a deliberately broken rules load, Docker started only
+# when the rules had loaded. It is now the default, so a routine deploy keeps it — a deploy with it false REMOVES
+# the drop-in. Set false only to roll back (docs/reboot-resilience.md, "If something goes wrong").
+tailscale_docker_user_firewall_fail_closed: true

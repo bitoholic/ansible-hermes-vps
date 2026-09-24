@@ -10,7 +10,7 @@
 #      anything else) so loading it can never disturb UFW, INPUT or Docker's own chains.
 #   3. Rendering is byte-stable (idempotent).
 #   4. The boot unit is ordered before Docker, follows Docker restarts, and is enabled at boot.
-#   5. The fail-closed coupling is STAGED: absent by default, a hard Requires= when enabled.
+#   5. The fail-closed coupling is a hard Requires= when enabled (default on since the drill) and absent when disabled.
 #   6. The role deploys these via one shared loader, no longer builds the chain with per-rule tasks,
 #      and a deploy heals an unchanged artifact by comparing the live chain, not the files.
 # Live (guarded; runs only when podman and the disposable image are present):
@@ -167,8 +167,8 @@ grep -q 'hermes-docker-user-rules apply' README.md && grep -q 'restart hermes-do
   || fail "README must document reloading with the loader and warn against restarting the unit"
 echo "boot unit OK"
 
-# ---- 5. staged fail-closed coupling (BEHAVIOR: evaluate the tasks' own gating) ---------------------
-grep -q '^tailscale_docker_user_firewall_fail_closed: false' roles/tailscale/defaults/main.yml || fail "fail-closed coupling must default to disabled (staged rollout)"
+# ---- 5. fail-closed coupling (BEHAVIOR: evaluate the tasks' own gating) ---------------------
+grep -q '^tailscale_docker_user_firewall_fail_closed: true' roles/tailscale/defaults/main.yml || fail "fail-closed coupling must default to enabled (enabled by the reboot drill, epic 21 #06; a deploy with it false removes the drop-in)"
 FC="$TMP/failclosed/docker-fail-closed.conf"
 must "$FC" '^Requires=hermes-docker-user-firewall\.service$' "hard Requires= on the firewall unit when the coupling is enabled"
 must "$FC" '^After=hermes-docker-user-firewall\.service$' "After= on the firewall unit"
@@ -192,7 +192,7 @@ for value,want_install,want_remove in ((False,False,True),(True,True,False)):
     assert (got_i,got_r)==(want_install,want_remove), f"switch={value}: install={got_i} remove={got_r}, expected install={want_install} remove={want_remove}"
 print("  drop-in gating: disabled -> removed and not installed; enabled -> installed and not removed")
 PY
-echo "staged fail-closed coupling OK (default off; install/remove gating evaluated for both switch values)"
+echo "fail-closed coupling OK (default on after the drill; install/remove gating evaluated for both switch values)"
 
 # ---- 6. role wiring --------------------------------------------------------------------------
 if grep -q 'ansible.builtin.iptables' "$TS"; then fail "tailscale role still builds the chain with per-rule iptables tasks"; fi

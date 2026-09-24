@@ -64,7 +64,9 @@ beszel_agent_data_dir: "{{ docker_compose_dir }}/beszel/agent"
 adguard_conf_dir: "{{ docker_compose_dir }}/adguard/conf"
 adguard_work_dir: "{{ docker_compose_dir }}/adguard/work"
 
-# Host DNS ownership (epic 21 #04) — STAGED: ships disabled, enabled by the attended reboot drill.
+# Host DNS ownership (epic 21 #04). It shipped DISABLED (staged) and was enabled by the attended reboot drill
+# (epic 21 #06, 2026-09-24), which measured the stopped/hung bounds and three reboots; it is now the default.
+# Turning it back off does NOT undo it (see docs/reboot-resilience.md).
 # Two components write the host's resolver configuration: the AdGuard DNS handover (roles/adguard) and
 # the Tailscale daemon's own DNS management. On the live host Tailscale won: resolv.conf points at
 # Tailscale's resolver, which forwards to the tailnet's nameserver — AdGuard on this very host — so an
@@ -75,7 +77,7 @@ adguard_work_dir: "{{ docker_compose_dir }}/adguard/work"
 # fallback that is actually consulted (the resolver daemon's FallbackDNS is NOT used while any DNS= is set,
 # so the fallbacks are listed as ordinary servers). With it disabled a routine deploy leaves an existing,
 # working resolver configuration exactly as it found it. See docs/reboot-resilience.md for the bounds.
-host_dns_resolver_owner_enabled: false
+host_dns_resolver_owner_enabled: true
 host_dns_fallback_servers:
   - 9.9.9.9
   - 149.112.112.112

@@ -15,8 +15,8 @@ the epic 21 spec (`.scratch/21-reboot-resilience/spec.md`) and [ADR-0006](adr/00
    and `WantedBy=docker.service`, so every Docker (re)start re-runs the loader first.
 4. **`docker.service`** starts, ordered **after** `tailscaled.service` (ordering only — a stopped or failed
    Tailscale can never keep Docker from starting; a merely slow one delays Docker by at most systemd's start
-   timeout). Optionally (staged, off by default) it also `Requires=` the firewall unit — the fail-closed
-   coupling.
+   timeout). It also `Requires=` the firewall unit (the fail-closed coupling, enabled by the reboot drill on 2026-09-24 and
+   the default since), so Docker refuses to start if the rules could not be loaded.
 5. **Containers** with `restart: unless-stopped` are started by the Docker daemon itself, independently and in
    no guaranteed order. `depends_on` in the compose file only orders `docker compose up`; it does nothing
    after a reboot. That is why every service below must tolerate a late dependency.
@@ -58,13 +58,13 @@ had the provider's two DHCP nameservers on the uplink link. So the host's lookup
 — and the playbook's AdGuard handover, which points `resolv.conf` at resolved's own file, rewrote it on every
 deploy while Tailscale rewrote it back. With AdGuard stopped **or hung**, the host itself could not resolve.
 
-**Design (staged; `host_dns_resolver_owner_enabled`, default `false`).**
+**Design (`host_dns_resolver_owner_enabled`; shipped staged, enabled by the reboot drill on 2026-09-24 and the default since).**
 
-- **Disabled (default):** a routine deploy changes nothing about a working resolver. The handover still
+- **Disabled (`false`):** a routine deploy changes nothing about a working resolver. The handover still
   disables resolved's stub listener (AdGuard needs port 53) and repoints `resolv.conf` only when the *current*
   file would be broken by that — missing, the fresh-host symlink to the stub file, or a regular file that still names the stub address (`127.0.0.53`). Tailscale's file is left as
   found; the overwrite fight ends.
-- **Enabled (by the attended drill):** the handover is the single owner. Tailscale is told to stop managing DNS
+- **Enabled (`true`, the default since the drill):** the handover is the single owner. Tailscale is told to stop managing DNS
   on this host (`tailscale set --accept-dns=false`; `tailscale up` restates the preference in *both* switch states so a re-login
   can't fail on a "non-default flags" error, even after the switch is turned back off), the deploy waits until Tailscale has released the file, then `resolv.conf` →
   `/run/systemd/resolve/resolv.conf`. Other tailnet devices are unaffected — the tailnet nameserver setting is
@@ -102,7 +102,7 @@ Everything the playbook configures that lives only in memory or depends on start
 | Forwarding sysctls (IPv4 + IPv6) | `/etc/sysctl.d/99-tailscale.conf`, written by the Tailscale installer; Docker also sets IPv4 at daemon start | yes, both families (verified live) | **Accepted** — depends on the Tailscale installer's file; re-created if Tailscale is reinstalled. Epic 23's plain-exit-node ticket reuses this finding |
 | Caddy's public `:443` publish address | rendered into the compose file at deploy time from the host's default IPv4 | yes (file) | **Accepted** — stale only if the provider changes the VPS's address; a redeploy fixes it |
 | `caddy-relay` bind addresses | rendered into `haproxy.cfg` at deploy time from `tailscale ip` | yes (file) | **Accepted** — a node's Tailscale addresses are stable for its lifetime; stale only if the node is re-registered; a redeploy fixes it. Boot-time absence of the address is handled by the restart policy (table above) |
-| Host resolver configuration | `/etc/resolv.conf` (Tailscale- or resolved-managed) | yes | **Staged fix** — single owner, see above |
+| Host resolver configuration | `/etc/resolv.conf` (Tailscale- or resolved-managed) | yes | **Fixed** (enabled by the drill) — single owner, see above |
 | Docker → Tailscale start order | systemd | — | **Fixed** — ordering-only drop-in (epic 21 #04) |
 | `/run/shm` `noexec,nosuid` | `/etc/fstab` | yes | Accepted (persistent) |
 | UFW rules and enablement | `/etc/ufw`, `ufw.service` enabled | yes | Accepted (persistent) |
@@ -142,7 +142,10 @@ ticket #06.
 1. **Provider console reachable.** Open the provider's VNC/serial console and log in once. SSH does not depend on
    anything in this epic (`ssh.socket` + UFW), but the console is the last resort.
 2. **An alternate SSH path over the tailnet.** From this workstation (on the tailnet) `ssh <tailscale-ip>` works —
-   SSH listens on all addresses and UFW allows the tailnet interface.
+   SSH listens on all addresses and UFW allows the tailnet interface. **Caveat found in the drill:** this node runs
+   Tailscale SSH, which intercepts port 22 on the tailnet and asks for a browser "check" (an approval link) before it
+   lets a session in — the connection just *hangs* until approved. Approve it once before relying on this path, and
+   know that during an incident it needs a browser (see follow-ups below).
 3. **Baseline captured — before anything is deployed.** Run `scripts/verify-live.sh <host>` and keep the output
    (before the new code is deployed it is *expected* to FAIL on the pieces this epic adds — that is the "before"
    picture), plus `uptime`. The script prints no address, host or domain and reports rule drift as counts only, so its
@@ -162,8 +165,8 @@ ticket #06.
 | 1b | **Late-dependency observation** (right after step 1, once SSH is back): `docker ps --format '{{.Names}} {{.Status}}'`, `docker inspect -f '{{.Name}} restarts={{.RestartCount}}' $(docker ps -aq)`, and `docker logs --since 10m hermes-agent` | for each row of the late-dependency table: did it converge within its bound, and by which mechanism (internal retry vs. a restart-policy retry — a non-zero `RestartCount` means the latter)? **This is where `hermes-agent`'s retry behavior is finally observed.** Record anything outside its bound |
 | 2 | **AdGuard stopped:** in your *existing* SSH session run it as **one subshell that ignores a hangup**, so a dropped connection does not skip the restart (the restart policy does not restart a container you stopped; a plain `a; b; c` line *is* cut short when the session drops): `( trap '' HUP; docker stop adguard; time getent hosts example.com; docker start adguard )`. If the session drops anyway, reconnect by the Tailscale address and run `docker start adguard`. With ownership *off* this shows today's dependency — record it. AdGuard is also the tailnet's DNS server, so while it is stopped new connections *by hostname* may fail: stay in the open session, and use the Tailscale address for anything new | expect the lookup to fail or stall (the finding this epic fixes); record it |
 | 3 | **Docker restart** (quiet time): `sudo systemctl restart docker` | `verify-live.sh`: chain still matches; containers return |
-| 4 | **Enable the fail-closed coupling:** set `tailscale_docker_user_firewall_fail_closed: true`, deploy (`--tags tailscale`), **reboot** | `verify-live.sh` shows *fail-closed coupling: ENABLED*; `journalctl -b -u hermes-docker-user-firewall -u docker` shows the firewall unit finished before Docker started |
-| 5 | **Enable single-owner host DNS:** set `host_dns_resolver_owner_enabled: true`, deploy (`--tags tailscale,adguard`) | `getent hosts example.com` works; `resolv.conf` owner reads *systemd-resolved* |
+| 4 | **Enable the fail-closed coupling:** set `tailscale_docker_user_firewall_fail_closed: true`, deploy (`--tags secrets,tailscale` — the `secrets` tag is needed or the resolver's values are not loaded), **reboot** | `verify-live.sh` shows *fail-closed coupling: ENABLED*; `journalctl -b -u hermes-docker-user-firewall -u docker` shows the firewall unit finished before Docker started |
+| 5 | **Enable single-owner host DNS:** set `host_dns_resolver_owner_enabled: true`, deploy (`--tags secrets,tailscale,adguard`) | `getent hosts example.com` works; `resolv.conf` owner reads *systemd-resolved* |
 | 6 | **AdGuard stopped again**, then **paused (hung)** — again as a hangup-proof subshell each, in the open session: `( trap '' HUP; docker stop adguard; time getent hosts example.com; docker start adguard )`, then `( trap '' HUP; docker pause adguard; time getent hosts example.com; docker unpause adguard )`. If the session drops, reconnect by the Tailscale address and run `docker start adguard` / `docker unpause adguard` | stopped ≈ 0 s extra, paused ≤ ~5 s extra; the host resolves in both |
 | 7 | **Reboot once more** with both switches on | `verify-live.sh` clean; host DNS still owned by resolved; bounds met |
 | 8 | **Docker restart again, with the coupling on** (quiet time): `sudo systemctl restart docker`. The unit is `PartOf=` Docker and Docker `Requires=` the unit, so this exercises the mutual dependency step 3 could not | `verify-live.sh`: chain still matches and the containers return; `journalctl -u hermes-docker-user-firewall -u docker` shows the unit re-ran before Docker came back |
@@ -196,3 +199,42 @@ Enable **one** switch at a time; if a step fails, roll back that switch before c
 
 Record each run in ticket #06: the time of each bound, the `verify-live.sh` output (nothing in it is secret —
 tailnet routes print as `<label>.<domain>`), the stopped/paused lookup timings, and any deviation.
+
+**The first drill, 2026-09-24 (attended, three reboots).** Times are from the moment the reboot was issued; the
+boot itself (shutdown, power cycle, kernel) takes ~20–27 s of that.
+
+| Bound | Stated | Reboot 1 (switches off) | Reboot 2 (coupling on) | Reboot 3 (both on) |
+|---|---|---|---|---|
+| Restricted rules live *before* the first published port | before | unit finished 21:49:09.56, first container 21:49:14.34 (**4.8 s before**) | 22:02:55.72 → 22:03:00.3 (**4.6 s**) | 22:19:03.88 → 22:19:08.26 (**4.4 s**) |
+| Firewall unit finished before Docker started | before | yes (Docker "Starting" 2.1 s later) | yes (2.0 s) | yes (2.0 s) |
+| SSH back | — | +48 s | +41 s | +41 s |
+| Public front door (Caddy) serving | ≤ 3 min | +44 s | +35 s | +35 s |
+| Every container `running` | ≤ 5 min | +41 s (13/13, 0 restarts) | +32 s (13/13, 0 restarts) | +32 s (13/13, 0 restarts) |
+| `caddy-relay` bound | ≤ 2 min | started +41 s, bound on the tailnet address, 0 restarts | same | same |
+
+`verify-live.sh` after each boot, **without running the playbook**: 33 passed, 0 failed (1 inconclusive: TCP 53 is
+answered by the operator's own network on any address — see the script's negative control). `docker.service` reports
+"active" ~20 s after the containers were already running (the daemon restarts restart-policy containers while it is
+still initializing — the reason the rules must load *before* the daemon).
+
+Other measurements:
+
+| Check | Result |
+|---|---|
+| AdGuard stopped, **before** the DNS change (Tailscale owned `resolv.conf`) | lookup **failed after 40 s** (the fault this epic fixes) |
+| AdGuard stopped, after (real names, cold cache) | ≈ **0.015 s** extra |
+| AdGuard paused (hung), after (real names, cold cache) | **5.0 s** per lookup — the documented bound |
+| AdGuard paused, after, for a name that **does not exist** (NXDOMAIN) | **~20 s** per lookup — a documented limit: the resolver retries a hung server before accepting a negative answer, so it is 4× the bound for names that do not exist |
+| Docker restart, coupling off / on | 24 s / 25 s; rules intact (24 v4 + 23 v6); with the coupling on the unit re-ran *before* Docker and there was no dependency loop |
+| **Fail-closed proof:** rules file removed, then `systemctl restart docker` | the loader failed, `docker.service` did **not** start ("A dependency job … failed"), 0 published-port listeners while it was down; the file was restored and all 13 containers came back with the rules intact |
+| Late-dependency observation | 0 restarts on every container across all three reboots — none needed the restart policy to converge. `hermes-agent` logged a Playwright MCP connection failure at start, but it appears at deploy-time restarts too, so it is not reboot-ordering related |
+
+**What the drill found that no test had (fixed and guarded):** the resolved drop-in's `template` source was not found
+when its task file is included by raw path from `site.yml` (a real deploy in check mode failed; a guard now resolves
+those sources the way Ansible does); the verifier's outside-in probe reported a *false* exposure because the operator's
+network answers TCP 53 on any address (a negative control now makes that inconclusive); and Tailscale SSH's browser
+check makes the tailnet SSH path hang until approved.
+
+**Follow-ups (not part of this epic):** make the tailnet SSH path usable in an incident without a browser (adjust the
+Tailscale SSH check policy, or keep the console as the documented last resort); publicly probing **UDP** 53 from a
+non-intercepting network; the leftover `ws-spike-*` containers on the host are not managed by this repository.

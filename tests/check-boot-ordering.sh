@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Epic 21 ticket #04 guard: boot ordering, late-dependency tolerance, single-owner host DNS (staged),
+# Epic 21 ticket #04 guard: boot ordering, late-dependency tolerance, single-owner host DNS,
 # and the runtime-state audit.
 #
 # Asserts on behavior:
 #   1. Docker is ordered AFTER tailscaled by an ordering-only drop-in — no Requires/Wants/BindsTo/PartOf/
 #      Requisite — so a stopped or failed Tailscale can never keep Docker from starting.
-#   2. The host-DNS ownership switch is STAGED (default off), and its decision table holds: disabled leaves a
+#   2. The host-DNS ownership switch is ON by default since the drill (both values are still tested), and its decision table holds: disabled leaves a
 #      working resolver as found, repoints only when the current file would be broken; enabled takes ownership.
 #   3. The resolver drop-in keeps AdGuard first; the public fallbacks follow in order only when enabled, and
 #      the stub listener is always disabled (AdGuard needs port 53).
@@ -40,9 +40,9 @@ grep -q 'docker-after-tailscaled.conf.j2' "$TS" || fail "tailscale role does not
 grep -qE 'dest: /etc/systemd/system/docker\.service\.d/20-hermes-after-tailscaled\.conf$' "$TS" || fail "ordering drop-in must be installed at exactly docker.service.d/20-hermes-after-tailscaled.conf (a renamed/.disabled file would be ignored by systemd)"
 echo "docker ordered after tailscaled, ordering only OK"
 
-# ---- 2. staged switch ---------------------------------------------------------------------------
-grep -qE '^host_dns_resolver_owner_enabled: false$' group_vars/all/main.yml || fail "host_dns_resolver_owner_enabled must default to false (staged rollout)"
-echo "host-DNS ownership is staged (default off) OK; repoint decision table passed in the playbook"
+# ---- 2. switch default ---------------------------------------------------------------------------
+grep -qE '^host_dns_resolver_owner_enabled: true$' group_vars/all/main.yml || fail "host_dns_resolver_owner_enabled must default to true (enabled by the reboot drill, epic 21 #06)"
+echo "host-DNS ownership: enabled by the drill (default on); both switch values still tested; repoint decision table passed in the playbook"
 
 # ---- 3. resolved drop-in ------------------------------------------------------------------------
 R_OFF="$TMP/off/resolved-adguardhome.conf"; R_ON="$TMP/on/resolved-adguardhome.conf"
