@@ -12,6 +12,12 @@ CANARY_TOKEN='tok-9f8e7d6c5b4a3210'
 CANARY_DOMAIN='fixture-domain.example'
 CANARY_UNICODE='zażółć-gęślą-jaźń'
 CANARY_SHORT='ab12'
+CANARY_SPECIAL='p@ss w/ord&x=1%'
+CANARY_CONTAINER="wrap-${CANARY_TOKEN}-wrap"    # contains another value
+CANARY_OVERLAP='3210-overlap-zz'                 # overlaps the END of the token when the two are printed together
+CANARY_LONGER="${CANARY_TOKEN}-longer"           # the token is a proper prefix of this value
+CANARY_QUOTES="it's \"q\" ok"                     # repr() escapes the single quote
+CANARY_TINY='abc'                                # below the redaction minimum (3 characters): NOT masked
 CANARY_HOST='127.0.0.2'
 
 fx_encrypt() {  # fx_encrypt SRC DEST PUBKEY...
@@ -37,6 +43,12 @@ secrets_manifest:
   fix_domain:   { env: FIX_DOMAIN,   required: true }
   fix_unicode:  { env: FIX_UNICODE,  required: true }
   fix_short:    { env: FIX_SHORT,    required: true }
+  fix_special:   { env: FIX_SPECIAL,   required: true }
+  fix_container: { env: FIX_CONTAINER, required: true }
+  fix_tiny:      { env: FIX_TINY }
+  fix_overlap:   { env: FIX_OVERLAP }
+  fix_longer:    { env: FIX_LONGER }
+  fix_quotes:    { env: FIX_QUOTES }
   fix_optional: { env: FIX_OPTIONAL, default: "dflt" }
 M
   cat > "$repo/group_vars/all/conn.yml" <<'C'
@@ -55,6 +67,9 @@ show-env      scripts/fx-show-env.sh
 exit-seven    scripts/fx-exit-seven.sh
 missing-file  scripts/fx-not-there.sh
 escape        ../outside.sh
+split         scripts/fx-split.sh
+tail          scripts/fx-tail.sh
+tail-full     scripts/fx-tail-full.sh
 kill-self     scripts/fx-kill-self.sh
 not-exec      scripts/fx-not-exec.sh
 link          scripts/fx-link.sh
@@ -72,9 +87,28 @@ echo "SCRIPT-STDERR-LINE" >&2
 echo "args: $*"
 C
   printf '#!/usr/bin/env bash\nexit 7\n' > "$repo/scripts/fx-exit-seven.sh"
+  # writes every secret value split at EVERY position across two separate writes (a pause between them forces two
+  # reads), to stdout and to stderr, in plain and JSON-escaped forms — the redactor must find values that straddle chunks
+  cat > "$repo/scripts/fx-split.sh" <<'SPLIT'
+#!/usr/bin/env python3
+import json, os, sys, time
+values = [os.environ[n] for n in ("FIX_TOKEN", "FIX_UNICODE", "FIX_SPECIAL", "FIX_SHORT", "FIX_CONTAINER", "FIX_QUOTES")]
+def emit(stream, data):
+    stream.buffer.write(data); stream.buffer.flush()
+for stream in (sys.stdout, sys.stderr):
+    for value in values:
+        for form in (value, json.dumps(value)[1:-1], repr(value)[1:-1]):
+            raw = ("SPLIT[" + form + "]").encode()
+            for cut in range(len(b"SPLIT[") , len(raw)):
+                emit(stream, raw[:cut]); time.sleep(0.01); emit(stream, raw[cut:] + b"\n")
+SPLIT
+  # ends with the WHOLE token and no newline; the token is a proper prefix of another value, so it is held back and must be masked at exit
+  printf '#!/usr/bin/env bash\nprintf "%%s" "$FIX_TOKEN"\n' > "$repo/scripts/fx-tail-full.sh"; chmod +x "$repo/scripts/fx-tail-full.sh"
+  # ends WITHOUT a newline in the middle of what could be the start of a value: the held-back tail must be flushed at exit
+  printf '#!/usr/bin/env bash\nprintf "END-%%s" "${FIX_TOKEN:0:3}"\n' > "$repo/scripts/fx-tail.sh"
   printf '#!/usr/bin/env bash\nkill -9 $$\n' > "$repo/scripts/fx-kill-self.sh"
   printf '#!/usr/bin/env bash\necho should-not-run\n' > "$repo/scripts/fx-not-exec.sh"
-  chmod +x "$repo/scripts/fx-show-env.sh" "$repo/scripts/fx-exit-seven.sh" "$repo/scripts/fx-kill-self.sh"
+  chmod +x "$repo/scripts/fx-show-env.sh" "$repo/scripts/fx-exit-seven.sh" "$repo/scripts/fx-kill-self.sh" "$repo/scripts/fx-split.sh" "$repo/scripts/fx-tail.sh"
   ln -s ../../outside.sh "$repo/scripts/fx-link.sh"
   mkdir -p "$dir/repo-evil"; printf '#!/usr/bin/env bash\necho sibling-ran\n' > "$dir/repo-evil/x.sh"; chmod +x "$dir/repo-evil/x.sh"
   printf '#!/usr/bin/env bash\nhead -c 5000000 /dev/zero | tr "\\0" x\n' > "$repo/scripts/fx-big-output.sh"
@@ -93,6 +127,8 @@ def main():
 main()
 PYM
   printf '#!/usr/bin/env bash\necho escaped\n' > "$dir/outside.sh"; chmod +x "$dir/outside.sh"
+  mkdir -p "$repo/templates"
+  printf 'token={{ secrets.fix_token }}\nspecial={{ secrets.fix_special }}\nunicode={{ secrets.fix_unicode }}\nwrap={{ secrets.fix_container }}\n' > "$repo/templates/leak.j2"
   cat > "$repo/site.yml" <<Y
 - name: fixture deployment
   hosts: all
@@ -108,6 +144,11 @@ PYM
           - secrets.fix_domain == '$CANARY_DOMAIN'
           - secrets.fix_unicode == '$CANARY_UNICODE'
           - secrets.fix_short == '$CANARY_SHORT'
+          - secrets.fix_special == '$CANARY_SPECIAL'
+          - secrets.fix_container == '$CANARY_CONTAINER'
+          - secrets.fix_tiny == '$CANARY_TINY'
+          - secrets.fix_overlap == '$CANARY_OVERLAP'
+          - secrets.fix_longer == '$CANARY_LONGER'
           - secrets.fix_optional == 'dflt'
         quiet: true
       tags: [always]
@@ -143,6 +184,42 @@ PYM
       ansible.builtin.debug:
         msg: "{{ fx_collection.msg }}"
       tags: [collection]
+    - name: Leak canaries through a debug message
+      ansible.builtin.debug:
+        msg: "LEAK-MSG {{ secrets.fix_token }} {{ secrets.fix_special }} {{ secrets.fix_short }}"
+      tags: [leak]
+    - name: Leak canaries JSON-escaped (non-ASCII becomes \\u sequences)
+      ansible.builtin.debug:
+        msg: "LEAK-JSON {{ secrets.fix_unicode | to_json }} {{ secrets.fix_special | to_json }}"
+      tags: [leak]
+    - name: Leak canaries URL-encoded
+      ansible.builtin.debug:
+        msg: "LEAK-URL {{ secrets.fix_unicode | urlencode }} {{ secrets.fix_special | urlencode }}"
+      tags: [leak]
+    - name: Leak a value that contains another value
+      ansible.builtin.debug:
+        msg: "LEAK-WRAP {{ secrets.fix_container }}"
+      tags: [leak]
+    - name: Leak two values that overlap in the output
+      ansible.builtin.debug:
+        msg: "LEAK-OVERLAP {{ secrets.fix_token }}-overlap-zz"
+      tags: [leak]
+    - name: A value below the minimum length is not masked
+      ansible.builtin.debug:
+        msg: "LEAK-TINY {{ secrets.fix_tiny }} abcdef"
+      tags: [leak]
+    - name: Leak through a rendered template diff
+      ansible.builtin.template:
+        src: leak.j2
+        dest: "{{ lookup('ansible.builtin.env', 'TMPDIR') }}/leak.conf"
+        mode: "0600"
+      tags: [leak]
+    - name: Leak through verbose task arguments and results
+      ansible.builtin.command:
+        cmd: "echo LEAK-CMD {{ secrets.fix_token }} {{ secrets.fix_unicode }}"
+      changed_when: false
+      check_mode: false
+      tags: [leak]
     - name: A task that fails
       ansible.builtin.fail:
         msg: deliberate failure
@@ -171,8 +248,8 @@ creation_rules:
       - age:
           - $FIX_PUB
 S
-  printf 'TARGET_HOST=%s\nFIX_TOKEN=%s\nFIX_DOMAIN=%s\nFIX_UNICODE=%s\nFIX_SHORT=%s\n' \
-    "$CANARY_HOST" "$CANARY_TOKEN" "$CANARY_DOMAIN" "$CANARY_UNICODE" "$CANARY_SHORT" > "$dir/plain/store.env"
+  printf 'TARGET_HOST=%s\nFIX_TOKEN=%s\nFIX_DOMAIN=%s\nFIX_UNICODE=%s\nFIX_SHORT=%s\nFIX_SPECIAL=%s\nFIX_CONTAINER=%s\nFIX_TINY=%s\nFIX_OVERLAP=%s\nFIX_LONGER=%s\nFIX_QUOTES=%s\n' \
+    "$CANARY_HOST" "$CANARY_TOKEN" "$CANARY_DOMAIN" "$CANARY_UNICODE" "$CANARY_SHORT" "$CANARY_SPECIAL" "$CANARY_CONTAINER" "$CANARY_TINY" "$CANARY_OVERLAP" "$CANARY_LONGER" "$CANARY_QUOTES" > "$dir/plain/store.env"
   ( cd "$repo" && sops encrypt --filename-override secrets/secrets.enc.env --input-type dotenv --output-type dotenv "$dir/plain/store.env" >"$repo/secrets/secrets.enc.env" )
   FIX_PLAIN="$dir/plain/store.env"
 }

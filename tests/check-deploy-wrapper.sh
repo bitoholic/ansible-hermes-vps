@@ -29,12 +29,13 @@ fx_deploy --tags always
 [[ $RC -eq 0 ]] || fail "the happy path exited $RC"
 grep -q 'RESOLVER OK' <<<"$OUT" || fail "the resolver did not receive the fixture values (seam broken)"
 grep -q 'ok=' <<<"$OUT" || fail "no play recap"
-grep -q 'ok: \[127.0.0.2\]' <<<"$OUT" || fail "the play did not target the host read from the store"
+# (the target host is one of the store's values, so it is itself masked in the output)
+grep -q 'ok: \[\[redacted\]\]' <<<"$OUT" && ! grep -q '127.0.0.2' <<<"$OUT" || fail "the play did not target the host read from the store (or the host was printed unmasked)"
 echo "runs the fixture playbook; the real resolver received the store's values (target host read from the store)"
 
 # --- no plaintext file anywhere, including Ansible's own temp and cache locations ------------------------
 # Search the repository tree, HOME, the runtime dir, TMPDIR and /tmp-like locations for every canary value.
-for canary in "$CANARY_TOKEN" "$CANARY_DOMAIN" "$CANARY_UNICODE" "$CANARY_SHORT"; do
+for canary in "$CANARY_TOKEN" "$CANARY_DOMAIN" "$CANARY_UNICODE" "$CANARY_SHORT" "$CANARY_SPECIAL" "$CANARY_QUOTES"; do
   hits="$(grep -rla -F -- "$canary" "$FIX_REPO" "$FIX_HOME" "$FIX_RUN" "$FIX_TMP" 2>/dev/null | grep -v '^$' || true)"
   # the fixture's own site.yml and show-env script legitimately contain the canaries as assertion literals; nothing else may.
   hits="$(grep -v -x -e "$FIX_REPO/site.yml" -e "$FIX_REPO/scripts/fx-show-env.sh" <<<"$hits" || true)"
@@ -75,6 +76,53 @@ wait "$pid" || true
 (( live )) || { cat "$T/live.out" >&2; fail "output did not stream live (the first message only arrived at the end)"; }
 grep -q 'STREAM-LAST' "$T/live.out" || fail "the streamed run did not finish"
 echo "output streams live"
+
+# --- output redaction (ticket #02): the canary test -------------------------------------------------------
+# An independent ORACLE computes every form a value may take in output (plain, JSON with and without \u escapes, repr,
+# URL-encoded); none may appear anywhere in the combined output, while markers prove the leaking tasks really ran.
+oracle() {  # oracle <value...>: print every form, one per line, that must never appear
+  python3 - "$@" <<'E'
+import json, sys, urllib.parse
+for v in sys.argv[1:]:
+    forms = {v, json.dumps(v)[1:-1], json.dumps(v, ensure_ascii=False)[1:-1], repr(v)[1:-1], urllib.parse.quote(v, safe=""),
+             urllib.parse.quote(v), urllib.parse.quote_plus(v), json.dumps(v)[1:-1].replace("\\u", "\\U").lower()}
+    forms |= {f.replace("%", "%").lower() for f in list(forms) if "%" in f}
+    for f in forms:
+        if len(f) >= 4:
+            print(f)
+E
+}
+assert_no_canary() {  # assert_no_canary <label>  (reads $OUT)
+  local form
+  while IFS= read -r form; do
+    [[ -z "$form" ]] && continue
+    [[ "$OUT" != *"$form"* ]] || fail "$1: a decrypted value leaked into the output (form: ${form:0:6}…)"
+  done < <(oracle "$CANARY_TOKEN" "$CANARY_DOMAIN" "$CANARY_UNICODE" "$CANARY_SHORT" "$CANARY_SPECIAL" "$CANARY_CONTAINER" "$CANARY_HOST" "$CANARY_OVERLAP" "$CANARY_LONGER" "$CANARY_QUOTES")
+}
+fx_deploy --tags leak --check --diff -vvvvvv
+[[ $RC -eq 0 ]] || fail "the leak play did not run cleanly (rc=$RC)"
+for marker in LEAK-MSG LEAK-JSON LEAK-URL LEAK-WRAP LEAK-TINY LEAK-CMD 'token=' ; do
+  grep -q "$marker" <<<"$OUT" || fail "the leaking task for '$marker' did not produce output (vacuous test)"
+done
+assert_no_canary "debug message, JSON, URL, template diff and verbose arguments at -vvvvvv"
+grep -q 'LEAK-MSG \[redacted\] \[redacted\] \[redacted\]' <<<"$OUT" || fail "values in a debug message were not masked (or the masks are not where expected)"
+grep -qE 'LEAK-WRAP \[redacted\]($|[^A-Za-z0-9-])' <<<"$OUT" || fail "a value containing another value was not masked completely"
+! grep -q 'wrap-' <<<"$OUT" || fail "a readable fragment of a value that contains another value remains"
+grep -qE 'LEAK-OVERLAP \[redacted\]($|[^A-Za-z0-9-])' <<<"$OUT" && ! grep -q -- '-overlap' <<<"$OUT" || fail "two values that overlap in the output left a readable fragment"
+grep -q 'LEAK-TINY abc abcdef' <<<"$OUT" || fail "a value below the minimum length must NOT be masked (the documented constant)"
+grep -qE "^\+token=|token=\[redacted\]" <<<"$OUT" || fail "the rendered diff did not show the masked template"
+# the same at lower verbosity and without diff, and in script mode with values split at every position across reads
+fx_deploy --tags leak;      assert_no_canary "default verbosity"
+fx_deploy --tags leak -vvv; assert_no_canary "-vvv"
+fx_deploy --script split
+[[ $RC -eq 0 ]] || fail "the split-value script did not run (rc=$RC)"
+assert_no_canary "values split across output chunks (stdout and stderr)"
+[[ "$(grep -c 'SPLIT\[\[redacted\]\]' <<<"$OUT")" -ge 20 ]] || fail "the split-value script's output was not masked as expected (vacuous test)"
+fx_deploy --script tail
+[[ "$OUT" == "END-${CANARY_TOKEN:0:3}" ]] || fail "the held-back tail of a stream must be flushed at the end (got: ${OUT:0:20})"
+fx_deploy --script tail-full
+[[ "$OUT" == "[redacted]" ]] || fail "a value held back at the end of the stream must be masked when flushed (got: ${OUT:0:30})"
+echo "redaction: canaries in debug messages, JSON/URL forms, template diffs and verbose arguments (-vvvvvv), split across chunks, nested — none in the output; values below the minimum are documented as unmasked"
 
 # --- refused invocation shapes (each: exit 64, and the child never ran) ---------------------------------
 refused() {  # refused <label> args...
@@ -379,7 +427,7 @@ FX_PATH="$T/stub2:$T/stub:$PATH" fx_deploy --tags always
 rm -f "$T/inspect-env"
 FX_PATH="$T/stub:$PATH" fx_deploy --tags always
 [[ $RC -eq 0 && -f "$T/inspect-env" ]] || fail "the inspection did not run in the normal case (rc=$RC)"
-for canary in "$CANARY_TOKEN" "$CANARY_DOMAIN" "$CANARY_UNICODE" "$CANARY_SHORT"; do
+for canary in "$CANARY_TOKEN" "$CANARY_DOMAIN" "$CANARY_UNICODE" "$CANARY_SHORT" "$CANARY_SPECIAL" "$CANARY_QUOTES"; do
   ! grep -qF -- "$canary" "$T/inspect-env" || fail "the decrypted secrets were in the environment of the configuration inspection"
 done
 echo "Ansible file writes are pinned off: inherited settings, ansible.cfg log/cache/callback settings and callback_plugins dirs are each refused; print-only callbacks pass"
@@ -410,7 +458,7 @@ grep -q 'FIX_DOMAIN' <<<"$OUT" && grep -q 'FIX_UNICODE' <<<"$OUT" && grep -q 'FI
 ! grep -qE "$CANARY_TOKEN|$CANARY_HOST" <<<"$OUT" || fail "a preflight message printed a value"
 ! grep -q 'PLAY \[' <<<"$OUT" || fail "the playbook ran despite missing required secrets"
 # no target host in the store
-printf 'FIX_TOKEN=x\nFIX_DOMAIN=x\nFIX_UNICODE=x\nFIX_SHORT=x\n' > "$T/plain/nohost.env"
+printf 'FIX_TOKEN=x\nFIX_DOMAIN=x\nFIX_UNICODE=x\nFIX_SHORT=x\nFIX_SPECIAL=x\nFIX_CONTAINER=x\n' > "$T/plain/nohost.env"
 fx_encrypt "$T/plain/nohost.env" "$FIX_REPO/secrets/secrets.enc.env" "$FIX_PUB"
 fx_deploy --tags always;  [[ $RC -eq 78 ]] && grep -q 'TARGET_HOST' <<<"$OUT" || fail "a store without TARGET_HOST must fail preflight naming it (rc=$RC)"
 fx_encrypt "$FIX_PLAIN" "$FIX_REPO/secrets/secrets.enc.env" "$FIX_PUB"
@@ -419,21 +467,21 @@ mkdir -p "$T/nobin"; ln -sf "$(command -v python3)" "$T/nobin/python3"; ln -sf "
 set +e; OUT="$(cd / && env -i PATH="$T/nobin" HOME="$FIX_HOME" HERMES_SECRETS_KEY_FILE="$FIX_KEY" "$FIX_REPO/scripts/deploy" --tags always 2>&1)"; RC=$?; set -e
 [[ $RC -eq 78 ]] && grep -q 'sops is not installed' <<<"$OUT" && grep -q 'age is not installed' <<<"$OUT" || fail "missing sops/age must be reported (rc=$RC)"
 # the store may not inject names that change how the child runs, and TARGET_HOST must be a plain host
-printf 'TARGET_HOST=%s\nFIX_TOKEN=x\nFIX_DOMAIN=x\nFIX_UNICODE=x\nFIX_SHORT=x\nANSIBLE_LOG_PATH=/x\nPATH=/x\nHOME=/x\nLD_PRELOAD=/x\nPYTHONPATH=/x\nSSH_AUTH_SOCK=/x\nHTTPS_PROXY=/x\nNOT_IN_THE_MANIFEST=1\n' "$CANARY_HOST" > "$T/plain/reserved.env"
+printf 'TARGET_HOST=%s\nFIX_TOKEN=x\nFIX_DOMAIN=x\nFIX_UNICODE=x\nFIX_SHORT=x\nFIX_SPECIAL=x\nFIX_CONTAINER=x\nANSIBLE_LOG_PATH=/x\nPATH=/x\nHOME=/x\nLD_PRELOAD=/x\nPYTHONPATH=/x\nSSH_AUTH_SOCK=/x\nHTTPS_PROXY=/x\nNOT_IN_THE_MANIFEST=1\n' "$CANARY_HOST" > "$T/plain/reserved.env"
 fx_encrypt "$T/plain/reserved.env" "$FIX_REPO/secrets/secrets.enc.env" "$FIX_PUB"
 fx_deploy --tags always
 [[ $RC -eq 78 ]] && ! grep -q 'PLAY \[' <<<"$OUT" || fail "names outside the manifest and the declared extras must fail preflight (rc=$RC)"
 for n in ANSIBLE_LOG_PATH PATH HOME LD_PRELOAD PYTHONPATH SSH_AUTH_SOCK HTTPS_PROXY NOT_IN_THE_MANIFEST; do
   grep -qw -- "$n" <<<"$OUT" || fail "the undeclared name $n was not reported"
 done
-printf 'TARGET_HOST=%s\nFIX_TOKEN=\nFIX_DOMAIN=x\nFIX_UNICODE=x\nFIX_SHORT=x\n' "$CANARY_HOST" > "$T/plain/empty.env"
+printf 'TARGET_HOST=%s\nFIX_TOKEN=\nFIX_DOMAIN=x\nFIX_UNICODE=x\nFIX_SHORT=x\nFIX_SPECIAL=x\nFIX_CONTAINER=x\n' "$CANARY_HOST" > "$T/plain/empty.env"
 fx_encrypt "$T/plain/empty.env" "$FIX_REPO/secrets/secrets.enc.env" "$FIX_PUB"
 fx_deploy --tags always;  [[ $RC -eq 78 ]] && grep -q 'FIX_TOKEN' <<<"$OUT" || fail "an EMPTY required value must count as missing (rc=$RC)"
-printf 'TARGET_HOST=-oProxyCommand=id\nFIX_TOKEN=x\nFIX_DOMAIN=x\nFIX_UNICODE=x\nFIX_SHORT=x\n' > "$T/plain/badhost.env"
+printf 'TARGET_HOST=-oProxyCommand=id\nFIX_TOKEN=x\nFIX_DOMAIN=x\nFIX_UNICODE=x\nFIX_SHORT=x\nFIX_SPECIAL=x\nFIX_CONTAINER=x\n' > "$T/plain/badhost.env"
 fx_encrypt "$T/plain/badhost.env" "$FIX_REPO/secrets/secrets.enc.env" "$FIX_PUB"
 fx_deploy --tags always;  [[ $RC -eq 78 ]] && grep -q 'TARGET_HOST' <<<"$OUT" && ! grep -q 'PLAY \[' <<<"$OUT" || fail "an odd TARGET_HOST must fail preflight (rc=$RC)"
 for badhost in '-host' 'localhost\n' 'a b'; do
-  printf 'TARGET_HOST=%s\nFIX_TOKEN=x\nFIX_DOMAIN=x\nFIX_UNICODE=x\nFIX_SHORT=x\n' "$badhost" > "$T/plain/badhost2.env"
+  printf 'TARGET_HOST=%s\nFIX_TOKEN=x\nFIX_DOMAIN=x\nFIX_UNICODE=x\nFIX_SHORT=x\nFIX_SPECIAL=x\nFIX_CONTAINER=x\n' "$badhost" > "$T/plain/badhost2.env"
   fx_encrypt "$T/plain/badhost2.env" "$FIX_REPO/secrets/secrets.enc.env" "$FIX_PUB"
   fx_deploy --tags always;  [[ $RC -eq 78 ]] && grep -q 'TARGET_HOST' <<<"$OUT" && ! grep -q 'PLAY \[' <<<"$OUT" || fail "TARGET_HOST '$badhost' must fail preflight (rc=$RC)"
 done
