@@ -148,6 +148,7 @@ refused "unknown flag"          --become-user root
 refused "tags with space"       --tags 'a b'
 refused "tags with shell"       --tags 'a;id'
 refused "limit from file"       --limit @/etc/hosts
+refused "limit from a relative file" --limit=@hosts
 refused "start-at-task flag"    --start-at-task --check
 refused "verbosity too high"    -vvvvvvv
 refused "missing value"         --tags
@@ -181,6 +182,17 @@ fx_deploy --script show-env
 [[ $RC -eq 0 ]] && grep -q 'SCRIPT SAW THE STORE' <<<"$OUT" && [[ ! -e "$T/shadow-leak" ]] || fail "a file in scripts/ shadowed a standard-library module in the wrapper process (rc=$RC)"
 rm -f "$FIX_REPO/scripts"/{tempfile,json,subprocess,shutil,re}.py
 [[ -z "$(ls "$FIX_REPO/scripts" | grep -E '\.pyc$|__pycache__' || true)" ]] || fail "the wrapper wrote bytecode into scripts/"
+# a compiled-bytecode file planted in scripts/__pycache__ (gitignored, so `git diff` stays clean) must not be loaded in place of the source
+mkdir -p "$FIX_REPO/scripts/__pycache__"
+printf 'import os\nclass StreamRedactor:\n    def __init__(self, values):\n        open("%s/pyc-leak", "a").write(repr(values))\n    def feed(self, c): return c\n    def finish(self): return b""\n' "$T" > "$T/evil_redact.py"
+python3 - "$T/evil_redact.py" "$FIX_REPO/scripts/hermes_redact.py" <<'E'
+import importlib.util, py_compile, sys
+target = importlib.util.cache_from_source(sys.argv[2])
+py_compile.compile(sys.argv[1], cfile=target, invalidation_mode=py_compile.PycInvalidationMode.UNCHECKED_HASH)
+E
+fx_deploy --script show-env
+[[ $RC -eq 0 && ! -e "$T/pyc-leak" ]] && grep -q 'SCRIPT SAW THE STORE' <<<"$OUT" || fail "planted bytecode in scripts/__pycache__ was loaded (rc=$RC)"
+rm -rf "$FIX_REPO/scripts/__pycache__"
 fx_deploy --script link;     [[ $RC -eq 64 ]] && grep -q 'outside the repository' <<<"$OUT" || fail "a registered symlink pointing outside the repository must be refused (rc=$RC)"
 fx_deploy --script not-exec; [[ $RC -eq 64 ]] && grep -q 'not executable' <<<"$OUT" || fail "a non-executable registered script must be refused clearly (rc=$RC)"
 fx_deploy --script kill-self; [[ $RC -eq 137 ]] || fail "a child killed by signal 9 must return 128+9 (got $RC)"
@@ -228,6 +240,14 @@ for _ in $(seq 1 60); do sleep 0.2; grep -q 'STREAM-FIRST' "$T/term.out" 2>/dev/
 kill -TERM "$tpid"; wait "$tpid" || true
 [[ -z "$(ls -A "$FIX_RUN")" ]] || fail "SIGTERM left the wrapper's scratch directory behind: $(ls -A "$FIX_RUN")"
 ! grep -q 'STREAM-LAST' "$T/term.out" || fail "SIGTERM did not stop the play"
+# SIGHUP (a closed terminal) is forwarded too, and the scratch directory is still removed
+( cd / && exec env -i PATH="$PATH" HOME="$FIX_HOME" XDG_RUNTIME_DIR="$FIX_RUN" TMPDIR="$FIX_TMP" HERMES_SECRETS_KEY_FILE="$FIX_KEY" \
+    "$FIX_REPO/scripts/deploy" --tags slow >"$T/hup.out" 2>&1 ) &
+hpid=$!
+for _ in $(seq 1 60); do sleep 0.2; grep -q 'STREAM-FIRST' "$T/hup.out" 2>/dev/null && break; done
+kill -HUP "$hpid"; wait "$hpid" || true
+[[ -z "$(ls -A "$FIX_RUN")" ]] || fail "SIGHUP left the wrapper's scratch directory behind"
+! grep -q 'STREAM-LAST' "$T/hup.out" || fail "SIGHUP did not stop the play"
 echo "vetted flags pass through; extra variables, ad-hoc modules, inventories, other playbooks, odd values and unregistered scripts are refused"
 
 # --- Ansible's own file writes are pinned off ------------------------------------------------------------
@@ -293,6 +313,27 @@ cfg_case "library path in ansible.cfg"            '[defaults]' 'library = ./.scr
 cfg_case "local_tmp in ansible.cfg"               '[defaults]' "local_tmp = $T/lt"
 cfg_case "persistent_connection log in ansible.cfg" '[persistent_connection]' "log_messages = true"
 cfg_case "unknown section in ansible.cfg"         '[galaxy]' 'server_list = x'
+# [DEFAULT] keys are merged into every section and honoured by Ansible: refused as a section of its own
+cfg_case "a [DEFAULT] section in ansible.cfg"     '[DEFAULT]' 'vault_password_file = ./.scratch/vp.sh'
+cfg_case "a [DEFAULT] section with an allowlisted key" '[DEFAULT]' 'forks = 5'   # only the explicit refusal catches this
+cfg_case "interpreter_python in ansible.cfg"      '[defaults]' 'interpreter_python = ./.scratch/py'
+reset_cfg; printf '[defaults]\ncollections_paths = ./.scratch/c\n' >> "$FIX_REPO/ansible.cfg"
+python3 - "$FIX_REPO/ansible.cfg" <<'E'
+import sys; p=sys.argv[1]; t=open(p).read().replace("[defaults]\n","",1).replace("collections_paths = ./.scratch/c\n","",1); open(p,"w").write("[defaults]\ncollections_paths = ./.scratch/c\n"+t)
+E
+fx_deploy --tags always;  pinned_refusal "an in-repo collections_paths (plural key)" 'pinned locations'
+reset_cfg; sed -i 's|^roles_path = ./roles|roles_path = ./roles:|' "$FIX_REPO/ansible.cfg"
+fx_deploy --tags always;  pinned_refusal "an empty roles_path entry" 'pinned locations'
+reset_cfg; sed -i 's|^roles_path = ./roles|roles_path = ./roles\ninventory = ./.scratch/inv|' "$FIX_REPO/ansible.cfg"
+fx_deploy --tags always;  pinned_refusal "an inventory other than inventory.ini" 'inventory must stay'
+reset_cfg; chmod 000 "$FIX_REPO/ansible.cfg"
+fx_deploy --tags always;  pinned_refusal "an unreadable ansible.cfg" 'cannot be read'
+chmod 600 "$FIX_REPO/ansible.cfg"; reset_cfg
+# a repo-local virtualenv (gitignored) is not a plugin location: it must not make the wrapper refuse
+mkdir -p "$FIX_REPO/.venv/lib/site-packages/ansible_collections/x"
+fx_deploy --tags always;  [[ $RC -eq 0 ]] || fail "a repo-local .venv must not make the wrapper refuse (rc=$RC)"
+rm -rf "$FIX_REPO/.venv"
+mkdir -p "$FIX_REPO/Vars_Plugins"; fx_deploy --tags always;  pinned_refusal "a plugin directory name in another letter case" 'vars_plugins'; rm -rf "$FIX_REPO/Vars_Plugins"
 # search paths that leave the repository
 reset_cfg; sed -i 's|^roles_path = ./roles|roles_path = /elsewhere/roles|' "$FIX_REPO/ansible.cfg"
 fx_deploy --tags always;  pinned_refusal "roles_path outside the repository" 'pinned locations'
@@ -486,6 +527,13 @@ for badhost in '-host' 'localhost\n' 'a b'; do
   fx_deploy --tags always;  [[ $RC -eq 78 ]] && grep -q 'TARGET_HOST' <<<"$OUT" && ! grep -q 'PLAY \[' <<<"$OUT" || fail "TARGET_HOST '$badhost' must fail preflight (rc=$RC)"
 done
 fx_encrypt "$FIX_PLAIN" "$FIX_REPO/secrets/secrets.enc.env" "$FIX_PUB"
+# the wrapper must never echo sops' own text: pointed at a file that is not a store, sops names the offending LINE
+printf 'SECRETLINE-xyz789\nsecond line\n' > "$T/plain/notastore.txt"
+for target in "$FIX_KEY" "$T/plain/notastore.txt"; do
+  FX_EXTRA_ENV="HERMES_SECRETS_STORE=$target" fx_deploy --tags always
+  [[ $RC -eq 78 ]] && grep -q 'cannot decrypt' <<<"$OUT" || fail "a non-store file must fail preflight (rc=$RC)"
+  ! grep -qE 'AGE-SECRET-KEY|SECRETLINE|xyz789' <<<"$OUT" || fail "sops' text (a key or a plaintext line) was echoed by preflight"
+done
 echo "preflight: missing/loose/foreign key, missing/corrupt store, missing required names (by name only) and missing tools each stop the run before anything runs"
 
 # --- a leftover plaintext .env: warned about, never used -------------------------------------------------

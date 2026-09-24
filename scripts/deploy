@@ -36,6 +36,10 @@ import sys
 # where the hermes_* modules are still found but nothing else can be overridden — and never write bytecode there.
 _HERE = os.path.dirname(os.path.realpath(__file__))
 sys.dont_write_bytecode = True
+# ... and never READ bytecode from scripts/__pycache__ either: an UNCHECKED-hash .pyc dropped there (it is gitignored, so
+# `git diff` stays clean) would be loaded in place of the source. The nonexistent prefix makes every import compile
+# from source.
+sys.pycache_prefix = "/nonexistent-hermes-pycache"
 sys.path[:] = [p for p in sys.path if os.path.realpath(p or os.getcwd()) != _HERE]
 sys.path.append(_HERE)
 
@@ -210,6 +214,9 @@ def cfg_allowlist_problems(root):
     except (configparser.Error, OSError, UnicodeError) as exc:
         return ["ansible.cfg cannot be read or parsed (%s)" % type(exc).__name__]
     problems = []
+    if parser.defaults():
+        # [DEFAULT] keys are merged into every section and Ansible honours them (`[DEFAULT] vault_password_file=...`)
+        problems.append("ansible.cfg has a [DEFAULT] section, which is not on the allowlist")
     for section in parser.sections():
         allowed = CFG_ALLOWED.get(section)
         if allowed is None:
@@ -219,9 +226,11 @@ def cfg_allowlist_problems(root):
             if key not in allowed:
                 problems.append("ansible.cfg sets %s in [%s], which is not on the allowlist (it can load or run code, "
                                 "or write output the redactor never sees)" % (key, section))
+            elif key == "inventory" and value.strip() != "inventory.ini":
+                problems.append("ansible.cfg inventory must stay inventory.ini (it is overridden by the wrapper's -i, pinned anyway)")
             elif key in CFG_PATH_VALUES:
-                for entry in [e.strip() for e in value.split(":") if e.strip()]:
-                    if entry not in CFG_PATH_VALUES[key]:
+                for entry in [e.strip() for e in value.split(":")]:
+                    if entry not in CFG_PATH_VALUES[key]:   # (an empty entry is not a pinned location either)
                         problems.append("ansible.cfg %s entry %r is not one of the pinned locations (%s)"
                                         % (key, entry, ", ".join(sorted(CFG_PATH_VALUES[key]))))
     return problems
@@ -269,8 +278,10 @@ def effective_config_problems(root, env, pins):
     problems = cfg_allowlist_problems(root)
     pins.update({"ANSIBLE_STDOUT_CALLBACK": "default"})   # ANSIBLE_CALLBACKS_ENABLED only if the config sets it (empty is invalid)
     for dirpath, dirnames, _files in os.walk(root):
-        dirnames[:] = [d for d in dirnames if d not in (".git", ".scratch", ".ansible", "node_modules")]
-        for name in sorted(PLUGIN_DIR_NAMES.intersection(dirnames) | PLUGIN_DIR_NAMES.intersection(_files)):
+        dirnames[:] = [d for d in dirnames if d not in (".git", ".scratch", ".ansible", "node_modules", ".venv", "venv", ".tox", "__pycache__")]
+        # (a repo-local virtualenv holds site-packages/ansible_collections; Ansible never loads from it, and the config
+        # allowlist pins every search path, so skipping it is safe — refusing it would make a local venv unusable)
+        for name in sorted(PLUGIN_DIR_NAMES.intersection(n.lower() for n in dirnames) | PLUGIN_DIR_NAMES.intersection(n.lower() for n in _files)):
             # (a directory, a symlink to one — os.walk lists but never visits those — or a file of that name)
             problems.append("a %s entry exists in %s (Ansible auto-loads code from it into the process that holds the "
                             "decrypted environment)" % (name, os.path.relpath(dirpath, root) if dirpath != root else "."))

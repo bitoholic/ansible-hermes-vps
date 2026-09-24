@@ -102,6 +102,20 @@ def sops_env(environ=None):
     return environ
 
 
+def _sops_failure_reason(stderr):
+    """A fixed-vocabulary reason for a sops failure; never any of sops' own text."""
+    text = stderr.lower()
+    if "mac mismatch" in text:
+        return "the store's integrity check failed (edited or corrupted)"
+    if "metadata not found" in text or "sops metadata" in text:
+        return "the file is not a SOPS-encrypted store"
+    if "no identity matched" in text or "failed to get the data key" in text or "no age identity" in text or "no key could decrypt" in text:
+        return "your key is not a recipient of this store"
+    if "invalid" in text or "unmarshal" in text or "parse" in text:
+        return "the file is not a valid encrypted dotenv store"
+    return "sops could not decrypt it"
+
+
 def decrypt_store(path, environ=None):
     """Decrypt the dotenv store into a {name: value} dict held only in memory.
 
@@ -113,9 +127,10 @@ def decrypt_store(path, environ=None):
         env=sops_env(environ), capture_output=True, text=True, encoding="utf-8",
     )
     if proc.returncode != 0:
-        # sops' stderr can name the key path and the failure but never a decrypted value; still, keep it short.
-        detail = (proc.stderr or "").strip().splitlines()[-1:] or ["no detail"]
-        raise SecretsError("cannot decrypt the secrets store %s (%s)" % (path, detail[0][:200]))
+        # NEVER print sops' own text: for a file that is not a store it echoes the offending line — which can be a
+        # private key or a plaintext secret (HERMES_SECRETS_STORE may point anywhere the wrapper can read). Map the
+        # failure to a small fixed vocabulary instead.
+        raise SecretsError("cannot decrypt the secrets store %s (%s)" % (path, _sops_failure_reason(proc.stderr or "")))
     try:
         values = json.loads(proc.stdout)
     except ValueError:
