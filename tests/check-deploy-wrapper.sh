@@ -239,6 +239,27 @@ start=$SECONDS
 ( cd / && env -i PATH="$PATH" HOME="$FIX_HOME" XDG_RUNTIME_DIR="$FIX_RUN" TMPDIR="$FIX_TMP" HERMES_SECRETS_KEY_FILE="$FIX_KEY" \
     timeout 30 "$FIX_REPO/scripts/deploy" --script big-output 2>/dev/null | head -c 10 >/dev/null ) || true
 (( SECONDS - start < 20 )) || fail "the wrapper hung when its consumer closed the pipe"
+# a registered script runs with cwd = the repository root: an untracked re.py / yaml.py / json.py there must NOT be
+# imported by the script's `python3 -c` (PYTHONSAFEPATH), and its temp files go to the private scratch directory
+for m in re yaml json; do printf 'import os\nopen("%s/pypath-leak", "a").write(os.environ.get("FIX_TOKEN", ""))\n' "$T" > "$FIX_REPO/$m.py"; done
+fx_deploy --script pyimport
+[[ $RC -eq 0 && ! -e "$T/pypath-leak" ]] && grep -q 'IMPORT-OK' <<<"$OUT" || fail "an untracked re.py/yaml.py/json.py in the repository root ran inside a registered script (rc=$RC)"
+grep -q 'TMPDIR-PRIVATE' <<<"$OUT" || fail "a registered script's TMPDIR is not the wrapper's private scratch directory"
+rm -f "$FIX_REPO/re.py" "$FIX_REPO/yaml.py" "$FIX_REPO/json.py"
+# a consumer that closes the pipe (| head) must not turn a successful child into exit status 120
+( cd / && env -i PATH="$PATH" HOME="$FIX_HOME" XDG_RUNTIME_DIR="$FIX_RUN" TMPDIR="$FIX_TMP" HERMES_SECRETS_KEY_FILE="$FIX_KEY" \
+    "$FIX_REPO/scripts/deploy" --script big-output 2>"$T/head.err" | head -c 10 >/dev/null; exit "${PIPESTATUS[0]}" ); hrc=$?
+[[ $hrc -eq 0 ]] && ! grep -q 'Exception ignored' "$T/head.err" || fail "a closed consumer changed the wrapper's exit status or printed an exception (rc=$hrc)"
+# ^C sent to the wrapper alone: it keeps waiting for the child and reports its status (no traceback, play completes)
+# (a background job in a non-interactive shell starts with SIGINT IGNORED, which Python would then keep: reset it first,
+# or the signal below would be a no-op and this test vacuous)
+( cd / && exec env -i PATH="$PATH" HOME="$FIX_HOME" XDG_RUNTIME_DIR="$FIX_RUN" TMPDIR="$FIX_TMP" HERMES_SECRETS_KEY_FILE="$FIX_KEY" \
+    python3 -c 'import os, signal, sys; signal.signal(signal.SIGINT, signal.SIG_DFL); os.execv(sys.argv[1], sys.argv[1:])' \
+    "$FIX_REPO/scripts/deploy" --tags slow >"$T/int.out" 2>&1 ) &
+ipid=$!
+for _ in $(seq 1 60); do sleep 0.2; grep -q 'STREAM-FIRST' "$T/int.out" 2>/dev/null && break; done
+kill -INT "$ipid"; wait "$ipid"; irc=$?
+[[ $irc -eq 0 ]] && grep -q 'STREAM-LAST' "$T/int.out" && ! grep -q Traceback "$T/int.out" || { cat "$T/int.out" >&2; fail "SIGINT to the wrapper alone must not abort it (rc=$irc)"; }
 # the TAIL of the output must survive a slow consumer: a child that writes 125 KB and exits, read by a consumer that
 # starts reading late, must deliver every byte (the wrapper waits for a thread that is blocked WRITING)
 got=$( ( cd / && env -i PATH="$PATH" HOME="$FIX_HOME" XDG_RUNTIME_DIR="$FIX_RUN" TMPDIR="$FIX_TMP" HERMES_SECRETS_KEY_FILE="$FIX_KEY" \

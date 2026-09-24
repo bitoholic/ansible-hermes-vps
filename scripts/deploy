@@ -55,6 +55,9 @@ import configparser  # noqa: E402
 
 import importlib.util  # noqa: E402
 
+if sys.version_info < (3, 11):    # PYTHONSAFEPATH (used to keep the repository out of a child's sys.path) needs 3.11+
+    sys.exit("deploy: Python 3.11 or newer is required")
+
 
 def _load(name):
     """Load scripts/<name>.py from its explicit path (never through sys.path, so nothing else can take its place)."""
@@ -350,17 +353,24 @@ def pump(fd, sink, redactor, state):
         if broken or not data:
             return
         state["writing"] = True
+        state["last"] = time.monotonic()
         try:
             sink.write(data)
             sink.flush()
         except (BrokenPipeError, ValueError, OSError):
             broken = True
+            try:   # nothing will read this any more: without this the interpreter's exit flush raises and exits 120
+                os.dup2(os.open(os.devnull, os.O_WRONLY), sink.fileno())
+            except (OSError, ValueError, AttributeError):
+                pass
         finally:
             state["writing"] = False
+            state["last"] = time.monotonic()
 
     failed = False
     while True:
         chunk = os.read(fd, 4096)
+        state["last"] = time.monotonic()
         if not chunk:
             break
         if failed:
@@ -406,7 +416,7 @@ def run_child(cmd, cwd, env, secret_values):
         for s, handler in old.items():
             signal.signal(s, handler)
         raise
-    states = [{"writing": False}, {"writing": False}]
+    states = [{"writing": False, "last": time.monotonic()}, {"writing": False, "last": time.monotonic()}]
     threads = [
         threading.Thread(target=pump, daemon=True,
                          args=(proc.stdout.fileno(), out_sink, hermes_redact.StreamRedactor(secret_values), states[0])),
@@ -424,14 +434,14 @@ def run_child(cmd, cwd, env, secret_values):
                 continue   # ^C also reaches the child (same process group); keep waiting so we report its status
     finally:
         # A grandchild that inherited the pipes can keep them open after the child has exited; do not wait forever.
-        # A thread that is blocked READING (nothing more is coming) is abandoned after a few seconds; a thread that is
-        # blocked WRITING to a slow consumer still has output to deliver, and is waited for (the tail of the output —
-        # the play recap — must not be lost behind a stalled `| less`).
-        deadline = time.monotonic() + 5
+        # A thread that is blocked READING with nothing arriving (a grandchild holding the pipe open) is abandoned once
+        # nothing has happened for a few seconds after the child exited; a thread that is writing or has just moved data
+        # still has output to deliver, and is waited for (the tail of the output — the play recap — must not be lost
+        # behind a stalled `| less`).
+        exited = time.monotonic()
         for t, st in zip(threads, states):
-            t.join(timeout=max(0.0, deadline - time.monotonic()))
-            while t.is_alive() and st["writing"]:
-                t.join(timeout=0.5)
+            while t.is_alive() and (st["writing"] or time.monotonic() - max(st["last"], exited) < 5):
+                t.join(timeout=0.25)
         for s, handler in old.items():
             signal.signal(s, handler)
     return 128 - status if status < 0 else status
@@ -555,14 +565,20 @@ def main(argv):
                 print("deploy: refused: registered script %s is not executable" % script, file=sys.stderr)
                 return EX_REFUSED
             cmd = [path] + script_args
+            scratch = private_scratch()
+            env["TMPDIR"] = os.path.join(scratch, "tmp")   # a script's mktemp files (rendered rules, ...) stay off persistent storage
 
         env.update(values)
         env["PYTHONUNBUFFERED"] = "1"
+        # The child runs with cwd = the repository root. Without this, `python3 -c ...` (verify-live does it) puts the cwd
+        # FIRST on its sys.path, so an untracked re.py / yaml.py / json.py in the repository would run inside a registered
+        # script with the decrypted environment. PYTHONSAFEPATH stops Python adding cwd / the script's directory.
+        env["PYTHONSAFEPATH"] = "1"
         # Redaction (ticket #02) masks every value of at least the minimum length in the output streams.
         try:
             return run_child(cmd, root, env, list(values.values()))
-        except OSError as exc:
-            print("deploy: cannot start %s: %s" % (os.path.basename(cmd[0]), exc.strerror or type(exc).__name__), file=sys.stderr)
+        except (OSError, ValueError) as exc:
+            print("deploy: cannot start %s: %s" % (os.path.basename(cmd[0]), getattr(exc, "strerror", None) or type(exc).__name__), file=sys.stderr)
             return EX_CONFIG
     finally:
         if scratch:
