@@ -124,7 +124,7 @@ def decrypt_store(path, environ=None):
     """
     proc = subprocess.run(
         ["sops", "decrypt", "--input-type", "dotenv", "--output-type", "json", path],
-        env=sops_env(environ), capture_output=True, text=True, encoding="utf-8",
+        env=sops_env(environ), capture_output=True, text=True, encoding="utf-8", errors="replace",
     )
     if proc.returncode != 0:
         # NEVER print sops' own text: for a file that is not a store it echoes the offending line — which can be a

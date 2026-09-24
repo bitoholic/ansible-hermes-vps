@@ -76,6 +76,7 @@ link          scripts/fx-link.sh
 sibling       ../repo-evil/x.sh
 big-output    scripts/fx-big-output.sh
 grandchild    scripts/fx-grandchild.sh
+medium        scripts/fx-medium-output.sh
 outerr        scripts/fx-outerr.sh
 C
   cat > "$repo/scripts/fx-show-env.sh" <<'C'
@@ -112,6 +113,7 @@ SPLIT
   ln -s ../../outside.sh "$repo/scripts/fx-link.sh"
   mkdir -p "$dir/repo-evil"; printf '#!/usr/bin/env bash\necho sibling-ran\n' > "$dir/repo-evil/x.sh"; chmod +x "$dir/repo-evil/x.sh"
   printf '#!/usr/bin/env bash\nhead -c 5000000 /dev/zero | tr "\\0" x\n' > "$repo/scripts/fx-big-output.sh"
+  printf '#!/usr/bin/env bash\nhead -c 125000 /dev/zero | tr "\\0" x\necho\n' > "$repo/scripts/fx-medium-output.sh"; chmod +x "$repo/scripts/fx-medium-output.sh"
   printf '#!/usr/bin/env bash\nsleep 8 &\necho parent-done\nexit 0\n' > "$repo/scripts/fx-grandchild.sh"
   printf '#!/usr/bin/env bash\necho OUT-LINE\necho ERR-LINE >&2\n' > "$repo/scripts/fx-outerr.sh"
   chmod +x "$repo/scripts/fx-big-output.sh" "$repo/scripts/fx-grandchild.sh" "$repo/scripts/fx-outerr.sh"

@@ -181,6 +181,18 @@ done
 fx_deploy --script show-env
 [[ $RC -eq 0 ]] && grep -q 'SCRIPT SAW THE STORE' <<<"$OUT" && [[ ! -e "$T/shadow-leak" ]] || fail "a file in scripts/ shadowed a standard-library module in the wrapper process (rc=$RC)"
 rm -f "$FIX_REPO/scripts"/{tempfile,json,subprocess,shutil,re}.py
+# scripts/ must not be an import source AT ALL: modules that do not exist elsewhere (msvcrt, which subprocess tries to
+# import and is absent on Linux), an extension module and a package standing in for a sibling would all run inside the
+# process that holds the decrypted values
+printf 'import sys\ndef _h(event, args):\n    if event == "subprocess.Popen": open("%s/msvcrt-leak", "a").write(repr(args))\nsys.addaudithook(_h)\nraise ModuleNotFoundError("msvcrt")\n' "$T" > "$FIX_REPO/scripts/msvcrt.py"
+so="$(python3 -c 'import importlib.machinery as m; print(m.EXTENSION_SUFFIXES[0])')"
+printf 'not a real extension module' > "$FIX_REPO/scripts/hermes_redact$so"; cp "$FIX_REPO/scripts/hermes_redact$so" "$FIX_REPO/scripts/hermes_secrets$so"
+mkdir -p "$FIX_REPO/scripts/hermes_redact"; printf 'open("%s/pkg-leak", "a").write("ran")\n' "$T" > "$FIX_REPO/scripts/hermes_redact/__init__.py"
+fx_deploy --script show-env
+[[ $RC -eq 0 && ! -e "$T/msvcrt-leak" && ! -e "$T/pkg-leak" ]] && grep -q 'SCRIPT SAW THE STORE' <<<"$OUT" || fail "a file added to scripts/ (msvcrt.py, an extension module, a package) ran inside the wrapper (rc=$RC)"
+fx_deploy --tags always
+grep -q 'ok: \[\[redacted\]\]' <<<"$OUT" || fail "with planted modules in scripts/ the real redactor was not the one used"
+rm -rf "$FIX_REPO/scripts/msvcrt.py" "$FIX_REPO/scripts/hermes_redact$so" "$FIX_REPO/scripts/hermes_secrets$so" "$FIX_REPO/scripts/hermes_redact"
 [[ -z "$(ls "$FIX_REPO/scripts" | grep -E '\.pyc$|__pycache__' || true)" ]] || fail "the wrapper wrote bytecode into scripts/"
 # a compiled-bytecode file planted in scripts/__pycache__ (gitignored, so `git diff` stays clean) must not be loaded in place of the source
 mkdir -p "$FIX_REPO/scripts/__pycache__"
@@ -227,6 +239,11 @@ start=$SECONDS
 ( cd / && env -i PATH="$PATH" HOME="$FIX_HOME" XDG_RUNTIME_DIR="$FIX_RUN" TMPDIR="$FIX_TMP" HERMES_SECRETS_KEY_FILE="$FIX_KEY" \
     timeout 30 "$FIX_REPO/scripts/deploy" --script big-output 2>/dev/null | head -c 10 >/dev/null ) || true
 (( SECONDS - start < 20 )) || fail "the wrapper hung when its consumer closed the pipe"
+# the TAIL of the output must survive a slow consumer: a child that writes 125 KB and exits, read by a consumer that
+# starts reading late, must deliver every byte (the wrapper waits for a thread that is blocked WRITING)
+got=$( ( cd / && env -i PATH="$PATH" HOME="$FIX_HOME" XDG_RUNTIME_DIR="$FIX_RUN" TMPDIR="$FIX_TMP" HERMES_SECRETS_KEY_FILE="$FIX_KEY" \
+    "$FIX_REPO/scripts/deploy" --script medium 2>/dev/null | ( sleep 8; wc -c ) ) )
+[[ "$got" -eq 125001 ]] || fail "output was lost behind a slow consumer ($got of 125001 bytes delivered)"
 # a grandchild that keeps the pipes open after the child exits must not hold the wrapper (bounded wait)
 start=$SECONDS; fx_deploy --script grandchild
 [[ $RC -eq 0 ]] && grep -q 'parent-done' <<<"$OUT" || fail "the grandchild script should have returned 0 (rc=$RC)"
@@ -529,7 +546,8 @@ done
 fx_encrypt "$FIX_PLAIN" "$FIX_REPO/secrets/secrets.enc.env" "$FIX_PUB"
 # the wrapper must never echo sops' own text: pointed at a file that is not a store, sops names the offending LINE
 printf 'SECRETLINE-xyz789\nsecond line\n' > "$T/plain/notastore.txt"
-for target in "$FIX_KEY" "$T/plain/notastore.txt"; do
+printf '\xff\xfe\x00\x80binary-xyz789' > "$T/plain/binstore.bin"      # not UTF-8: must still be a clean "cannot decrypt"
+for target in "$FIX_KEY" "$T/plain/notastore.txt" "$T/plain/binstore.bin"; do
   FX_EXTRA_ENV="HERMES_SECRETS_STORE=$target" fx_deploy --tags always
   [[ $RC -eq 78 ]] && grep -q 'cannot decrypt' <<<"$OUT" || fail "a non-store file must fail preflight (rc=$RC)"
   ! grep -qE 'AGE-SECRET-KEY|SECRETLINE|xyz789' <<<"$OUT" || fail "sops' text (a key or a plaintext line) was echoed by preflight"

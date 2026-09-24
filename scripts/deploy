@@ -31,9 +31,10 @@ SOPS_AGE_KEY_CMD is honoured for a hardware-backed key (Tier 2) with no change h
 import os
 import sys
 
-# Python puts this script's directory FIRST on sys.path. This process holds the decrypted values, so a file added to
-# scripts/ (json.py, tempfile.py, ...) must not be able to shadow the standard library: move the directory to the END,
-# where the hermes_* modules are still found but nothing else can be overridden — and never write bytecode there.
+# Python puts this script's directory FIRST on sys.path. This process holds the decrypted values, so scripts/ must not be
+# an import source at all: a file added there (json.py, tempfile.py; msvcrt.py, which subprocess tries to import and which
+# does not exist on Linux; an extension module hermes_redact*.so, gitignored; a hermes_redact/ package) would run inside
+# it. The directory is removed from sys.path and the two sibling modules are loaded from explicit .py paths.
 _HERE = os.path.dirname(os.path.realpath(__file__))
 sys.dont_write_bytecode = True
 # ... and never READ bytecode from scripts/__pycache__ either: an UNCHECKED-hash .pyc dropped there (it is gitignored, so
@@ -41,7 +42,6 @@ sys.dont_write_bytecode = True
 # from source.
 sys.pycache_prefix = "/nonexistent-hermes-pycache"
 sys.path[:] = [p for p in sys.path if os.path.realpath(p or os.getcwd()) != _HERE]
-sys.path.append(_HERE)
 
 import json  # noqa: E402
 import re  # noqa: E402
@@ -53,8 +53,20 @@ import threading  # noqa: E402
 import time  # noqa: E402
 import configparser  # noqa: E402
 
-import hermes_redact  # noqa: E402
-import hermes_secrets as hs  # noqa: E402
+import importlib.util  # noqa: E402
+
+
+def _load(name):
+    """Load scripts/<name>.py from its explicit path (never through sys.path, so nothing else can take its place)."""
+    spec = importlib.util.spec_from_file_location(name, os.path.join(_HERE, name + ".py"))
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+hermes_redact = _load("hermes_redact")
+hs = _load("hermes_secrets")
 
 EX_REFUSED = 64
 EX_CONFIG = 78
@@ -328,7 +340,7 @@ def effective_config_problems(root, env, pins):
 # ---------------------------------------------------------------------------------------------
 # Running the child with live, redacted output
 # ---------------------------------------------------------------------------------------------
-def pump(fd, sink, redactor):
+def pump(fd, sink, redactor, state):
     """Copy child output to `sink` through the redactor, live. If the consumer goes away (e.g. `| head`)
     keep draining and discarding, so the child never blocks on a full pipe."""
     broken = False
@@ -337,11 +349,14 @@ def pump(fd, sink, redactor):
         nonlocal broken
         if broken or not data:
             return
+        state["writing"] = True
         try:
             sink.write(data)
             sink.flush()
         except (BrokenPipeError, ValueError, OSError):
             broken = True
+        finally:
+            state["writing"] = False
 
     failed = False
     while True:
@@ -391,11 +406,12 @@ def run_child(cmd, cwd, env, secret_values):
         for s, handler in old.items():
             signal.signal(s, handler)
         raise
+    states = [{"writing": False}, {"writing": False}]
     threads = [
         threading.Thread(target=pump, daemon=True,
-                         args=(proc.stdout.fileno(), out_sink, hermes_redact.StreamRedactor(secret_values))),
+                         args=(proc.stdout.fileno(), out_sink, hermes_redact.StreamRedactor(secret_values), states[0])),
         threading.Thread(target=pump, daemon=True,
-                         args=(proc.stderr.fileno(), err_sink, hermes_redact.StreamRedactor(secret_values))),
+                         args=(proc.stderr.fileno(), err_sink, hermes_redact.StreamRedactor(secret_values), states[1])),
     ]
     for t in threads:
         t.start()
@@ -408,9 +424,14 @@ def run_child(cmd, cwd, env, secret_values):
                 continue   # ^C also reaches the child (same process group); keep waiting so we report its status
     finally:
         # A grandchild that inherited the pipes can keep them open after the child has exited; do not wait forever.
+        # A thread that is blocked READING (nothing more is coming) is abandoned after a few seconds; a thread that is
+        # blocked WRITING to a slow consumer still has output to deliver, and is waited for (the tail of the output —
+        # the play recap — must not be lost behind a stalled `| less`).
         deadline = time.monotonic() + 5
-        for t in threads:
+        for t, st in zip(threads, states):
             t.join(timeout=max(0.0, deadline - time.monotonic()))
+            while t.is_alive() and st["writing"]:
+                t.join(timeout=0.5)
         for s, handler in old.items():
             signal.signal(s, handler)
     return 128 - status if status < 0 else status
