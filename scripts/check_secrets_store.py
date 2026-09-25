@@ -53,12 +53,14 @@ hs = _load("hermes_secrets")
 # value's length): it does not prove the ciphertext decrypts (no key here), but text such as `ENC[AES256_GCM,data:hunter2,
 # iv:AAAA,tag:BBBB,type:str]` — plaintext dressed as ciphertext — does not pass.
 _B64 = r"(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?"
-_ENC_BODY = r"ENC\[AES256_GCM,data:(?P<data>" + _B64 + r"),iv:[A-Za-z0-9+/]{43}=,tag:[A-Za-z0-9+/]{22}==,type:(?P<type>str|int|float|bytes|bool|comment)\]"
+_ENC_BODY = r"ENC\[AES256_GCM,data:(?P<data>" + _B64 + r"),iv:[A-Za-z0-9+/]{43}=,tag:[A-Za-z0-9+/]{22}==,type:(?P<type>str|comment)\]"
 ENC_RE = re.compile(r"^" + _ENC_BODY + r"$")
 COMMENT_RE = re.compile(r"^#" + _ENC_BODY + r"$")
-AGE_ENC_RE = re.compile(r"^-----BEGIN AGE ENCRYPTED FILE-----\\n")
+# An age-encrypted data key as SOPS stores it in a dotenv value: PEM-style armour with literal `\n` separators and base64
+# lines only (a plaintext tail, or plaintext instead of base64, is refused). It is stored once per recipient.
+AGE_ENC_RE = re.compile(r"^-----BEGIN AGE ENCRYPTED FILE-----\\n(?:[A-Za-z0-9+/]{1,64}={0,2}\\n)+-----END AGE ENCRYPTED FILE-----\\n$")
 TIMESTAMP_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
-VERSION_RE = re.compile(r"^\d+\.\d+\.\d+")
+VERSION_RE = re.compile(r"^\d+\.\d+\.\d+$")
 # The ONLY metadata names a SOPS dotenv store carries when encrypted to age recipients with default settings. Any other
 # `sops_*` name is refused: SOPS ignores it on decrypt, so it would be a place to hide a plaintext value.
 DEFAULT_METADATA = {"sops_unencrypted_suffix": "_unencrypted"}
@@ -67,6 +69,8 @@ AGE_RECIPIENT_RE = re.compile(r"^age1[a-z0-9]{58}$")
 WEAKENING_KEYS = ("unencrypted_suffix", "unencrypted_regex", "unencrypted_comment_regex", "encrypted_suffix",
                   "encrypted_regex", "encrypted_comment_regex", "mac_only_encrypted")
 PLAINTEXT_FILE_THRESHOLD = 3
+# key material in any tracked or untracked file (assembled from pieces so this file does not match itself)
+PRIVATE_KEY_RES = (re.compile("AGE-SECRET-" + r"KEY-1[A-Z0-9]{50,}"), re.compile("-----BEGIN (?:[A-Z]+ )?PRIVATE " + "KEY-----"))
 PLACEHOLDER_HINTS = ("%s", "$", "{{", "<", ">", "[", "...", "xxx", "changeme", "placeholder", "example", "your-", "your_",
                      "test", "fake", "dummy", "canary", "fixture", "sample")
 FIXTURE_STYLE_RE = re.compile(r"^[A-Z0-9_,]+$")      # WIKI_KEY, AUTHELIA_HASH, U1,U2: a test fixture's stand-in, not a real credential
@@ -83,13 +87,41 @@ def tracked_files(root):
     proc = git(root, "ls-files", "-z")
     if proc.returncode != 0:
         raise RuntimeError("not a git repository (the guard reads the tracked file list): %s" % root)
-    return [f for f in proc.stdout.decode("utf-8", "replace").split("\0") if f]
+    return [f for f in os.fsdecode(proc.stdout).split("\0") if f]
 
 
 def untracked_files(root):
     """Files a `git add -A` would pick up next: untracked and not ignored."""
     proc = git(root, "ls-files", "-z", "--others", "--exclude-standard")
-    return [f for f in proc.stdout.decode("utf-8", "replace").split("\0") if f] if proc.returncode == 0 else []
+    return [f for f in os.fsdecode(proc.stdout).split("\0") if f] if proc.returncode == 0 else []
+
+
+_BECH32 = "qpzry9x8gf2tvdw0s3jn54khce6mua7l"
+
+
+def valid_age_recipient(key):
+    """An age public key is a bech32 string (hrp `age`): verify the checksum, so a plaintext lookalike of the right length and
+    alphabet — a place to hide 58 characters — is refused. No key material is involved."""
+    if not isinstance(key, str) or not AGE_RECIPIENT_RE.match(key):
+        return False
+    hrp, data = key.rsplit("1", 1)
+    if hrp != "age":
+        return False
+    try:
+        values = [_BECH32.index(c) for c in data]
+    except ValueError:
+        return False
+    def polymod(vals):
+        gen = (0x3b6a57b2, 0x26508e6d, 0x1ea119fa, 0x3d4233dd, 0x2a1462b3)
+        chk = 1
+        for v in vals:
+            top = chk >> 25
+            chk = (chk & 0x1ffffff) << 5 ^ v
+            for i in range(5):
+                chk ^= gen[i] if (top >> i) & 1 else 0
+        return chk
+    expand = [ord(c) >> 5 for c in hrp] + [0] + [ord(c) & 31 for c in hrp]
+    return polymod(expand + values) == 1
 
 
 def check_metadata(name, value):
@@ -105,8 +137,10 @@ def check_metadata(name, value):
     m = re.fullmatch(r"sops_age__list_(\d+)__map_(recipient|enc)", name)
     if m:
         if m.group(2) == "recipient":
-            return None if AGE_RECIPIENT_RE.match(value) else "%s is not an age public key" % name
+            return None if valid_age_recipient(value) else "%s is not an age public key" % name
         return None if AGE_ENC_RE.match(value) else "%s is not an age-encrypted data key" % name
+    if name.startswith(("sops_key_groups__", "sops_shamir_threshold")):
+        return "%s: multi-group / Shamir stores are not used by this repository (recipients are one flat age list)" % name
     return "%s is not a SOPS metadata name this repository uses (a `sops_`-prefixed name is ignored by SOPS: it would hide a plaintext value)" % name
 
 
@@ -116,7 +150,7 @@ def check_store_text(text, rel, root):
     for number, line in enumerate(text.splitlines(), 1):
         if not line.strip():
             continue
-        if COMMENT_RE.match(line):
+        if COMMENT_RE.match(line) or line == "#":      # (SOPS leaves an EMPTY comment as a bare `#`; it carries no text)
             continue
         m = NAME_LINE_RE.match(line)
         if not m:
@@ -185,10 +219,12 @@ def check_sops_config(path, store_rel):
                 recipients += [r for r in (group.get("age") or [])]
         if isinstance(rule.get("age"), str):
             recipients += [r.strip() for r in rule["age"].split(",") if r.strip()]
+        elif isinstance(rule.get("age"), list):
+            recipients += [str(r) for r in rule["age"]]
         if not recipients:
             problems.append(".sops.yaml rule %d lists no age recipient" % (i + 1))
         for r in recipients:
-            if not AGE_RECIPIENT_RE.match(str(r)):
+            if not valid_age_recipient(str(r)):
                 problems.append(".sops.yaml rule %d lists a recipient that is not an age public key" % (i + 1))
     if not scoped:
         problems.append(".sops.yaml has no rule whose path_regex matches the store's path %s" % store_rel)
@@ -200,7 +236,7 @@ def looks_like_plaintext_secrets(text, names):
     found = set()
     for line in text.lstrip("\ufeff").splitlines():
         # NAME=value, export NAME=value, NAME = value, `- NAME=value` (compose), `NAME: value` (YAML), "NAME": "value", (JSON)
-        m = re.match(r"^\s*(?:\{\s*)?(?:-\s+)?(?:export\s+)?(?:([A-Za-z_][A-Za-z0-9_]*)\s*=|[\"']?([A-Za-z_][A-Za-z0-9_]*)[\"']?\s*:(?=\s))\s*(.*)$", line)
+        m = re.match(r"^\s*(?:\{\s*)?(?:-\s+)?(?:export\s+|declare\s+-x\s+)?(?:([A-Za-z_][A-Za-z0-9_]*)\s*=|[\"']?([A-Za-z_][A-Za-z0-9_]*)[\"']?\s*:(?=\s))\s*(.*)$", line)
         if not m:
             continue
         name = m.group(1) or m.group(2)
@@ -251,7 +287,8 @@ def run(root):
             problems.append("%s: a file with the name of a plaintext secrets file (tracked, or untracked and not ignored)" % path)
         full = os.path.join(root, path)
         try:
-            if not os.path.isfile(full) or os.path.getsize(full) > TEXT_SIZE_LIMIT:
+            # a symlink's TARGET is never read (it could be outside the repository — or the operator's own .env)
+            if os.path.islink(full) or not os.path.isfile(full) or os.path.getsize(full) > TEXT_SIZE_LIMIT:
                 continue
             with open(full, "rb") as fh:
                 raw = fh.read()
@@ -259,7 +296,10 @@ def run(root):
             continue
         if b"\0" in raw:
             continue
-        found = looks_like_plaintext_secrets(raw.decode("utf-8", "replace"), names)
+        text = raw.decode("utf-8", "replace")
+        if any(rx.search(text) for rx in PRIVATE_KEY_RES):
+            problems.append("%s: contains private key material (an age identity or a PEM private key)" % path)
+        found = looks_like_plaintext_secrets(text, names)
         if len(found) >= PLAINTEXT_FILE_THRESHOLD:
             problems.append("%s: looks like a plaintext secrets file (%d manifest names assigned values, e.g. %s)"
                             % (path, len(found), ", ".join(sorted(found)[:3])))

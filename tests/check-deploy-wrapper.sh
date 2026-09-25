@@ -717,6 +717,12 @@ fx_deploy --tags always;  [[ $RC -eq 78 ]] && grep -q 'store is missing' <<<"$OU
 head -c 60 "$T/store.bak" > "$FIX_REPO/secrets/secrets.enc.env"
 fx_deploy --tags always;  [[ $RC -eq 78 ]] && grep -q 'cannot decrypt' <<<"$OUT" || fail "a corrupt store must fail preflight (rc=$RC)"
 mv "$T/store.bak" "$FIX_REPO/secrets/secrets.enc.env"
+# sops only WARNS (rc 0) about a forged/unencrypted comment line; the wrapper must refuse, and print none of it
+cp "$FIX_REPO/secrets/secrets.enc.env" "$T/store.forged.bak"
+printf '#ENC[AES256_GCM,data:aGVsbG8=,iv:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=,tag:AAAAAAAAAAAAAAAAAAAAAA==,type:comment]\n' >> "$FIX_REPO/secrets/secrets.enc.env"
+fx_deploy --tags always
+[[ $RC -eq 78 ]] && grep -q 'comment line that is not properly encrypted' <<<"$OUT" && ! grep -q 'aGVsbG8' <<<"$OUT" && ! grep -q 'PLAY \[' <<<"$OUT" || fail "a store with a forged comment line must fail preflight without echoing it (rc=$RC)"
+cp "$T/store.forged.bak" "$FIX_REPO/secrets/secrets.enc.env"
 # a store missing required names: reported by NAME only, never a value
 printf 'TARGET_HOST=%s\nFIX_TOKEN=%s\n' "$CANARY_HOST" "$CANARY_TOKEN" > "$T/plain/partial.env"
 fx_encrypt "$T/plain/partial.env" "$FIX_REPO/secrets/secrets.enc.env" "$FIX_PUB"

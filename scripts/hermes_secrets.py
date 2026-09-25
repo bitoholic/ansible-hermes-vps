@@ -152,6 +152,10 @@ def decrypt_store(path, environ=None):
         # private key or a plaintext secret (HERMES_SECRETS_STORE may point anywhere the wrapper can read). Map the
         # failure to a small fixed vocabulary instead.
         raise SecretsError("cannot decrypt the secrets store %s (%s)" % (path, _sops_failure_reason(proc.stderr or "")))
+    if "possibly unencrypted comment" in (proc.stderr or "").lower():
+        # SOPS only WARNS (rc 0) about a comment line that is not properly encrypted, yet the line was not authenticated: a
+        # forged comment could carry plaintext. Refuse rather than print sops' text (which echoes the comment).
+        raise SecretsError("the secrets store %s holds a comment line that is not properly encrypted (forged or corrupted)" % path)
     try:
         values = json.loads(proc.stdout)
     except ValueError:

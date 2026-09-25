@@ -183,6 +183,51 @@ printf 'creation_rules:\n  - path_regex: ^secrets/secrets\\.enc\\.env$\n    age:
 expect_ok ".sops.yaml with a comma-separated string of recipients"
 cp "$T/sops.good" "$FIX_REPO/.sops.yaml"
 
+# --- review round 2: more hiding places, real-sops shapes -------------------------------------------------------------------
+mutate_store "plaintext appended to sops_version" 'sops_version is not a version' - 's/^sops_version=.*/sops_version=3.13.3+HUNTER2PLAINSECRET/'
+mutate_store "plaintext appended to sops_lastmodified" 'sops_lastmodified is not a timestamp' - 's/^(sops_lastmodified=.*)$/\1+HUNTER2/'
+mutate_store "a recipient with a bad bech32 checksum" 'is not an age public key' - 's/^(sops_age__list_0__map_recipient=age1)(.)/\1q/'
+mutate_store "a plaintext age recipient lookalike" 'is not an age public key' - 's/^(sops_age__list_0__map_recipient)=.*/\1=age1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq/'
+mutate_store "the age data key with a plaintext tail" 'is not an age-encrypted data key' - 's/^(sops_age__list_0__map_enc=.*)$/\1HUNTER2 plain text/'
+mutate_store "multi-group (Shamir) metadata" 'multi-group / Shamir stores are not used' 'sops_shamir_threshold=2'
+# a store encrypted to TWO recipients (workstation + break-glass) — with comments, a bare '#', an empty value — passes
+age-keygen -o "$T/keys/bg.txt" >/dev/null 2>&1; BG_PUB="$(age-keygen -y "$T/keys/bg.txt")"
+{ printf '#\n# a comment\n'; for n in $fx_full_names; do echo "$n=value-$n"; done; echo "AUDIT_EXTRA_TERMS="; } > "$T/plain/two.env"
+fx_encrypt "$T/plain/two.env" "$FIX_REPO/secrets/secrets.enc.env" "$FIX_PUB" "$BG_PUB"
+expect_ok "a REAL two-recipient store with comments, a bare # and an empty value"
+# the second recipient's data key hidden plaintext: sops still decrypts with the first, the guard must not
+sed -i -E 's/^(sops_age__list_1__map_enc)=.*/\1=-----BEGIN AGE ENCRYPTED FILE-----\\nHUNTER2 plain text\\n-----END AGE ENCRYPTED FILE-----\\n/' "$FIX_REPO/secrets/secrets.enc.env"
+expect_fail "plaintext in an unused recipient's data key" 'sops_age__list_1__map_enc is not an age-encrypted data key'
+new_store "$T/plain/ok.env"; cp "$FIX_REPO/secrets/secrets.enc.env" "$T/store.good"
+
+# --- .sops.yaml semantics -----------------------------------------------------------------------------------------------
+printf 'creation_rules:\n  - path_regex: secrets/secrets\\.enc\\.env$\n    key_groups:\n      - age:\n          - %s\n' "$FIX_PUB" > "$FIX_REPO/.sops.yaml"
+expect_ok ".sops.yaml path_regex not anchored at the start (SOPS uses a search, not a match)"
+printf 'creation_rules:\n  - path_regex: ^secrets/secrets\\.enc\\.env$\n    age:\n      - %s\n' "$FIX_PUB" > "$FIX_REPO/.sops.yaml"
+expect_ok ".sops.yaml with age as a YAML list"
+cp "$T/sops.good" "$FIX_REPO/.sops.yaml"
+
+# --- user-global ignores, symlinks, key material, more content forms -----------------------------------------------------
+printf '[core]\n\texcludesFile = %s/global_ignore\n' "$FIX_HOME" > "$FIX_HOME/.gitconfig"; printf '.env\n' > "$FIX_HOME/global_ignore"
+( cd "$FIX_REPO" && printf '' > .gitignore )
+expect_fail ".env ignored only by a USER-GLOBAL ignore (a fresh clone would not ignore it)" '.env is not git-ignored'
+( cd "$FIX_REPO" && printf '.env\n' > .gitignore ); rm -f "$FIX_HOME/.gitconfig" "$FIX_HOME/global_ignore"
+printf 'export FIX_TOKEN=Kj83hd92Lx\nexport FIX_DOMAIN=Vb2mN7qW9z\nexport FIX_UNICODE=qW9zXc7Vb2\n' > "$T/outside-secrets.txt"
+( cd "$FIX_REPO" && ln -s "$T/outside-secrets.txt" link.txt && git add link.txt )
+expect_ok "a tracked symlink whose TARGET holds plaintext-looking names (the target must never be read)"
+( cd "$FIX_REPO" && git rm -q --cached -f link.txt && rm link.txt )
+( cd "$FIX_REPO" && printf 'declare -x FIX_TOKEN="Kj83hd92Lx"\ndeclare -x FIX_DOMAIN="Vb2mN7qW9z"\ndeclare -x FIX_UNICODE="qW9zXc7Vb2"\n' > envdump.txt && git add envdump.txt )
+expect_fail "a bash 'export -p' style dump" 'envdump.txt: looks like a plaintext secrets file'
+( cd "$FIX_REPO" && git rm -q --cached -f envdump.txt && rm envdump.txt )
+( cd "$FIX_REPO" && { printf 'identity: '; head -c 20000 "$FIX_KEY" | grep AGE-SECRET-KEY; } > id.txt && git add id.txt )
+expect_fail "an age identity (private key) in a tracked file" 'id.txt: contains private key material'
+! grep -q 'AGE-SECRET-KEY-1' <<<"$OUT" || fail "the guard printed the private key"
+( cd "$FIX_REPO" && git rm -q --cached -f id.txt && rm id.txt )
+( cd "$FIX_REPO" && printf -- '-----BEGIN %s PRIVATE KEY-----\nMIIB\n-----END %s PRIVATE KEY-----\n' RSA RSA > key.pem && git add key.pem )
+expect_fail "a PEM private key in a tracked file" 'key.pem: contains private key material'
+( cd "$FIX_REPO" && git rm -q --cached -f key.pem && rm key.pem )
+expect_ok "no stray files left (round 2)"
+
 # --- the guard needs no key --------------------------------------------------------------------------------------
 [[ ! -e "$FIX_HOME/.config/sops" ]] || fail "test setup: a key file exists in the fixture HOME"
 echo "structural guard OK"
