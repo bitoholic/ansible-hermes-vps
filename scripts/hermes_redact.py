@@ -14,9 +14,13 @@ lines) is still found, because the tail of the buffer that could be the start of
 chunk (or `finish()`). Only such a tail is held, so ordinary output is not delayed. Overlapping and nested matches
 are merged, so a value that contains another value (or overlaps one) leaves no readable fragment of either.
 
+  * JSON text *inside* a JSON string (Ansible prints a `to_json` result, or any JSON a command returned, as a JSON string
+    value): the escaping is applied up to three levels deep, in every mix of the ASCII and raw-UTF-8 forms.
+
 Documented limits (the complement is suppression at the source, ticket #05):
-  * other encodings are NOT covered — base64, hex, ROT13, a value split by the program's own formatting, or a value
-    printed one character at a time;
+  * other encodings are NOT covered — base64, hex, ROT13, JSON nested more than three levels, double URL-encoding
+    (`%2540`), JavaScript's `encodeURIComponent` (which leaves `!'()*` unescaped), shell quoting, YAML quoting, a value
+    split by the program's own formatting, or a value printed one character at a time;
   * values shorter than MIN_REDACT_LEN are not redacted (a one- or two-character value would mask half of every
     log); a value AT the minimum is, and the over-redaction this causes for a common word is an accepted trade-off:
     the safe failure mode is to hide too much, not too little.
@@ -37,19 +41,37 @@ def _upper_unicode_escapes(text):
     return re.sub(r"\\u([0-9a-fA-F]{4})", lambda m: "\\u" + m.group(1).upper(), text)
 
 
+MAX_JSON_NESTING = 3
+
+
+def _json_forms(value):
+    """The value JSON-string-escaped 1..MAX_JSON_NESTING times, in every mix of ensure_ascii True/False per level."""
+    forms, level = set(), {value}
+    for _ in range(MAX_JSON_NESTING):
+        nxt = set()
+        for text in level:
+            for ensure_ascii in (True, False):
+                nxt.add(json.dumps(text, ensure_ascii=ensure_ascii)[1:-1])
+        forms |= nxt
+        level = nxt
+    return forms
+
+
 def variants(value):
     """Every byte string under which `value` may appear in program output."""
     out = {value}
-    for ensure_ascii in (True, False):
-        as_json = json.dumps(value, ensure_ascii=ensure_ascii)[1:-1]
+    for as_json in _json_forms(value):
         out.add(as_json)
         out.add(as_json.replace("/", "\\/"))
         out.add(_upper_unicode_escapes(as_json))
+        out.add(repr(as_json)[1:-1])                                # a JSON string shown by Python's repr
     out.add(repr(value)[1:-1])
     out.add(value.replace("\\", "\\\\").replace("'", "\\'"))     # repr() of a str that is shown single-quoted
     out.add(value.replace("\\", "\\\\").replace('"', '\\"'))     # ... and double-quoted
-    for quoted in (urllib.parse.quote(value, safe=""), urllib.parse.quote(value, safe="/"),
-                   urllib.parse.quote_plus(value), urllib.parse.quote_plus(value, safe="/")):
+    raw = value.encode("utf-8", "surrogateescape")      # (a lone surrogate must not crash the constructor)
+    for quoted in (urllib.parse.quote_from_bytes(raw, safe=""), urllib.parse.quote_from_bytes(raw, safe="/"),
+                   urllib.parse.quote_from_bytes(raw, safe="").replace("%20", "+"),
+                   urllib.parse.quote_from_bytes(raw, safe="/").replace("%20", "+")):
         out.add(quoted)
         out.add(_lower_hex_escapes(quoted))
     return {v.encode("utf-8", "replace") for v in out if v}
@@ -64,6 +86,7 @@ class StreamRedactor:
             if isinstance(value, str) and len(value) >= MIN_REDACT_LEN:
                 needles |= variants(value)
         self._needles = sorted(needles, key=len, reverse=True)
+        self._maxlen = max((len(n) for n in self._needles), default=1)
         self._buf = b""
 
     def _spans(self, buf):
@@ -115,9 +138,18 @@ class StreamRedactor:
         buf = self._buf + chunk
         spans = self._spans(buf)
         safe_end = len(buf) - self._held_suffix(buf)
-        for start, end in spans:              # never cut through a match
+        for i, (start, end) in enumerate(spans):              # never cut through a match ...
             if start < safe_end < end:
-                safe_end = start
+                # ... except that a very long merged run (a value-shaped run of output such as `aaaa…`) must not make
+                # the buffer grow without bound and stall all output: every byte of it is masked anyway, so emit it up
+                # to the last MAXLEN-1 bytes (which a later chunk might still extend) and carry only those.
+                cut = end - (self._maxlen - 1) if end == len(buf) else end
+                if cut - start > 2 * self._maxlen:
+                    spans[i] = (start, cut)
+                    safe_end = cut
+                else:
+                    safe_end = start
+                break
         self._buf = buf[safe_end:]
         return self._apply(buf, spans, safe_end)
 

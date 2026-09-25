@@ -400,6 +400,8 @@ def _sink(stream):
 
 def run_child(cmd, cwd, env, secret_values):
     out_sink, err_sink = _sink(sys.stdout), _sink(sys.stderr)
+    # built BEFORE the child starts: a redactor that cannot be constructed must not leave a running child behind
+    redactors = [hermes_redact.StreamRedactor(secret_values), hermes_redact.StreamRedactor(secret_values)]
     proc = None
     signalled = {"at": None}
 
@@ -426,9 +428,9 @@ def run_child(cmd, cwd, env, secret_values):
     states = [{"writing": False, "last": time.monotonic()}, {"writing": False, "last": time.monotonic()}]
     threads = [
         threading.Thread(target=pump, daemon=True,
-                         args=(proc.stdout.fileno(), out_sink, hermes_redact.StreamRedactor(secret_values), states[0])),
+                         args=(proc.stdout.fileno(), out_sink, redactors[0], states[0])),
         threading.Thread(target=pump, daemon=True,
-                         args=(proc.stderr.fileno(), err_sink, hermes_redact.StreamRedactor(secret_values), states[1])),
+                         args=(proc.stderr.fileno(), err_sink, redactors[1], states[1])),
     ]
     for t in threads:
         t.start()

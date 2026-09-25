@@ -17,6 +17,7 @@ CANARY_CONTAINER="wrap-${CANARY_TOKEN}-wrap"    # contains another value
 CANARY_OVERLAP='3210-overlap-zz'                 # overlaps the END of the token when the two are printed together
 CANARY_LONGER="${CANARY_TOKEN}-longer"           # the token is a proper prefix of this value
 CANARY_QUOTES="it's \"q\" ok"                     # repr() escapes the single quote
+CANARY_REPEAT='qqqq'                             # a value-shaped RUN of output must not stall or blow up redaction
 CANARY_TINY='abc'                                # below the redaction minimum (3 characters): NOT masked
 CANARY_HOST='127.0.0.2'
 
@@ -49,6 +50,7 @@ secrets_manifest:
   fix_overlap:   { env: FIX_OVERLAP }
   fix_longer:    { env: FIX_LONGER }
   fix_quotes:    { env: FIX_QUOTES }
+  fix_repeat:    { env: FIX_REPEAT }
   fix_optional: { env: FIX_OPTIONAL, default: "dflt" }
 M
   cat > "$repo/group_vars/all/conn.yml" <<'C'
@@ -70,6 +72,8 @@ escape        ../outside.sh
 split         scripts/fx-split.sh
 tail          scripts/fx-tail.sh
 tail-full     scripts/fx-tail-full.sh
+repeat        scripts/fx-repeat.sh
+repeat-slow   scripts/fx-repeat-slow.sh
 kill-self     scripts/fx-kill-self.sh
 not-exec      scripts/fx-not-exec.sh
 link          scripts/fx-link.sh
@@ -106,6 +110,10 @@ for stream in (sys.stdout, sys.stderr):
             for cut in range(len(b"SPLIT[") , len(raw)):
                 emit(stream, raw[:cut]); time.sleep(0.01); emit(stream, raw[cut:] + b"\n")
 SPLIT
+  # a long run of value-shaped output (the repeated value 'qqqq'): must be masked without stalling or unbounded memory
+  printf '#!/usr/bin/env bash\nhead -c 3000000 /dev/zero | tr "\\0" q; echo\n' > "$repo/scripts/fx-repeat.sh"
+  printf '#!/usr/bin/env bash\nhead -c 100000 /dev/zero | tr "\\0" q; sleep 4; head -c 100000 /dev/zero | tr "\\0" q; echo\n' > "$repo/scripts/fx-repeat-slow.sh"
+  chmod +x "$repo/scripts/fx-repeat.sh" "$repo/scripts/fx-repeat-slow.sh"
   # ends with the WHOLE token and no newline; the token is a proper prefix of another value, so it is held back and must be masked at exit
   printf '#!/usr/bin/env bash\nprintf "%%s" "$FIX_TOKEN"\n' > "$repo/scripts/fx-tail-full.sh"; chmod +x "$repo/scripts/fx-tail-full.sh"
   # ends WITHOUT a newline in the middle of what could be the start of a value: the held-back tail must be flushed at exit
@@ -257,8 +265,8 @@ creation_rules:
       - age:
           - $FIX_PUB
 S
-  printf 'TARGET_HOST=%s\nFIX_TOKEN=%s\nFIX_DOMAIN=%s\nFIX_UNICODE=%s\nFIX_SHORT=%s\nFIX_SPECIAL=%s\nFIX_CONTAINER=%s\nFIX_TINY=%s\nFIX_OVERLAP=%s\nFIX_LONGER=%s\nFIX_QUOTES=%s\n' \
-    "$CANARY_HOST" "$CANARY_TOKEN" "$CANARY_DOMAIN" "$CANARY_UNICODE" "$CANARY_SHORT" "$CANARY_SPECIAL" "$CANARY_CONTAINER" "$CANARY_TINY" "$CANARY_OVERLAP" "$CANARY_LONGER" "$CANARY_QUOTES" > "$dir/plain/store.env"
+  printf 'TARGET_HOST=%s\nFIX_TOKEN=%s\nFIX_DOMAIN=%s\nFIX_UNICODE=%s\nFIX_SHORT=%s\nFIX_SPECIAL=%s\nFIX_CONTAINER=%s\nFIX_TINY=%s\nFIX_OVERLAP=%s\nFIX_LONGER=%s\nFIX_QUOTES=%s\nFIX_REPEAT=%s\n' \
+    "$CANARY_HOST" "$CANARY_TOKEN" "$CANARY_DOMAIN" "$CANARY_UNICODE" "$CANARY_SHORT" "$CANARY_SPECIAL" "$CANARY_CONTAINER" "$CANARY_TINY" "$CANARY_OVERLAP" "$CANARY_LONGER" "$CANARY_QUOTES" "$CANARY_REPEAT" > "$dir/plain/store.env"
   ( cd "$repo" && sops encrypt --filename-override secrets/secrets.enc.env --input-type dotenv --output-type dotenv "$dir/plain/store.env" >"$repo/secrets/secrets.enc.env" )
   FIX_PLAIN="$dir/plain/store.env"
 }

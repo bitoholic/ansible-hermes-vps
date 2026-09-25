@@ -84,13 +84,21 @@ echo "output streams live"
 # --- output redaction (ticket #02): the canary test -------------------------------------------------------
 # An independent ORACLE computes every form a value may take in output (plain, JSON with and without \u escapes, repr,
 # URL-encoded); none may appear anywhere in the combined output, while markers prove the leaking tasks really ran.
-oracle() {  # oracle <value...>: print every form, one per line, that must never appear
+oracle() {  # oracle <value...>: print every form, one per line, that must never appear (written independently of the redactor)
   python3 - "$@" <<'E'
-import json, sys, urllib.parse
+import json, re, sys, urllib.parse
+def json_levels(v, depth):
+    out, cur = set(), {v}
+    for _ in range(depth):
+        cur = {json.dumps(x, ensure_ascii=a)[1:-1] for x in cur for a in (True, False)}
+        out |= cur
+    return out
 for v in sys.argv[1:]:
-    forms = {v, json.dumps(v)[1:-1], json.dumps(v, ensure_ascii=False)[1:-1], repr(v)[1:-1], urllib.parse.quote(v, safe=""),
-             urllib.parse.quote(v), urllib.parse.quote_plus(v), json.dumps(v)[1:-1].replace("\\u", "\\U").lower()}
-    forms |= {f.replace("%", "%").lower() for f in list(forms) if "%" in f}
+    forms = {v, repr(v)[1:-1]}
+    for j in json_levels(v, 3):
+        forms |= {j, j.replace("/", "\\/"), re.sub(r"\\u([0-9a-f]{4})", lambda m: "\\u" + m.group(1).upper(), j)}
+    for q in (urllib.parse.quote(v, safe=""), urllib.parse.quote(v), urllib.parse.quote_plus(v)):
+        forms |= {q, re.sub(r"%[0-9A-F]{2}", lambda m: m.group(0).lower(), q)}
     for f in forms:
         if len(f) >= 4:
             print(f)
@@ -110,6 +118,8 @@ for marker in LEAK-MSG LEAK-JSON LEAK-URL LEAK-WRAP LEAK-TINY LEAK-CMD 'token=' 
 done
 assert_no_canary "debug message, JSON, URL, template diff and verbose arguments at -vvvvvv"
 grep -q 'LEAK-MSG \[redacted\] \[redacted\] \[redacted\]' <<<"$OUT" || fail "values in a debug message were not masked (or the masks are not where expected)"
+grep -E 'LEAK-JSON' <<<"$OUT" | grep -q '\[redacted\].*\[redacted\]' || fail "the JSON-escaped (nested) values on the LEAK-JSON line were not masked"
+grep -E 'LEAK-URL' <<<"$OUT" | grep -q '\[redacted\].*\[redacted\]' || fail "the URL-encoded values on the LEAK-URL line were not masked"
 grep -qE 'LEAK-WRAP \[redacted\]($|[^A-Za-z0-9-])' <<<"$OUT" || fail "a value containing another value was not masked completely"
 ! grep -q 'wrap-' <<<"$OUT" || fail "a readable fragment of a value that contains another value remains"
 grep -qE 'LEAK-OVERLAP \[redacted\]($|[^A-Za-z0-9-])' <<<"$OUT" && ! grep -q -- '-overlap' <<<"$OUT" || fail "two values that overlap in the output left a readable fragment"
@@ -126,6 +136,95 @@ fx_deploy --script tail
 [[ "$OUT" == "END-${CANARY_TOKEN:0:3}" ]] || fail "the held-back tail of a stream must be flushed at the end (got: ${OUT:0:20})"
 fx_deploy --script tail-full
 [[ "$OUT" == "[redacted]" ]] || fail "a value held back at the end of the stream must be masked when flushed (got: ${OUT:0:30})"
+# --- the redactor itself: properties the black-box run cannot reach ---------------------------------------------
+python3 - "$ROOT_DIR" <<'E' || fail "the redactor's property checks failed"
+import importlib.machinery, importlib.util, json, os, random, re, sys, time, urllib.parse
+root = sys.argv[1]
+def load(name, path):
+    loader = importlib.machinery.SourceFileLoader(name, path)
+    spec = importlib.util.spec_from_loader(name, loader); mod = importlib.util.module_from_spec(spec); sys.modules[name] = mod; loader.exec_module(mod); return mod
+R = load("hermes_redact_t", os.path.join(root, "scripts", "hermes_redact.py"))
+MASK = R.MASK
+def run(values, chunks):
+    x = R.StreamRedactor(values); out = b"".join(x.feed(c) for c in chunks) + x.finish(); return out
+def collapse(b):  # adjacent masks are one mask (a match split across chunks may print two)
+    return re.sub(rb"(\[redacted\])+", b"[redacted]", b)
+# 1. random values, texts and splits: the split output equals the one-shot output, and no value survives
+rnd = random.Random(20260925)
+alphabet = ["a", "b", "%", "2", "0", " ", "/", "\\", "\"", "'", "\n", "é", "ż", "-"]
+for case in range(400):
+    values = ["".join(rnd.choice(alphabet) for _ in range(rnd.randint(4, 9))) for _ in range(rnd.randint(1, 4))]
+    if rnd.random() < .5:
+        values.append(values[0][:rnd.randint(4, len(values[0]))] + "".join(rnd.choice(alphabet) for _ in range(3)))   # a prefix/overlap
+    text = "".join(rnd.choice(alphabet + values + [json.dumps(v)[1:-1] for v in values] + [urllib.parse.quote(v) for v in values]) for _ in range(rnd.randint(1, 30))).encode()
+    whole = collapse(run(values, [text]))
+    cuts = sorted(rnd.sample(range(1, max(2, len(text))), min(3, max(0, len(text) - 1)))) if len(text) > 1 else []
+    parts = [text[a:b] for a, b in zip([0] + cuts, cuts + [len(text)])]
+    assert collapse(run(values, parts)) == whole, ("split differs", values, text, parts)
+    assert collapse(run(values, [bytes([b]) for b in text])) == whole, ("byte-wise differs", values, text)
+    for v in values:
+        if len(v) >= R.MIN_REDACT_LEN:
+            assert v.encode() not in whole, ("value survived", v, text, whole)
+# 2. every documented form of a value is masked (each computed here, independently of the redactor)
+v = "a b/ü%\u017c"
+forms = {"plain": v, "json ascii": json.dumps(v)[1:-1], "json utf8": json.dumps(v, ensure_ascii=False)[1:-1],
+         "json slash": json.dumps(v)[1:-1].replace("/", "\\/"),
+         "json upper hex": re.sub(r"\\u([0-9a-f]{4})", lambda m: "\\u" + m.group(1).upper(), json.dumps(v)[1:-1]),
+         "quote": urllib.parse.quote(v, safe=""), "quote_plus": urllib.parse.quote_plus(v),
+         "quote lower hex": re.sub(r"%[0-9A-F]{2}", lambda m: m.group(0).lower(), urllib.parse.quote(v, safe="")),
+         "json in json": json.dumps(json.dumps(v)[1:-1])[1:-1], "json in json in json": json.dumps(json.dumps(json.dumps(v)[1:-1])[1:-1])[1:-1],
+         "repr": repr(v)[1:-1]}
+for label, f in forms.items():
+    out = run([v], [("x " + f + " y").encode()])
+    assert f.encode() not in out and MASK in out, ("form not masked", label, f, out)
+# 2b. a self-overlapping (periodic) value leaves no fragment where its occurrences overlap
+out = run(["abababab"], [b"x abababababab y"])
+assert b"ab" not in out.replace(b"[redacted]", b"").replace(b"y", b"").replace(b"x", b""), ("overlapping occurrences left a fragment", out)
+# 2c. ordinary output is not held back: a complete line is emitted at once (only a possible value PREFIX waits)
+x = R.StreamRedactor(["tok-abcdef", "qqqq"])
+assert x.feed(b"a complete line\n") == b"a complete line\n", "a line was held back"
+assert x.feed(b"ends like a value: to") == b"ends like a value: ", "the held tail is more than the possible value prefix"
+assert x.feed(b"k-abcdef!") == b"[redacted]!", "a value split across chunks was not masked"
+# 3. a long run of value-shaped output neither stalls nor grows the buffer: it is emitted progressively and quickly
+for vals, size in ((["aaaa"], 1_500_000), (["ab" * 6], 600_000)):
+    x = R.StreamRedactor(vals); t0 = time.time(); emitted = 0; peak = 0
+    data = (b"a" if vals[0][0] == "a" and len(set(vals[0])) == 1 else b"ab") * (size if len(set(vals[0])) == 1 else size // 2)
+    for i in range(0, len(data), 4096):
+        emitted += len(x.feed(data[i:i + 4096])); peak = max(peak, len(x._buf))
+    assert emitted > 0, "output was withheld until the end of the run"
+    assert peak < 20 * max(len(n) for n in x._needles) + 8192, ("the carry grew without bound", peak)
+    assert time.time() - t0 < 10, ("too slow", time.time() - t0)
+    tail = x.finish(); assert vals[0].encode() not in tail
+# 4. a lone surrogate in a value does not crash construction
+R.StreamRedactor(["ab\udcffcd"])
+# 5. a redactor that raises must not leak or block: the pump withholds the rest of the stream and keeps draining
+D = load("deploy_t", os.path.join(root, "scripts", "deploy"))
+class Boom:
+    def feed(self, c): raise RuntimeError("boom")
+    def finish(self): raise RuntimeError("boom")
+r, w = os.pipe(); got = []
+class Sink:
+    def write(self, b): got.append(b)
+    def flush(self): pass
+import threading
+st = {"writing": False, "last": time.time()}
+th = threading.Thread(target=D.pump, args=(r, Sink(), Boom(), st), daemon=True); th.start()
+os.write(w, b"secret-looking data " * 1000); os.write(w, b"more" * 100000); os.close(w); th.join(10)
+assert not th.is_alive(), "the pump blocked behind a failing redactor"
+assert b"secret-looking" not in b"".join(got), "a failing redactor let raw output through"
+E
+# a long run of value-shaped output (the repeated value 'qqqq') through the wrapper: masked, complete, prompt, and delivered while it runs
+start=$SECONDS; fx_deploy --script repeat
+(( SECONDS - start < 20 )) || fail "a 3 MB run of value-shaped output took $((SECONDS - start)) s (quadratic redaction)"
+[[ $RC -eq 0 ]] && grep -q '\[redacted\]' <<<"$OUT" && ! grep -q 'qqqq' <<<"$OUT" || fail "a run of a repeated value was not masked (rc=$RC)"
+: > "$T/rep.out"
+( cd / && env -i PATH="$PATH" HOME="$FIX_HOME" XDG_RUNTIME_DIR="$FIX_RUN" TMPDIR="$FIX_TMP" HERMES_SECRETS_KEY_FILE="$FIX_KEY" \
+    "$FIX_REPO/scripts/deploy" --script repeat-slow >"$T/rep.out" 2>&1 ) &
+rpid=$!; seen=0
+for _ in $(seq 1 25); do sleep 0.2; grep -q '\[redacted\]' "$T/rep.out" && { seen=1; break; }; done   # the script pauses 4 s after its first 100 KB
+if (( seen )) && kill -0 "$rpid" 2>/dev/null; then :; else wait "$rpid" || true; fail "the first 100 KB of a repeated-value run was withheld until the end (stall)"; fi
+wait "$rpid" || true
+! grep -q 'qqqq' "$T/rep.out" || fail "part of a repeated-value run was not masked"
 echo "redaction: canaries in debug messages, JSON/URL forms, template diffs and verbose arguments (-vvvvvv), split across chunks, nested — none in the output; values below the minimum are documented as unmasked"
 
 # --- refused invocation shapes (each: exit 64, and the child never ran) ---------------------------------
