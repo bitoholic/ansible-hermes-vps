@@ -60,3 +60,30 @@ two mutations are accepted as not real gaps rather than fixed further:
 - A non-atomic direct write that still succeeds without a crash is indistinguishable from an atomic one by black-box
   testing alone (no fault injection at the syscall level); `write_atomic()`'s use of `mkstemp` + `os.replace` is
   verified by code inspection instead.
+
+## Review round 1 (independent fresh-context subagent): CHANGES REQUIRED, fixed
+
+Two genuine code defects found by direct testing (not by mutation — both existed in the code as shipped):
+
+1. `cmd_edit` ran `sops edit` without capturing its output, so a decrypt/parse failure printed sops' own raw
+   diagnostic text straight to the terminal — including, in one repro, a private key verbatim — bypassing the
+   fixed-vocabulary mapping every other command already used. Fixed: stderr is now captured (stdin/stdout stay
+   inherited so the interactive editor still works) and a failure is raised through the same `sops_failure()` path
+   as `rotate`/`fill`/`import`.
+2. `add-recipient`/`remove-recipient` wrote `.sops.yaml` to disk *before* confirming `sops updatekeys` succeeded; a
+   failure partway through (permission error, full disk, a Ctrl-C in that window) left the config and the real
+   ciphertext's recipients out of sync — for `remove-recipient` this could silently leave a "removed" key still able
+   to decrypt while reporting success. Fixed: a shared `persist_config_rekeying()` helper writes the config, runs
+   `updatekeys`, and rolls the config file back to its exact prior bytes (or removes it, if it didn't exist before)
+   if `updatekeys` fails, so the two can never end up disagreeing.
+
+Also addressed from the same round: a symlinked store is now refused outright at the point of use (`store_exists()`),
+not only caught later by ticket #03's lint-time structural guard; `import` now refuses a source file that assigns
+the same name more than once (the one class of data loss its round-trip check structurally cannot see, since both
+sides of that check parse the same bytes through sops' own dotenv parser). New regression tests: `edit` leaking raw
+sops text (including the exact "an age key file ends up at `HERMES_SECRETS_STORE`" scenario), the config/ciphertext
+rollback-on-failure, a multi-rule `.sops.yaml` using the first match, a checksum-corrupted (but right-shaped) age
+key, and the duplicate-name refusal — each verified to actually catch its regression when reverted.
+
+Not changed: the reviewer's SOPS_AGE_KEY_CMD and "possibly unencrypted comment" coverage gaps are already exercised
+against the same shared `hermes_secrets.py` functions by ticket #01's `check-deploy-wrapper.sh`; not duplicated here.

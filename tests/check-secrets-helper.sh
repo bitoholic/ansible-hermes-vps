@@ -54,7 +54,14 @@ run_secrets "$FIX_HOME1" -- add-recipient "$PUBBG"
 [[ $RC -eq 0 ]] && grep -q "$PUBBG" "$FIX_REPO/.sops.yaml" || fail "a second add-recipient (still no store) did not append"
 run_secrets "$FIX_HOME1" -- add-recipient "not-an-age-key"
 [[ $RC -eq 64 ]] && ! grep -q "not-an-age-key" "$FIX_REPO/.sops.yaml" || fail "an invalid recipient must be refused, not written (rc=$RC)"
-echo "bootstrap: add-recipient creates .sops.yaml when no store exists, refuses an invalid key"
+# Right shape (age1 + 58 chars from the bech32 alphabet), wrong checksum: this must be rejected by the checksum
+# verification itself, not merely by the length/alphabet regex — a same-length, same-alphabet lookalike is exactly
+# what the checksum exists to catch (a typo'd or truncated-and-repaired key must never be silently accepted).
+BADCHECKSUM="${PUB1%?}$([ "${PUB1: -1}" = "q" ] && echo p || echo q)"
+[[ "$BADCHECKSUM" =~ ^age1[a-z0-9]{58}$ ]] || fail "test setup: BADCHECKSUM does not even have the right shape"
+run_secrets "$FIX_HOME1" -- add-recipient "$BADCHECKSUM"
+[[ $RC -eq 64 ]] && ! grep -qF "$BADCHECKSUM" "$FIX_REPO/.sops.yaml" || fail "a right-shaped but checksum-invalid recipient must be refused, not written (rc=$RC)"
+echo "bootstrap: add-recipient creates .sops.yaml when no store exists, refuses an invalid key (shape AND checksum)"
 
 # --- import: verified round trip, missing/undeclared reporting, nothing printed ----------------------------------
 printf 'FIX_TOKEN=%s\nFIX_DOMAIN=fixture.example\nTARGET_HOST=host.example\n' "$CANARY_VALUE" > "$T/plain/clean.env"
@@ -91,7 +98,14 @@ run_secrets "$FIX_HOME1" -- import "$T/plain/empty.env"
 [[ $RC -ne 0 ]] || fail "import of an empty source file must fail"
 run_secrets "$FIX_HOME2" -- import "$T/plain/clean.env"
 [[ $RC -ne 0 ]] && ! grep -qi 'traceback' <<<"$OUT" || fail "import must fail cleanly (not a traceback) for a workstation with no key yet (rc=$RC)"
-echo "import: verified round trip; missing/undeclared/optional-empty reported by name only; nothing printed; clean failures"
+# A duplicate NAME= line in the source is refused up front: sops' own dotenv parser would silently pick one of the
+# two values consistently on both sides of the round-trip check, so that check alone could never notice the loss.
+printf 'FIX_TOKEN=%s\nFIX_TOKEN=second-value-should-never-land\nFIX_DOMAIN=d\nTARGET_HOST=h\n' "$CANARY_VALUE" > "$T/plain/dupe.env"
+run_secrets "$FIX_HOME1" -- import "$T/plain/dupe.env"
+[[ $RC -ne 0 ]] && grep -q 'FIX_TOKEN' <<<"$OUT" || fail "import must refuse a source with a duplicate NAME= assignment (rc=$RC)"
+no_leak "import (duplicate name)"
+! grep -qF 'second-value-should-never-land' <<<"$OUT" || fail "import must report a duplicate by name only, never the value"
+echo "import: verified round trip; missing/undeclared/optional-empty/duplicate reported by name only; nothing printed; clean failures"
 
 run_secrets "$FIX_HOME1" -- import "$T/plain/clean.env"   # restore a clean single-name store for what follows
 [[ $RC -eq 0 ]] || fail "test setup: could not restore a clean store"
@@ -188,6 +202,51 @@ run_secrets "$FIX_BG_DIR" HERMES_SECRETS_KEY_FILE="$BGKEY" -- add-recipient "$PU
 no_leak "add/remove-recipient sequence"
 echo "add-recipient/remove-recipient: re-key an existing store; a removed key genuinely loses access; the last recipient can't be removed"
 
+# --- add-recipient/remove-recipient: if `sops updatekeys` fails partway through, .sops.yaml is rolled back rather
+# than left claiming a recipient set the real ciphertext doesn't have (a permission hiccup, a full disk, or a
+# Ctrl-C landing in that exact window are all realistic; this must never leave the two silently out of sync) --------
+cp "$FIX_REPO/.sops.yaml" "$T/sops.yaml.before"
+chmod 555 "$FIX_REPO/secrets"; chmod 444 "$FIX_REPO/secrets/secrets.enc.env"   # block both a temp+rename and a direct truncate-write
+run_secrets "$FIX_HOME1" -- remove-recipient "$PUBBG"
+RC_REMOVE=$RC; OUT_REMOVE="$OUT"
+chmod 755 "$FIX_REPO/secrets"; chmod 644 "$FIX_REPO/secrets/secrets.enc.env"
+[[ $RC_REMOVE -ne 0 ]] || fail "remove-recipient must fail when sops updatekeys can't write the store (test setup: RC=$RC_REMOVE)"
+diff -q "$T/sops.yaml.before" "$FIX_REPO/.sops.yaml" >/dev/null \
+  || fail "a failed updatekeys must roll .sops.yaml back — it must not record a recipient change the store never got"
+decrypt_as "$FIX_BG_DIR" SOPS_AGE_KEY_FILE="$BGKEY" -- "$FIX_REPO/secrets/secrets.enc.env"
+[[ $RC -eq 0 ]] || fail "after a rolled-back removal, the 'removed' recipient must still actually decrypt (config and store must agree)"
+echo "add-recipient/remove-recipient: a failed updatekeys rolls .sops.yaml back instead of leaving it out of sync with the store"
+
+# --- .sops.yaml with more than one matching creation_rules entry: the FIRST match is used, exactly like sops itself
+# resolves recipients — never a later, coincidentally-also-matching rule (a hand-edited multi-rule file is the only
+# way this can happen; sops's own semantics are "first match wins", so this tool must agree with it) ----------------
+cp "$FIX_REPO/.sops.yaml" "$T/sops.yaml.single"
+cat > "$FIX_REPO/.sops.yaml" <<YAML
+creation_rules:
+  - path_regex: '^secrets/secrets\.enc\.env$'
+    key_groups:
+      - age:
+          - $PUB1
+          - $PUBBG
+  - path_regex: '.*'
+    key_groups:
+      - age:
+          - $PUB2
+YAML
+run_secrets "$FIX_HOME1" -- add-recipient "$PUB2"
+[[ $RC -eq 0 ]] && grep -q 're-keyed the store' <<<"$OUT" || fail "add-recipient with more than one matching rule must act on the FIRST match, not no-op against a later one (rc=$RC, out=$OUT)"
+FIRST_RULE="$(awk '/path_regex/{n++} n==1' "$FIX_REPO/.sops.yaml")"
+SECOND_RULE="$(awk '/path_regex/{n++} n==2' "$FIX_REPO/.sops.yaml")"
+grep -qF "$PUB2" <<<"$FIRST_RULE" || fail "add-recipient did not append to the FIRST matching creation_rules entry"
+[[ "$(grep -cF "$PUB2" <<<"$SECOND_RULE")" -eq 1 ]] || fail "test setup: the second rule should be untouched, still listing only its original recipient"
+decrypt_as "$FIX_HOME1" -- "$FIX_REPO/secrets/secrets.enc.env"; RC1=$RC
+decrypt_as "$FIX_BG_DIR" SOPS_AGE_KEY_FILE="$BGKEY" -- "$FIX_REPO/secrets/secrets.enc.env"; RC2=$RC
+[[ $RC1 -eq 0 && $RC2 -eq 0 ]] || fail "using the first matching rule must keep the existing recipients valid (rc1=$RC1 rc2=$RC2)"
+run_secrets "$FIX_HOME1" -- remove-recipient "$PUB2"   # cleanup: drop the throwaway extra recipient from the real store
+[[ $RC -eq 0 ]] || fail "test cleanup: removing the multi-rule-test recipient failed (rc=$RC)"
+cp "$T/sops.yaml.single" "$FIX_REPO/.sops.yaml"   # cleanup: drop the throwaway second rule, back to the original single rule
+echo "add-recipient/remove-recipient: with more than one matching .sops.yaml rule, the first match is used, exactly like sops"
+
 # --- rotate: values survive, both recipients still work, data key actually changes ---------------------------------
 grep -o '^sops_age__list_0__map_enc=.*$' "$FIX_REPO/secrets/secrets.enc.env" > "$T/enc0.before"
 run_secrets "$FIX_HOME1" -- rotate
@@ -231,8 +290,18 @@ run_secrets "$FIX_HOME1" -- fill
 [[ $RC -ne 0 ]] || fail "fill on a corrupted store must fail"
 grep -qF "the store's integrity check failed" <<<"$OUT" || fail "fill on a corrupted store must report the fixed-vocabulary integrity-check reason: $OUT"
 no_raw_sops_text "fill"
+run_secrets "$FIX_HOME1" EDITOR=true -- edit
+[[ $RC -ne 0 ]] || fail "edit on a corrupted store must fail"
+grep -qF "the store's integrity check failed" <<<"$OUT" || fail "edit on a corrupted store must report the fixed-vocabulary integrity-check reason: $OUT"
+no_raw_sops_text "edit"
 cp "$T/store.forcorrupt" "$FIX_REPO/secrets/secrets.enc.env"
-echo "a sops failure is reported in a fixed vocabulary, never sops' own diagnostic text"
+# The exact scenario a real key file, not a store, ends up at HERMES_SECRETS_STORE (a plausible misconfiguration):
+# sops fails to parse it, and that failure must go through the same mapping — never echo the file's real content.
+run_secrets "$FIX_HOME1" HERMES_SECRETS_STORE="$KEY1" EDITOR=true -- edit
+[[ $RC -ne 0 ]] || fail "edit against a non-store file (here: an age key file) must fail"
+! grep -qF 'AGE-SECRET-KEY' <<<"$OUT" || fail "edit against a misconfigured HERMES_SECRETS_STORE leaked private key material: $OUT"
+no_raw_sops_text "edit (misconfigured store path)"
+echo "a sops failure is reported in a fixed vocabulary, never sops' own diagnostic text (including from edit)"
 
 # --- import: a genuine round-trip mismatch is caught, by name only (forced via a monkeypatch — sops's own dotenv
 # parser is deterministic, so no real input reproduces a mismatch; this proves the CODE that handles one, not that
