@@ -152,6 +152,14 @@ def _sops_failure_reason(stderr):
     return "sops could not decrypt it"
 
 
+def refuse_if_unencrypted_comment_warned(stderr_text, path):
+    """SOPS only WARNS (rc 0, or 200 for `edit`'s "no changes made") about a comment line that is not properly
+    encrypted, yet the line was not authenticated: a forged comment could carry plaintext. Any caller that
+    succeeds must still check this — refuse rather than print sops' text (which echoes the comment)."""
+    if "possibly unencrypted comment" in stderr_text.lower():
+        raise SecretsError("the secrets store %s holds a comment line that is not properly encrypted (forged or corrupted)" % path)
+
+
 def decrypt_store(path, environ=None):
     """Decrypt the dotenv store into a {name: value} dict held only in memory.
 
@@ -167,10 +175,7 @@ def decrypt_store(path, environ=None):
         # private key or a plaintext secret (HERMES_SECRETS_STORE may point anywhere the wrapper can read). Map the
         # failure to a small fixed vocabulary instead.
         raise SecretsError("cannot decrypt the secrets store %s (%s)" % (path, _sops_failure_reason(proc.stderr or "")))
-    if "possibly unencrypted comment" in (proc.stderr or "").lower():
-        # SOPS only WARNS (rc 0) about a comment line that is not properly encrypted, yet the line was not authenticated: a
-        # forged comment could carry plaintext. Refuse rather than print sops' text (which echoes the comment).
-        raise SecretsError("the secrets store %s holds a comment line that is not properly encrypted (forged or corrupted)" % path)
+    refuse_if_unencrypted_comment_warned(proc.stderr or "", path)
     try:
         values = json.loads(proc.stdout)
     except ValueError:

@@ -247,6 +247,52 @@ run_secrets "$FIX_HOME1" -- remove-recipient "$PUB2"   # cleanup: drop the throw
 cp "$T/sops.yaml.single" "$FIX_REPO/.sops.yaml"   # cleanup: drop the throwaway second rule, back to the original single rule
 echo "add-recipient/remove-recipient: with more than one matching .sops.yaml rule, the first match is used, exactly like sops"
 
+# --- add-recipient must never bootstrap a fresh .sops.yaml for a store that ALREADY exists: guessing a single-
+# recipient config from just the one key on the command line could either let an identity that can't actually
+# decrypt claim ownership (updatekeys would silently fail behind it) or, if the caller genuinely can decrypt, drop
+# every OTHER real recipient without any confirmation. Neither is safe to guess at, so both must be refused. --------
+cp "$FIX_REPO/.sops.yaml" "$T/sops.yaml.bootstrap_backup"
+rm "$FIX_REPO/.sops.yaml"   # simulate .sops.yaml lost (bad merge, sparse checkout) while the store remains
+run_secrets "$FIX_HOME1" -- add-recipient "$PUB1"   # even a REAL, currently-valid recipient must be refused here
+[[ $RC -ne 0 ]] && [[ ! -f "$FIX_REPO/.sops.yaml" ]] || fail "add-recipient must refuse to bootstrap .sops.yaml for a store that already exists, even for a valid recipient (rc=$RC)"
+decrypt_as "$FIX_HOME1" -- "$FIX_REPO/secrets/secrets.enc.env"; RC1=$RC
+decrypt_as "$FIX_BG_DIR" SOPS_AGE_KEY_FILE="$BGKEY" -- "$FIX_REPO/secrets/secrets.enc.env"; RC2=$RC
+[[ $RC1 -eq 0 && $RC2 -eq 0 ]] || fail "a refused bootstrap must leave the real store's recipients completely untouched (rc1=$RC1 rc2=$RC2)"
+cp "$T/sops.yaml.bootstrap_backup" "$FIX_REPO/.sops.yaml"
+echo "add-recipient: never bootstraps a fresh .sops.yaml for a store that already exists (refuses, does not guess)"
+
+# --- a symlinked store is refused outright at the point of use, for every command that reads or writes it, never
+# silently followed to whatever it points at ------------------------------------------------------------------------
+mv "$FIX_REPO/secrets/secrets.enc.env" "$T/real-store-for-symlink-test.env"
+ln -s "$T/real-store-for-symlink-test.env" "$FIX_REPO/secrets/secrets.enc.env"
+for cmd in check rotate fill; do
+  run_secrets "$FIX_HOME1" -- "$cmd"
+  [[ $RC -ne 0 ]] && grep -qi 'symlink' <<<"$OUT" || fail "'secrets $cmd' must refuse a symlinked store, not follow it (rc=$RC, out=$OUT)"
+done
+run_secrets "$FIX_HOME1" EDITOR=true -- edit
+[[ $RC -ne 0 ]] && grep -qi 'symlink' <<<"$OUT" || fail "'secrets edit' must refuse a symlinked store, not follow it (rc=$RC, out=$OUT)"
+rm "$FIX_REPO/secrets/secrets.enc.env"
+mv "$T/real-store-for-symlink-test.env" "$FIX_REPO/secrets/secrets.enc.env"
+echo "a symlinked store is refused outright by check/edit/rotate/fill, never followed"
+
+# --- check reports a missing required name (not just import's echo of the same underlying function) ----------------
+( cd "$FIX_REPO" && printf 'FIX_DOMAIN=fixture.example\nTARGET_HOST=host.example\n' \
+    | SOPS_AGE_KEY_FILE="$KEY1" sops encrypt --input-type dotenv --output-type dotenv --filename-override secrets/secrets.enc.env > "$T/s.tmp" \
+    && cp "$T/s.tmp" secrets/secrets.enc.env )   # FIX_TOKEN (required) absent
+run_secrets "$FIX_HOME1" -- check
+[[ $RC -eq 1 ]] && grep -q 'missing (required): FIX_TOKEN' <<<"$OUT" || fail "check must report a missing required name itself, not just via import (rc=$RC, out=$OUT)"
+run_secrets "$FIX_HOME1" -- import "$T/plain/clean.env" >/dev/null   # restore
+echo "check: reports a missing required name directly"
+
+# --- fill treats a required name that is PRESENT BUT EMPTY as still missing (not just an absent optional one) -------
+( cd "$FIX_REPO" && printf 'FIX_TOKEN=\nFIX_DOMAIN=fixture.example\nTARGET_HOST=host.example\n' \
+    | SOPS_AGE_KEY_FILE="$KEY1" sops encrypt --input-type dotenv --output-type dotenv --filename-override secrets/secrets.enc.env > "$T/s.tmp" \
+    && cp "$T/s.tmp" secrets/secrets.enc.env )   # FIX_TOKEN (required) present but empty
+run_secrets "$FIX_HOME1" -- fill   # non-interactive: must refuse citing FIX_TOKEN, not treat empty-but-present as satisfied
+[[ $RC -ne 0 ]] && grep -q 'FIX_TOKEN' <<<"$OUT" || fail "fill must treat a required name that is present but empty as still missing (rc=$RC, out=$OUT)"
+run_secrets "$FIX_HOME1" -- import "$T/plain/clean.env" >/dev/null   # restore
+echo "fill: a required name that is present but empty still counts as missing"
+
 # --- rotate: values survive, both recipients still work, data key actually changes ---------------------------------
 grep -o '^sops_age__list_0__map_enc=.*$' "$FIX_REPO/secrets/secrets.enc.env" > "$T/enc0.before"
 run_secrets "$FIX_HOME1" -- rotate
@@ -301,7 +347,15 @@ run_secrets "$FIX_HOME1" HERMES_SECRETS_STORE="$KEY1" EDITOR=true -- edit
 [[ $RC -ne 0 ]] || fail "edit against a non-store file (here: an age key file) must fail"
 ! grep -qF 'AGE-SECRET-KEY' <<<"$OUT" || fail "edit against a misconfigured HERMES_SECRETS_STORE leaked private key material: $OUT"
 no_raw_sops_text "edit (misconfigured store path)"
-echo "a sops failure is reported in a fixed vocabulary, never sops' own diagnostic text (including from edit)"
+# sops only WARNS (rc 0, or 200 for edit's own "no changes made") about a forged/unencrypted comment line; edit must
+# refuse it exactly like decrypt_store() already does for every other command, never silently succeed.
+cp "$FIX_REPO/secrets/secrets.enc.env" "$T/store.forged.bak"
+printf '#ENC[AES256_GCM,data:aGVsbG8=,iv:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=,tag:AAAAAAAAAAAAAAAAAAAAAA==,type:comment]\n' >> "$FIX_REPO/secrets/secrets.enc.env"
+run_secrets "$FIX_HOME1" EDITOR=true -- edit
+[[ $RC -ne 0 ]] && grep -q 'comment line that is not properly encrypted' <<<"$OUT" || fail "edit must refuse a store with a forged/unencrypted comment line (rc=$RC, out=$OUT)"
+! grep -q 'aGVsbG8' <<<"$OUT" || fail "edit echoed the forged comment's content"
+cp "$T/store.forged.bak" "$FIX_REPO/secrets/secrets.enc.env"
+echo "a sops failure is reported in a fixed vocabulary, never sops' own diagnostic text (including from edit); edit also refuses a forged unencrypted comment"
 
 # --- import: a genuine round-trip mismatch is caught, by name only (forced via a monkeypatch — sops's own dotenv
 # parser is deterministic, so no real input reproduces a mismatch; this proves the CODE that handles one, not that

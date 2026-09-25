@@ -87,3 +87,31 @@ key, and the duplicate-name refusal — each verified to actually catch its regr
 
 Not changed: the reviewer's SOPS_AGE_KEY_CMD and "possibly unencrypted comment" coverage gaps are already exercised
 against the same shared `hermes_secrets.py` functions by ticket #01's `check-deploy-wrapper.sh`; not duplicated here.
+
+## Review round 2 (independent fresh-context subagent): CHANGES REQUIRED, fixed
+
+Confirmed both round 1 fixes hold for the paths they cover, but found the bootstrap branch in `cmd_add_recipient`
+(taken when `.sops.yaml` doesn't exist yet) bypassed round 1's rollback protection entirely — a real, high-severity
+gap. Repro: delete `.sops.yaml` while a store still exists (a lost file, a bad merge), then have an identity that
+was never a recipient run `add-recipient`; the bootstrap path wrote a brand-new single-recipient config and
+reported success without ever running `updatekeys`, so `.sops.yaml` claimed sole ownership the identity never
+actually had. Fixed by refusing outright: **`add-recipient` never bootstraps a fresh `.sops.yaml` for a store that
+already exists**, full stop — not even a rollback-protected attempt, because (checked while fixing) even a
+*legitimate* recipient bootstrapping a single-key config would silently narrow the real recipient set down to just
+that one key, dropping every other current recipient with no confirmation. The operator is told to recreate
+`.sops.yaml` by hand or restore it from version control instead.
+
+Also fixed: `cmd_fill`'s happy path (via `hs.preflight()`) didn't go through the symlink guard, unlike every other
+command; `cmd_edit` checked `sops edit`'s return code but never its stderr, so it could return success on a forged/
+unencrypted comment line where every other command using `hs.decrypt_store()` refuses (factored the check into a
+shared `hs.refuse_if_unencrypted_comment_warned()` used by both); the bootstrap `.sops.yaml`'s `path_regex` only
+escaped literal `.`, not other regex metacharacters, so a custom store path with e.g. parentheses produced a rule
+that couldn't match its own store; `load_sops_config()` could crash with a raw traceback on malformed YAML instead
+of a clean message. Code-quality nits from the same round: an unused `stat` import removed, `yaml`/`re`/`json`/
+`shutil` hoisted to the top of the file instead of imported locally per-function (ticket #01's convention). New
+regression tests for all of the above (including the two ways a bootstrap-for-an-existing-store attempt is now
+refused, `check`'s own missing-required report, and `fill` treating a present-but-empty required value as missing),
+each verified to catch its bug when reverted. Not changed: the reviewer's "an editor can save an empty store" and
+"import verifies via dict comparison rather than literally a digest" observations were explicitly flagged as
+judgment calls, not stated-acceptance-criterion violations — left as accepted, documented behavior rather than
+building a rollback layer under `sops edit` itself.
