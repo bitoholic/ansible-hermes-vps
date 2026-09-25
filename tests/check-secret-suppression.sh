@@ -47,6 +47,22 @@ cat > "$T/roles/leaky/templates/shortform.j2" <<'J2'
 value = {{ secrets.shortform_secret }}
 J2
 
+cat > "$T/roles/leaky/templates/qalias.j2" <<'J2'
+{{ q('template', 'services/' + x + '.yml.j2')[0] }}
+J2
+
+cat > "$T/roles/leaky/templates/staticinclude.j2" <<'J2'
+{% include 'secret_fragment.j2' %}
+J2
+
+cat > "$T/roles/leaky/templates/secret_fragment.j2" <<'J2'
+value = {{ secrets.included_secret }}
+J2
+
+cat > "$T/roles/leaky/templates/safeprose.j2" <<'J2'
+This template file mentions the word "template" in prose but has no lookup or include call at all.
+J2
+
 cat > "$T/roles/leaky/tasks/main.yml" <<'YML'
 ---
 - name: Rendered template leaks a secret without suppression
@@ -178,6 +194,48 @@ cat > "$T/roles/leaky/tasks/main.yml" <<'YML'
   ansible.builtin.command:
     cmd: "echo {{ secrets.non_literal_no_log_token }}"
   no_log: "{{ some_flag | default(false) }}"
+
+- name: The query alias for lookup must be caught just like lookup itself
+  ansible.builtin.template:
+    src: qalias.j2
+    dest: /tmp/qalias-output
+
+- name: A native include with a literal target must be followed and caught
+  ansible.builtin.template:
+    src: staticinclude.j2
+    dest: /tmp/staticinclude-output
+
+- name: A template that merely mentions the word template in prose must not be flagged
+  ansible.builtin.template:
+    src: safeprose.j2
+    dest: /tmp/safeprose-output-safe
+
+- name: A violation inside always must still be caught
+  block:
+    - name: A step that always runs a cleanup after
+      ansible.builtin.command:
+        cmd: /bin/true
+  always:
+    - name: Violation nested inside always
+      ansible.builtin.command:
+        cmd: "echo {{ secrets.always_token }}"
+
+- name: The short assert module name must be scanned just like the FQCN
+  assert:
+    that:
+      - secrets.short_assert_check is defined
+    fail_msg: "the value is {{ secrets.short_assert_check }}"
+
+- name: A short-name assert's that must stay exempt even when Jinja-string-wrapped, not a false positive
+  assert:
+    that:
+      - "{{ secrets.short_assert_bare_check is defined }}"
+
+- name: A genuinely interpolated success_msg must be caught, unlike bare prose
+  ansible.builtin.assert:
+    that:
+      - secrets.interpolated_success_check is defined
+    success_msg: "the value is {{ secrets.interpolated_success_check }}"
 YML
 
 mkdir -p "$T/roles/leaky/tasks/nested"
@@ -212,7 +270,12 @@ for must_flag in \
   "The short module name template must be followed just like the FQCN" \
   "A genuinely interpolated fail_msg must be caught, unlike bare prose" \
   "A non-literal no_log expression must not be accepted as suppression" \
-  "A violation in a nested tasks subdirectory must still be caught"; do
+  "A violation in a nested tasks subdirectory must still be caught" \
+  "The query alias for lookup must be caught just like lookup itself" \
+  "A native include with a literal target must be followed and caught" \
+  "Violation nested inside always" \
+  "The short assert module name must be scanned just like the FQCN" \
+  "A genuinely interpolated success_msg must be caught, unlike bare prose"; do
   grep -qF "$must_flag" <<<"$OUT" || fail "the checker did not flag: $must_flag"$'\n'"$OUT"
 done
 grep -qF "no_log CANNOT protect" <<<"$OUT" || fail "environment:/become_user: violations must say plainly that no_log does not fix them"
@@ -221,7 +284,9 @@ for must_not_flag in \
   "Rendered template leaks a secret WITH suppression" \
   "Command argument leaks a secret WITH suppression" \
   "Registered result leaks a secret WITH suppression" \
-  "A boolean prerequisite check is not a value emission"; do
+  "A boolean prerequisite check is not a value emission" \
+  "A template that merely mentions the word template in prose must not be flagged" \
+  "A short-name assert's that must stay exempt even when Jinja-string-wrapped"; do
   ! grep -qF "$must_not_flag" <<<"$OUT" || fail "the checker flagged a suppressed or non-leaking task as if it were a violation: $must_not_flag"$'\n'"$OUT"
 done
 echo "negative fixtures: rendered template, command argument, registered result and a nested block are each flagged; their suppressed counterparts and a prose-only assert are not"

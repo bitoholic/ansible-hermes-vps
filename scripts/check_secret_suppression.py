@@ -19,10 +19,13 @@ What it asserts
     file (resolved against the role's own `templates/` directory; a `{{ ... | default('literal.j2') }}` expression
     is resolved via its literal default — single or double quotes, any whitespace around the quotes/parens all
     accepted — a `src:` this guard cannot resolve statically is not followed further) and that file's raw text is
-    searched the same way. A template that itself calls `lookup('template', ...)` to pull in another one (this
-    repo's own docker-compose.yml.j2, which assembles per-service fragments this way) is treated as needing
-    suppression outright, without trying to resolve the dynamic sub-lookup — a conservative default, not a proof
-    of absence.
+    searched the same way. A template that itself calls `lookup('template', ...)` — or its `query()`/`q()` aliases,
+    same plugin, list-returning call form — to pull in another one (this repo's own docker-compose.yml.j2, which
+    assembles per-service fragments this way) is treated as needing suppression outright, without trying to resolve
+    the dynamic sub-lookup — a conservative default, not a proof of absence. A native `{% include 'literal.j2' %}`
+    with a literal target is instead followed and checked recursively, exactly like a task's own `src:` (a `{%
+    include %}` whose target isn't a literal — a variable, a computed path — gets the same conservative treatment
+    as an unresolvable `lookup()`).
   * `environment:` and `become_user:` are NEVER accepted as fixed by `no_log: true`, because they aren't: Ansible
     inlines both into the literal shell command its connection plugin prints verbatim at high verbosity (-vvv+),
     regardless of no_log — no_log only redacts a task's own arguments and registered result, not that separate
@@ -48,7 +51,12 @@ What this CANNOT verify
     `ansible_user: "{{ secrets.admin_username }}"`, which has the identical never-fixable-by-no_log property as
     `become_user:` above (Ansible's SSH connection plugin inlines it into every task's connection trace for the
     whole play, regardless of any task's own no_log) — accepted and documented at its own call site for the same
-    reason: an OS username, not a credential, with no fix available.
+    reason: an OS username, not a credential, with no fix available. site.yml's FIRST play (bootstrapping the admin
+    account before `ansible_user` even applies) also interpolates `secrets.admin_username` (module arguments,
+    unsuppressed) and `secrets.admin_ssh_public_key` (an SSH *public* key, not sensitive by definition) several
+    times — outside this guard's scope, and, like `ansible_user`, not a credential leak under the same reasoning,
+    but not individually enumerated at each call site the way `ansible_user` is, since none of them share
+    `ansible_user`'s specific "no possible fix" property (checked by hand; found by round 5's independent review).
 """
 import argparse
 import glob
@@ -77,6 +85,19 @@ DEFAULT_JINJA_RE = re.compile(r"default\s*\(\s*['\"]([^'\"]+)['\"]\s*(?:,\s*true
 # recognized the FQCN, so a task written as `template:` (valid, and never exercised in this repo's own tasks today,
 # but a realistic style choice) was silently never followed (found by round 4's independent review).
 TEMPLATE_MODULE_NAMES = ("ansible.builtin.template", "template")
+
+# lookup('template', ...), its `query()`/`q()` aliases (identical plugin, list-returning call form) — any quoting,
+# any whitespace before the `(`. An earlier version of this guard only matched the literal substring "lookup(" (so
+# `query('template', ...)`/`q('template', ...)` — both valid, both used nowhere in this repo today — silently
+# defeated it entirely) (found by round 5's independent review).
+LOOKUP_TEMPLATE_RE = re.compile(r"\b(?:lookup|query|q)\s*\(\s*['\"]template['\"]")
+# {% include 'literal.j2' %} (any whitespace-control markers, either quote style) — a STATICALLY resolvable target,
+# followed and checked exactly like a task's own src:, not treated as merely "conservative" the way the genuinely
+# dynamic per-service lookup() case is.
+INCLUDE_LITERAL_RE = re.compile(r"\{%[-+]?\s*include\s+['\"]([^'\"]+)['\"]")
+# Any include tag at all, literal or dynamic — used to detect an include this guard could NOT resolve to a literal
+# target above, which is treated the same conservative way as an unresolvable lookup('template', ...).
+INCLUDE_ANY_RE = re.compile(r"\{%[-+]?\s*include\b")
 
 # Task-level keys that can never themselves emit a value: pure control flow / metadata that Ansible never
 # templates into a printed shell command or module argument. Deliberately NOT excluded (unlike an earlier version of
@@ -154,16 +175,31 @@ def resolve_template_src(src, templates_dir):
     return path if os.path.isfile(path) else None
 
 
-def template_needs_suppression(path):
+def template_needs_suppression(path, templates_dir, _seen=None):
+    _seen = set() if _seen is None else _seen
+    real_path = os.path.realpath(path)
+    if real_path in _seen:
+        return False   # a cycle, not a leak in itself; whatever it includes was (or will be) checked at its own site
+    _seen.add(real_path)
     with open(path, "r", encoding="utf-8", errors="replace") as fh:
         text = fh.read()
     if SECRET_RE.search(text):
         return True
-    # A template that pulls in another one dynamically (this repo's docker-compose.yml.j2, which assembles
-    # per-service fragments via `lookup('template', 'services/' + name + '.yml.j2')`) is treated as needing
-    # suppression outright: resolving the dynamic expression statically is out of this guard's scope, and silently
-    # trusting an unresolvable include would be worse than a false positive here.
-    if "lookup(" in text and "template" in text:
+    # A template that pulls in another one dynamically via lookup()/query()/q() (this repo's own docker-compose.yml.j2,
+    # which assembles per-service fragments via `lookup('template', 'services/' + name + '.yml.j2')`) is treated as
+    # needing suppression outright: resolving the dynamic expression statically is out of this guard's scope, and
+    # silently trusting an unresolvable include would be worse than a false positive here.
+    if LOOKUP_TEMPLATE_RE.search(text):
+        return True
+    # {% include %}: a LITERAL target is statically resolvable, so it is followed and checked exactly like a task's
+    # own src: (recursively, so a chain of literal includes is fully walked). Any OTHER include tag present that
+    # doesn't match the literal form (a variable, a computed path) is a dynamic include this guard cannot resolve,
+    # and is treated the same conservative way as an unresolvable lookup('template', ...) above.
+    for m in INCLUDE_LITERAL_RE.finditer(text):
+        target = os.path.join(templates_dir, m.group(1))
+        if not os.path.isfile(target) or template_needs_suppression(target, templates_dir, _seen):
+            return True
+    if INCLUDE_ANY_RE.search(text) and not INCLUDE_LITERAL_RE.search(text):
         return True
     return False
 
@@ -216,7 +252,7 @@ def check_file(path, role_dir, problems, root):
                 args = task[module_name]
                 src = args.get("src", "") if isinstance(args, dict) else ""
                 resolved = resolve_template_src(str(src), templates_dir)
-                if resolved and template_needs_suppression(resolved):
+                if resolved and template_needs_suppression(resolved, templates_dir):
                     leaks = True
                 break
         if leaks and not no_log:

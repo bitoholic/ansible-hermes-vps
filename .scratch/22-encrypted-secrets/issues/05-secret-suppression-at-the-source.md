@@ -209,3 +209,36 @@ only the fixtures were missing): `ansible.builtin.assert`'s scan-exemption widen
 accepting any truthy value instead of requiring the literal `True` the docstring already promised (no fixture used
 a non-literal `no_log:` expression); and the recursive `tasks/**/*.yml` glob regressing to non-recursive (no fixture
 used a nested tasks subdirectory). All three verified to actually fail their corresponding mutation when reverted.
+
+## Review round 5 (independent fresh-context subagent, breaking the 5-round cap on the operator's own instruction):
+CHANGES REQUIRED, fixed
+
+One more real code defect in the same family, found by hand-built (not mutated-code) fixtures against the real
+checker: the "does this template dynamically include another one" conservative heuristic
+(`"lookup(" in text and "template" in text`) was a plain substring check, bypassed completely by `query()`/`q()`
+(the built-in aliases for `lookup()` — same plugin, list-returning call form) and by a native Jinja
+`{% include 'file.j2' %}` statement (which doesn't use `lookup()` at all, and — unlike the genuinely dynamic
+per-service `lookup('template', 'services/' + name + '.yml.j2')` case this heuristic exists for — has a literal,
+statically-resolvable target that was never actually followed). Neither exploited in the real repo today. Fixed:
+`LOOKUP_TEMPLATE_RE` now matches `lookup`/`query`/`q` with any quoting/whitespace; a literal `{% include %}` target
+is now resolved and checked recursively, exactly like a task's own `src:`; a non-literal (dynamic) `{% include %}`
+gets the same conservative treatment as an unresolvable `lookup()`.
+
+Also closed four test-coverage gaps found by the round's mutation testing (the underlying code was already correct
+in all four — only fixtures were missing): the lookup/template detection was previously only caught incidentally
+by an unrelated fixture's prose, not by a purpose-built one; a violation inside a task's `always:` section (only
+`rescue:` had a fixture, from round 3); the short `assert:` module name (only the FQCN had a fixture); and a
+genuinely interpolated `success_msg:` (only `fail_msg:` had one). The short-`assert:`-name fixture needed one
+extra pass: the first version's leak came through `fail_msg:`, which the generic scan catches regardless of whether
+`assert`'s short name is recognized for the `that:` exemption specifically — so it didn't actually discriminate the
+mutation; replaced with a Jinja-string-wrapped bare `that:` entry, which does.
+
+Also documented (not a functional defect): the checker's docstring only named `site.yml`'s `ansible_user` as an
+out-of-scope reference, but its first play (bootstrapping the admin account, before `ansible_user` even applies)
+also interpolates `secrets.admin_username` and `secrets.admin_ssh_public_key` several times, unsuppressed — not a
+credential leak under this ticket's own established reasoning (a username and an SSH *public* key, not secrets),
+but not individually disclosed. Docstring updated to say so.
+
+This is the fifth real-defect-finding round in the same file, each narrower than the last. The operator was
+consulted directly at this point (the protocol's own 5-round cap) and chose to fix this finding and run one more
+review round rather than accept it as a documented limitation or close the ticket as-is.
