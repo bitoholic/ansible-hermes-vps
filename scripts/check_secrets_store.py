@@ -70,8 +70,6 @@ VERSION_RE = re.compile(r"^\d+\.\d+\.\d+$", re.ASCII)
 # The ONLY metadata names a SOPS dotenv store carries when encrypted to age recipients with default settings. Any other
 # `sops_*` name is refused: SOPS ignores it on decrypt, so it would be a place to hide a plaintext value.
 DEFAULT_METADATA = {"sops_unencrypted_suffix": "_unencrypted"}
-NAME_LINE_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)=(.*)$")
-AGE_RECIPIENT_RE = re.compile(r"^age1[a-z0-9]{58}$")
 WEAKENING_KEYS = ("unencrypted_suffix", "unencrypted_regex", "unencrypted_comment_regex", "encrypted_suffix",
                   "encrypted_regex", "encrypted_comment_regex", "mac_only_encrypted")
 PLAINTEXT_FILE_THRESHOLD = 3
@@ -102,34 +100,6 @@ def untracked_files(root):
     return [f for f in os.fsdecode(proc.stdout).split("\0") if f] if proc.returncode == 0 else []
 
 
-_BECH32 = "qpzry9x8gf2tvdw0s3jn54khce6mua7l"
-
-
-def valid_age_recipient(key):
-    """An age public key is a bech32 string (hrp `age`): verify the checksum, so a plaintext lookalike of the right length and
-    alphabet — a place to hide 58 characters — is refused. No key material is involved."""
-    if not isinstance(key, str) or not AGE_RECIPIENT_RE.match(key):
-        return False
-    hrp, data = key.rsplit("1", 1)
-    if hrp != "age":
-        return False
-    try:
-        values = [_BECH32.index(c) for c in data]
-    except ValueError:
-        return False
-    def polymod(vals):
-        gen = (0x3b6a57b2, 0x26508e6d, 0x1ea119fa, 0x3d4233dd, 0x2a1462b3)
-        chk = 1
-        for v in vals:
-            top = chk >> 25
-            chk = (chk & 0x1ffffff) << 5 ^ v
-            for i in range(5):
-                chk ^= gen[i] if (top >> i) & 1 else 0
-        return chk
-    expand = [ord(c) >> 5 for c in hrp] + [0] + [ord(c) & 31 for c in hrp]
-    return polymod(expand + values) == 1
-
-
 def check_metadata(name, value):
     """A problem with one `sops_*` line of the store, or None. Only the exact metadata names, each with its shape."""
     if name == "sops_version":
@@ -143,7 +113,7 @@ def check_metadata(name, value):
     m = re.fullmatch(r"sops_age__list_(0|[1-9][0-9]*)__map_(recipient|enc)", name)      # canonical numbers only
     if m:
         if m.group(2) == "recipient":
-            return None if valid_age_recipient(value) else "%s is not an age public key" % name
+            return None if hs.valid_age_recipient(value) else "%s is not an age public key" % name
         return None if AGE_ENC_RE.match(value) else "%s is not an age-encrypted data key" % name
     if name.startswith(("sops_key_groups__", "sops_shamir_threshold")):
         return "%s: multi-group / Shamir stores are not used by this repository (recipients are one flat age list)" % name
@@ -169,7 +139,7 @@ def check_store_text(text, rel, root):
             continue
         if COMMENT_RE.match(line) or line == "#":      # (SOPS leaves an EMPTY comment as a bare `#`; it carries no text)
             continue
-        m = NAME_LINE_RE.match(line)
+        m = hs.NAME_LINE_RE.match(line)
         if not m:
             problems.append("%s:%d is not a NAME=value line (a plaintext comment or stray text?)" % (rel, number))
             continue
@@ -285,7 +255,7 @@ def check_sops_config(path, store_rel):
         if not recipients:
             problems.append(".sops.yaml rule %d lists no age recipient" % (i + 1))
         for r in recipients:
-            if not valid_age_recipient(str(r)):
+            if not hs.valid_age_recipient(str(r)):
                 problems.append(".sops.yaml rule %d lists a recipient that is not an age public key" % (i + 1))
     if not scoped:
         problems.append(".sops.yaml has no rule whose path_regex matches the store's path %s" % store_rel)

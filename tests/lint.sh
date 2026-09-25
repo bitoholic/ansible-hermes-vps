@@ -46,8 +46,8 @@ if grep -rnE "lookup\([^)]*env" roles/ group_vars/all/main.yml site.yml tests/te
   exit 1
 fi
 
-# Ensure operator-facing env catalogs (.env.template, setup-env.sh) stay in sync
-# with the secret manifest. Regenerate with: python3 scripts/generate-env.py
+# Ensure the operator-facing env template (.env.template) stays in sync with the secret manifest.
+# Regenerate with: python3 scripts/generate-env.py
 python3 scripts/generate-env.py --check
 
 # Resolver unit test: crafted-env resolution + fail-fast naming (runs under --check).
@@ -203,4 +203,10 @@ echo "role skip-tags guard OK"
 # not weaken encryption, .env stays untracked and ignored, and no other tracked file looks like a plaintext secrets file.
 # The store's mandatory state is derived from the presence of .sops.yaml (neither present, as in a public export, is fine).
 ./tests/check-secrets-store.sh
+
+# Secrets helper (epic 22 ticket #04): maintains the encrypted store without ever writing plaintext to disk — edit
+# (via sops edit, TMPDIR pinned), check/fill (the one name-set rule), add/remove-recipient and rotate (ciphertext
+# operations only, values never touched), init-key, and import (a verified round trip). Run as a black box against
+# a throwaway repository tree with two workstation identities and a break-glass key, all throwaway.
+./tests/check-secrets-helper.sh
 

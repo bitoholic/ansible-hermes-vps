@@ -103,6 +103,21 @@ def name_set_problems(names, root=REPO_ROOT):
     return apply_name_set(names, required_names(root), allowed_names(root))
 
 
+def store_names(text):
+    """Every non-metadata NAME present in a store's (or a plain dotenv's) text — best effort, used where only the SET
+    of names matters (scripts/secrets check). Full structural validation of the store's shape (genuine encryption,
+    exact ciphertext forms, ...) is scripts/check_secrets_store.py's job, not this function's."""
+    names = []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        m = NAME_LINE_RE.match(line)
+        if m and not m.group(1).startswith("sops_"):
+            names.append(m.group(1))
+    return names
+
+
 def apply_name_set(names, required, allowed):
     """The pure form of the name-set rule (the rule's inputs computed by the caller — the wrapper computes them BEFORE any
     secret is in memory)."""
@@ -126,7 +141,7 @@ def sops_env(environ=None):
 def _sops_failure_reason(stderr):
     """A fixed-vocabulary reason for a sops failure; never any of sops' own text."""
     text = stderr.lower()
-    if "mac mismatch" in text:
+    if "mac mismatch" in text or "cannot decrypt mac" in text or "authentication failed" in text:
         return "the store's integrity check failed (edited or corrupted)"
     if "metadata not found" in text or "sops metadata" in text:
         return "the file is not a SOPS-encrypted store"
@@ -239,3 +254,38 @@ def load_registry(root=REPO_ROOT):
                 raise SecretsError("%s: malformed line (want 'name path'): %r" % (REGISTRY_RELPATH, raw.strip()))
             registry[parts[0]] = parts[1]
     return registry
+
+# ---------------------------------------------------------------------------------------------
+# Age recipients: shape and checksum. Shared by the structural guard (scripts/check_secrets_store.py) and by this
+# module's own recipient-management helpers (add_recipient / remove_recipient) — one definition, so they can never
+# disagree about what a valid age public key looks like.
+# ---------------------------------------------------------------------------------------------
+NAME_LINE_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)=(.*)$")
+AGE_RECIPIENT_RE = re.compile(r"^age1[a-z0-9]{58}$")
+_BECH32 = "qpzry9x8gf2tvdw0s3jn54khce6mua7l"
+
+
+def valid_age_recipient(key):
+    """An age public key is a bech32 string (hrp `age`): verify the checksum, so a plaintext lookalike of the right length and
+    alphabet — a place to hide 58 characters — is refused. No key material is involved."""
+    if not isinstance(key, str) or not AGE_RECIPIENT_RE.match(key):
+        return False
+    hrp, data = key.rsplit("1", 1)
+    if hrp != "age":
+        return False
+    try:
+        values = [_BECH32.index(c) for c in data]
+    except ValueError:
+        return False
+    def polymod(vals):
+        gen = (0x3b6a57b2, 0x26508e6d, 0x1ea119fa, 0x3d4233dd, 0x2a1462b3)
+        chk = 1
+        for v in vals:
+            top = chk >> 25
+            chk = (chk & 0x1ffffff) << 5 ^ v
+            for i in range(5):
+                chk ^= gen[i] if (top >> i) & 1 else 0
+        return chk
+    expand = [ord(c) >> 5 for c in hrp] + [0] + [ord(c) & 31 for c in hrp]
+    return polymod(expand + values) == 1
+
