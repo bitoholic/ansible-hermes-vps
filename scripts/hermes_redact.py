@@ -12,14 +12,17 @@ whatever form it takes there:
 The redactor works on a BYTE STREAM with carry-over, not line by line: a value split across two reads (or two
 lines) is still found, because the tail of the buffer that could be the start of a value is held back until the next
 chunk (or `finish()`). Only such a tail is held, so ordinary output is not delayed. Overlapping and nested matches
-are merged, so a value that contains another value (or overlaps one) leaves no readable fragment of either.
+are merged, so a value that contains another value (or overlaps one) leaves no readable fragment of either — including
+across chunk boundaries and inside a very long run of matches (see `_forced`).
 
   * JSON text *inside* a JSON string (Ansible prints a `to_json` result, or any JSON a command returned, as a JSON string
     value): the escaping is applied up to three levels deep, in every mix of the ASCII and raw-UTF-8 forms.
 
 Documented limits (the complement is suppression at the source, ticket #05):
   * other encodings are NOT covered — base64, hex, ROT13, JSON nested more than three levels, double URL-encoding
-    (`%2540`), JavaScript's `encodeURIComponent` (which leaves `!'()*` unescaped), shell quoting, YAML quoting, a value
+    (`%2540`), JavaScript's `encodeURIComponent` (which leaves `!'()*` unescaped), mixed-case or partial percent-encoding,
+    HTML/XML entities, cross-encodings such as JSON inside a URL, shell quoting, YAML quoting, a multi-line value shown
+    with per-line prefixes (`--diff` prints `+line1` / `+line2`, so the newline-joined value never matches), a value
     split by the program's own formatting, or a value printed one character at a time;
   * values shorter than MIN_REDACT_LEN are not redacted (a one- or two-character value would mask half of every
     log); a value AT the minimum is, and the over-redaction this causes for a common word is an accepted trade-off:
@@ -88,10 +91,14 @@ class StreamRedactor:
         self._needles = sorted(needles, key=len, reverse=True)
         self._maxlen = max((len(n) for n in self._needles), default=1)
         self._buf = b""
+        # Leading bytes of the carry that belong to a run of matches whose head was already emitted as a mask. Those
+        # bytes must be masked even if nothing extends the run, because the matches that covered them are no longer
+        # in the buffer to be found again.
+        self._forced = 0
 
     def _spans(self, buf):
         """Merged [start, end) intervals of every needle occurrence in `buf`, overlaps included."""
-        spans = []
+        spans = [(0, self._forced)] if self._forced else []
         for needle in self._needles:
             pos = buf.find(needle)
             while pos != -1:
@@ -138,21 +145,27 @@ class StreamRedactor:
         buf = self._buf + chunk
         spans = self._spans(buf)
         safe_end = len(buf) - self._held_suffix(buf)
+        forced = max(0, self._forced - safe_end)
         for i, (start, end) in enumerate(spans):              # never cut through a match ...
             if start < safe_end < end:
-                # ... except that a very long merged run (a value-shaped run of output such as `aaaa…`) must not make
-                # the buffer grow without bound and stall all output: every byte of it is masked anyway, so emit it up
-                # to the last MAXLEN-1 bytes (which a later chunk might still extend) and carry only those.
-                cut = end - (self._maxlen - 1) if end == len(buf) else end
-                if cut - start > 2 * self._maxlen:
-                    spans[i] = (start, cut)
-                    safe_end = cut
+                if safe_end - start > 2 * self._maxlen:
+                    # ... except that a very long merged run (a value-shaped run of output such as `aaaa…`) must not make
+                    # the buffer grow without bound and stall all output. Every byte of it is masked, so emit the part up
+                    # to the held tail as one mask and carry only the tail — of which the bytes still inside the run are
+                    # FORCED to be masked (their matches are gone from the buffer), whether or not the run continues.
+                    spans[i] = (start, safe_end)
+                    forced = end - safe_end
                 else:
                     safe_end = start
+                    forced = max(0, self._forced - safe_end)
                 break
         self._buf = buf[safe_end:]
+        self._forced = forced
         return self._apply(buf, spans, safe_end)
 
     def finish(self):
         buf, self._buf = self._buf, b""
-        return self._apply(buf, self._spans(buf), len(buf))
+        try:
+            return self._apply(buf, self._spans(buf), len(buf))
+        finally:
+            self._forced = 0

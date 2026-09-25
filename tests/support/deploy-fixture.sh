@@ -112,7 +112,7 @@ for stream in (sys.stdout, sys.stderr):
 SPLIT
   # a long run of value-shaped output (the repeated value 'qqqq'): must be masked without stalling or unbounded memory
   printf '#!/usr/bin/env bash\nhead -c 3000000 /dev/zero | tr "\\0" q; echo\n' > "$repo/scripts/fx-repeat.sh"
-  printf '#!/usr/bin/env bash\nhead -c 100000 /dev/zero | tr "\\0" q; sleep 4; head -c 100000 /dev/zero | tr "\\0" q; echo\n' > "$repo/scripts/fx-repeat-slow.sh"
+  printf '#!/usr/bin/env bash\nhead -c 100000 /dev/zero | tr "\\0" q; sleep 4; printf "\\nrecap-ok\\n"\n' > "$repo/scripts/fx-repeat-slow.sh"
   chmod +x "$repo/scripts/fx-repeat.sh" "$repo/scripts/fx-repeat-slow.sh"
   # ends with the WHOLE token and no newline; the token is a proper prefix of another value, so it is held back and must be masked at exit
   printf '#!/usr/bin/env bash\nprintf "%%s" "$FIX_TOKEN"\n' > "$repo/scripts/fx-tail-full.sh"; chmod +x "$repo/scripts/fx-tail-full.sh"

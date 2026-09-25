@@ -165,15 +165,47 @@ for case in range(400):
     for v in values:
         if len(v) >= R.MIN_REDACT_LEN:
             assert v.encode() not in whole, ("value survived", v, text, whole)
+# 1b. RUN-HEAVY texts (long merged runs of matches: repeated values, periodic and bordered values, a value that is a prefix
+# of another) against a plain WHOLE-BUFFER reference: split output must equal it — the bounded-growth path must never
+# print a fragment of a value that is part of a run
+def reference(values, text):
+    needles = set()
+    for v in values:
+        if len(v) >= R.MIN_REDACT_LEN: needles |= R.variants(v)
+    spans = []
+    for n in needles:
+        i = text.find(n)
+        while i != -1: spans.append((i, i + len(n))); i = text.find(n, i + 1)
+    spans.sort(); out, pos = [], 0
+    for a, b in spans:
+        if b <= pos: continue
+        out.append(text[pos:max(pos, a)]); out.append(MASK); pos = b
+    out.append(text[pos:]); return b"".join(out)
+rr = random.Random(11)
+families = [["aaaa"], ["aaaa", "aaaabXYZ"], ["abab", "ababab"], ["aaaaaa"], ["bbbb/a", "bbbb/abb", "bbbbbbb/a"], ["abcabcabc"], ["q" * 12, "qqqq"]]
+for case in range(300):
+    values = rr.choice(families)
+    unit = rr.choice(values + [json.dumps(values[0])[1:-1], urllib.parse.quote(values[0]), "x", "\n", " b"])
+    text = (unit * rr.randint(3, 120) + rr.choice(["", "\n", " tail", values[-1][:2]])).encode()
+    text = text + (rr.choice(values) + "Z\n").encode() if rr.random() < .4 else text
+    want = collapse(reference(values, text))
+    for step in (1, 3, len(min(values, key=len)), max(len(v) for v in values), 97):
+        assert collapse(run(values, [text[i:i + step] for i in range(0, len(text), step)])) == want, ("run-heavy split differs", values, step, text[:60], len(text))
+    cuts = sorted(rr.sample(range(1, len(text)), min(4, len(text) - 1)))
+    assert collapse(run(values, [text[a:b] for a, b in zip([0] + cuts, cuts + [len(text)])])) == want, ("run-heavy random split differs", values, text[:60])
 # 2. every documented form of a value is masked (each computed here, independently of the redactor)
-v = "a b/ü%\u017c"
+v = "a b/ü%\u017c \"q\" \\x"
 forms = {"plain": v, "json ascii": json.dumps(v)[1:-1], "json utf8": json.dumps(v, ensure_ascii=False)[1:-1],
          "json slash": json.dumps(v)[1:-1].replace("/", "\\/"),
          "json upper hex": re.sub(r"\\u([0-9a-f]{4})", lambda m: "\\u" + m.group(1).upper(), json.dumps(v)[1:-1]),
          "quote": urllib.parse.quote(v, safe=""), "quote_plus": urllib.parse.quote_plus(v),
          "quote lower hex": re.sub(r"%[0-9A-F]{2}", lambda m: m.group(0).lower(), urllib.parse.quote(v, safe="")),
          "json in json": json.dumps(json.dumps(v)[1:-1])[1:-1], "json in json in json": json.dumps(json.dumps(json.dumps(v)[1:-1])[1:-1])[1:-1],
-         "repr": repr(v)[1:-1]}
+         "repr": repr(v)[1:-1],
+         "json utf8 in json utf8": json.dumps(json.dumps(v, ensure_ascii=False)[1:-1], ensure_ascii=False)[1:-1],
+         "json ascii in json utf8": json.dumps(json.dumps(v)[1:-1], ensure_ascii=False)[1:-1],
+         "json utf8 in json ascii": json.dumps(json.dumps(v, ensure_ascii=False)[1:-1])[1:-1],
+         "json utf8 x3": json.dumps(json.dumps(json.dumps(v, ensure_ascii=False)[1:-1], ensure_ascii=False)[1:-1], ensure_ascii=False)[1:-1]}
 for label, f in forms.items():
     out = run([v], [("x " + f + " y").encode()])
     assert f.encode() not in out and MASK in out, ("form not masked", label, f, out)
@@ -192,6 +224,9 @@ for vals, size in ((["aaaa"], 1_500_000), (["ab" * 6], 600_000)):
     for i in range(0, len(data), 4096):
         emitted += len(x.feed(data[i:i + 4096])); peak = max(peak, len(x._buf))
     assert emitted > 0, "output was withheld until the end of the run"
+    stream = b"".join(  # the same run again, collecting every emitted byte: nothing but masks may come out
+        [y for y in (lambda z: [z.feed(data[i:i + 4096]) for i in range(0, len(data), 4096)] + [z.finish()])(R.StreamRedactor(vals))])
+    assert stream.replace(MASK, b"") == b"", ("a fragment of a run of the value was emitted", stream.replace(MASK, b"")[:40])
     assert peak < 20 * max(len(n) for n in x._needles) + 8192, ("the carry grew without bound", peak)
     assert time.time() - t0 < 10, ("too slow", time.time() - t0)
     tail = x.finish(); assert vals[0].encode() not in tail
@@ -209,7 +244,13 @@ class Sink:
 import threading
 st = {"writing": False, "last": time.time()}
 th = threading.Thread(target=D.pump, args=(r, Sink(), Boom(), st), daemon=True); th.start()
-os.write(w, b"secret-looking data " * 1000); os.write(w, b"more" * 100000); os.close(w); th.join(10)
+def feeder():
+    try:
+        os.write(w, b"secret-looking data " * 1000); os.write(w, b"more" * 100000)
+    finally:
+        os.close(w)
+threading.Thread(target=feeder, daemon=True).start()
+th.join(10)
 assert not th.is_alive(), "the pump blocked behind a failing redactor"
 assert b"secret-looking" not in b"".join(got), "a failing redactor let raw output through"
 E
@@ -224,7 +265,8 @@ rpid=$!; seen=0
 for _ in $(seq 1 25); do sleep 0.2; grep -q '\[redacted\]' "$T/rep.out" && { seen=1; break; }; done   # the script pauses 4 s after its first 100 KB
 if (( seen )) && kill -0 "$rpid" 2>/dev/null; then :; else wait "$rpid" || true; fail "the first 100 KB of a repeated-value run was withheld until the end (stall)"; fi
 wait "$rpid" || true
-! grep -q 'qqqq' "$T/rep.out" || fail "part of a repeated-value run was not masked"
+# the run ENDS at a read boundary here (a pause, then a different byte): no readable part of the value may remain, and no fragment
+grep -q 'recap-ok' "$T/rep.out" && ! grep -q 'qqq' "$T/rep.out" || fail "a fragment of a repeated-value run that ended at a read boundary was printed"
 echo "redaction: canaries in debug messages, JSON/URL forms, template diffs and verbose arguments (-vvvvvv), split across chunks, nested — none in the output; values below the minimum are documented as unmasked"
 
 # --- refused invocation shapes (each: exit 64, and the child never ran) ---------------------------------
