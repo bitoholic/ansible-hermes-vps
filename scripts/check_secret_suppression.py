@@ -41,7 +41,11 @@ What this CANNOT verify
   * That `no_log: true` on a task actually suppresses everything a module might print (a module bug that ignores
     no_log is Ansible's own contract to keep, not this guard's).
   * Anything outside roles/*/tasks/ (site.yml, group_vars, other playbooks) — the manifest and its callers are
-    covered by other guards (the single-seam check in tests/lint.sh, the resolver's own test).
+    covered by other guards (the single-seam check in tests/lint.sh, the resolver's own test). This includes
+    site.yml's own `ansible_user: "{{ secrets.admin_username }}"`, which has the identical never-fixable-by-no_log
+    property as `become_user:` above (Ansible's SSH connection plugin inlines it into every task's connection trace
+    for the whole play, regardless of any task's own no_log) — accepted and documented at its own call site for the
+    same reason: an OS username, not a credential, with no fix available.
 """
 import argparse
 import glob
@@ -79,11 +83,14 @@ NEVER_FIXABLE_BY_NO_LOG_KEYS = {"environment", "become_user"}
 # away, but this one specific class cannot). The two tasks below use it with secrets.admin_username, the OS
 # username Ansible needs to run these as: not a credential in the traditional sense (knowing it grants no
 # capability by itself), and there is no fix available beyond accepting that Ansible's own connection-plugin trace
-# will show it at high verbosity. Explicit, narrow and justified — NOT a blanket exemption for `become_user:
-# elsewhere; any OTHER task using it with a secret is still a hard failure above.
+# will show it at high verbosity. Keyed on (file, task name, the EXACT become_user expression) — not just (file,
+# name) — so silently repurposing an allowlisted task to pass a DIFFERENT, genuinely dangerous secret through
+# become_user (same file, same name, new expression) is still a hard failure, not silently waved through. Explicit,
+# narrow and justified — NOT a blanket exemption for `become_user:` elsewhere; any other task or expression is still
+# a hard failure above.
 ACCEPTED_BECOME_USER_EXCEPTIONS = {
-    ("roles/common/tasks/main.yml", "Configure global git user.name for admin user"),
-    ("roles/common/tasks/main.yml", "Configure global git user.email for admin user"),
+    ("roles/common/tasks/main.yml", "Configure global git user.name for admin user", "{{ secrets.admin_username }}"),
+    ("roles/common/tasks/main.yml", "Configure global git user.email for admin user", "{{ secrets.admin_username }}"),
 }
 
 
@@ -172,7 +179,7 @@ def check_file(path, role_dir, problems, root):
         rel_path = os.path.relpath(file_path, root)
         for key in NEVER_FIXABLE_BY_NO_LOG_KEYS:
             if key in task and contains_secret_ref(task[key]):
-                if key == "become_user" and (rel_path, name) in ACCEPTED_BECOME_USER_EXCEPTIONS:
+                if key == "become_user" and (rel_path, name, task[key]) in ACCEPTED_BECOME_USER_EXCEPTIONS:
                     continue
                 problems.append(
                     "%s: task %r passes a secret through `%s:`, which no_log CANNOT protect (Ansible's connection "

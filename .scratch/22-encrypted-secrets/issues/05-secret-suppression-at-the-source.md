@@ -134,3 +134,33 @@ New regression tests added to `tests/check-secret-suppression.sh` for all four n
 flagged even with `no_log: true` present, `become_user:` flagged when not on the accepted-exceptions list, a
 `vars:`-computed intermediate, a `loop:` directly over a secret), each verified to actually fail before the fix and
 pass after.
+
+## Review round 2 (independent fresh-context subagent): CHANGES REQUIRED, fixed
+
+Re-verified every round 1 fix independently (including reproducing the `become_user`-bypasses-`no_log` claim again,
+against real ansible-core in a disposable container) — all held. Two new findings:
+
+1. **CODE DEFECT (checker soundness):** `ACCEPTED_BECOME_USER_EXCEPTIONS` matched on `(file, task name)` only, never
+   the actual `become_user:` expression. Repurposing one of the two allowlisted tasks to carry a DIFFERENT, genuinely
+   dangerous secret through `become_user:` — same file, same task name, new expression — would have been silently
+   waved through with zero warning, exactly the failure mode a narrow allowlist exists to prevent. Fixed: the
+   allowlist is now keyed on `(file, task name, the exact expression)`; a repurposed task with a different expression
+   is a hard failure again. A regression fixture proves this (had to be rewritten once: the first version's
+   assertion was satisfied by an unrelated, already-present fixture's identical message text rather than by the new
+   fixture itself — caught by manually re-running the exact mutation this round found and confirming the test
+   initially passed when it should have failed, then tightening the assertion to the new fixture's own file+task
+   line specifically).
+2. **DOCUMENTATION gap, not a functional defect:** `site.yml`'s second play sets `ansible_user: "{{
+   secrets.admin_username }}"` at the play level — the identical never-fixable-by-no_log mechanism as `become_user:`
+   (Ansible's SSH connection plugin inlines it into every single task's connection trace for the whole play,
+   regardless of any task's own `no_log`), independently reproduced by the reviewer against a real local sshd. This
+   was already out of the checker's declared scope (`roles/*/tasks/` only) and doesn't violate the "no credential
+   leak" goal under this ticket's own established reasoning (an OS username is not a credential; knowing it grants
+   no capability by itself) — but was undocumented anywhere. Fixed: a comment at the call site mirroring
+   `roles/common/tasks/main.yml`'s, plus a line in the checker's own "what this cannot verify" docstring section.
+
+The full-playbook dynamic leak test was run for real again this round (a fresh disposable podman container, root,
+python3-apt, a real Docker daemon, destroyed afterward) and passed clean; the round also confirmed `delegate_to` is
+unused anywhere in the repo and that ordinary module arguments (`ansible.builtin.user`'s `password:`,
+`community.general.git_config`'s own args) do NOT share this bypass class — they're JSON-embedded in the AnsiballZ
+payload, not inlined into a printed shell command, so plain `no_log` correctly protects them.

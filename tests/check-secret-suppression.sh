@@ -142,6 +142,30 @@ for must_not_flag in \
 done
 echo "negative fixtures: rendered template, command argument, registered result and a nested block are each flagged; their suppressed counterparts and a prose-only assert are not"
 
+# The become_user allowlist is keyed on (file, task name, EXACT expression) — repurposing an allowlisted task to
+# carry a DIFFERENT secret through become_user, while keeping its file path and name unchanged, must still be
+# flagged, not silently waved through by a looser (file, name)-only match.
+mkdir -p "$T/roles/common/tasks"
+cat > "$T/roles/common/tasks/main.yml" <<'YML'
+---
+- name: Configure global git user.name for admin user
+  community.general.git_config:
+    name: user.name
+    value: "{{ secrets.git_username | default('') }}"
+  become: true
+  become_user: "{{ secrets.some_other_dangerous_secret }}"
+  no_log: true
+YML
+set +e
+OUT="$(python3 scripts/check_secret_suppression.py --root "$T" 2>&1)"; RC=$?
+set -e
+# Specific to THIS fixture's own file+task line, not just the generic phrase — roles/leaky's own become_user/
+# environment fixtures (added above, still present in $T) already produce that same phrase regardless.
+[[ $RC -eq 1 ]] && grep -qE "roles/common/tasks/main\.yml: task 'Configure global git user\.name for admin user'.*no_log CANNOT protect" <<<"$OUT" \
+  || fail "repurposing an allowlisted task's become_user expression (same file, same name, different secret) must still be flagged (rc=$RC, out=$OUT)"
+rm -rf "$T/roles/common"
+echo "the become_user allowlist is keyed on the exact expression, not just the task's file and name"
+
 # A YAML file that doesn't parse is reported as a problem by name (rc=1), never a silent, misleading "OK" (rc=0).
 mkdir -p "$T/roles/broken/tasks"
 printf -- '- name: unterminated\n  ansible.builtin.command: {cmd: "echo hi"\n' > "$T/roles/broken/tasks/main.yml"

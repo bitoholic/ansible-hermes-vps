@@ -71,6 +71,12 @@
   hosts: all
   gather_facts: true
   vars:
+    # Epic 22 #05: like become_user (roles/common/tasks/main.yml), ansible_user is inlined by Ansible's SSH
+    # connection plugin into every single task's connection trace, printed verbatim at high verbosity (-vvv+)
+    # regardless of any task's own no_log — there is no per-task or per-play fix, since the SSH connection itself
+    # must be told which account to log in as. Accepted, undefended, and out of scope for scripts/
+    # check_secret_suppression.py by design (it only walks roles/*/tasks/): an OS username is not a credential in
+    # the traditional sense — knowing it grants no capability by itself.
     ansible_user: "{{ secrets.admin_username }}"
     # Epic 18, #05: computed once, referenced by both the DNS handover and its
     # post-start verification below — they can't share a single block: (the
