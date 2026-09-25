@@ -203,6 +203,7 @@ forms = {"plain": v, "json ascii": json.dumps(v)[1:-1], "json utf8": json.dumps(
          "json in json": json.dumps(json.dumps(v)[1:-1])[1:-1], "json in json in json": json.dumps(json.dumps(json.dumps(v)[1:-1])[1:-1])[1:-1],
          "repr": repr(v)[1:-1],
          "json utf8 in json utf8": json.dumps(json.dumps(v, ensure_ascii=False)[1:-1], ensure_ascii=False)[1:-1],
+         "json slash + upper hex": re.sub(r"\\u([0-9a-f]{4})", lambda m: "\\u" + m.group(1).upper(), json.dumps(v)[1:-1]).replace("/", "\\/"),
          "json ascii in json utf8": json.dumps(json.dumps(v)[1:-1], ensure_ascii=False)[1:-1],
          "json utf8 in json ascii": json.dumps(json.dumps(v, ensure_ascii=False)[1:-1])[1:-1],
          "json utf8 x3": json.dumps(json.dumps(json.dumps(v, ensure_ascii=False)[1:-1], ensure_ascii=False)[1:-1], ensure_ascii=False)[1:-1]}
@@ -227,32 +228,49 @@ for vals, size in ((["aaaa"], 1_500_000), (["ab" * 6], 600_000)):
     stream = b"".join(  # the same run again, collecting every emitted byte: nothing but masks may come out
         [y for y in (lambda z: [z.feed(data[i:i + 4096]) for i in range(0, len(data), 4096)] + [z.finish()])(R.StreamRedactor(vals))])
     assert stream.replace(MASK, b"") == b"", ("a fragment of a run of the value was emitted", stream.replace(MASK, b"")[:40])
-    assert peak < 20 * max(len(n) for n in x._needles) + 8192, ("the carry grew without bound", peak)
+    assert peak <= 3 * max(len(n) for n in x._needles), ("the carry grew beyond its bound", peak)
     assert time.time() - t0 < 10, ("too slow", time.time() - t0)
     tail = x.finish(); assert vals[0].encode() not in tail
+# 3b. the carry stays within ~3*maxlen even for a run of only a dozen value-lengths fed byte by byte
+x = R.StreamRedactor(["aaaa"]); peak = 0
+for b in b"a" * (12 * x._maxlen):
+    x.feed(bytes([b])); peak = max(peak, len(x._buf))
+assert peak <= 3 * x._maxlen, ("the carry grew beyond its bound on a medium run", peak, x._maxlen)
 # 4. a lone surrogate in a value does not crash construction
-R.StreamRedactor(["ab\udcffcd"])
+R.StreamRedactor(["ab\udcffcd"]); R.StreamRedactor(["ab\ud800cd"])
 # 5. a redactor that raises must not leak or block: the pump withholds the rest of the stream and keeps draining
 D = load("deploy_t", os.path.join(root, "scripts", "deploy"))
 class Boom:
     def feed(self, c): raise RuntimeError("boom")
     def finish(self): raise RuntimeError("boom")
-r, w = os.pipe(); got = []
-class Sink:
-    def write(self, b): got.append(b)
-    def flush(self): pass
+class BoomAtEnd:                      # feed works, finish() raises: the carry must not be printed raw
+    def __init__(self): self.r = R.StreamRedactor(["secret-looking"])
+    def feed(self, c): return self.r.feed(c)
+    def finish(self): raise RuntimeError("boom")
 import threading
-st = {"writing": False, "last": time.time()}
-th = threading.Thread(target=D.pump, args=(r, Sink(), Boom(), st), daemon=True); th.start()
-def feeder():
-    try:
-        os.write(w, b"secret-looking data " * 1000); os.write(w, b"more" * 100000)
-    finally:
-        os.close(w)
-threading.Thread(target=feeder, daemon=True).start()
-th.join(10)
+class Sink:
+    def __init__(self): self.got = []
+    def write(self, b): self.got.append(b)
+    def flush(self): pass
+def drive(redactor, payload):
+    r, w = os.pipe(); sink = Sink(); st = {"writing": False, "last": time.time()}; fed = threading.Event()
+    th = threading.Thread(target=D.pump, args=(r, sink, redactor, st), daemon=True); th.start()
+    def feeder():                       # from a helper thread: a pump that stops draining fails the test instead of hanging it
+        try:
+            for chunk in payload: os.write(w, chunk)
+            fed.set()
+        finally:
+            os.close(w)
+    threading.Thread(target=feeder, daemon=True).start()
+    th.join(10)
+    return sink, th, fed
+sink, th, fed = drive(Boom(), [b"secret-looking data " * 1000, b"more" * 100000])
+assert fed.is_set(), "the pump stopped draining after the redactor failed (the child would block on a full pipe)"
 assert not th.is_alive(), "the pump blocked behind a failing redactor"
-assert b"secret-looking" not in b"".join(got), "a failing redactor let raw output through"
+assert b"secret-looking" not in b"".join(sink.got), "a failing redactor let raw output through"
+sink, th, fed = drive(BoomAtEnd(), [b"prefix secret-look"])       # ends holding a possible value prefix
+assert fed.is_set() and not th.is_alive(), "the pump did not finish when finish() raised"
+assert b"secret-look" not in b"".join(sink.got), "the held carry was printed raw when finish() failed"
 E
 # a long run of value-shaped output (the repeated value 'qqqq') through the wrapper: masked, complete, prompt, and delivered while it runs
 start=$SECONDS; fx_deploy --script repeat

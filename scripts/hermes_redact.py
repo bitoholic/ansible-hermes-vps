@@ -67,11 +67,12 @@ def variants(value):
         out.add(as_json)
         out.add(as_json.replace("/", "\\/"))
         out.add(_upper_unicode_escapes(as_json))
+        out.add(_upper_unicode_escapes(as_json).replace("/", "\\/"))     # upper-case hex AND an escaped slash
         out.add(repr(as_json)[1:-1])                                # a JSON string shown by Python's repr
     out.add(repr(value)[1:-1])
     out.add(value.replace("\\", "\\\\").replace("'", "\\'"))     # repr() of a str that is shown single-quoted
     out.add(value.replace("\\", "\\\\").replace('"', '\\"'))     # ... and double-quoted
-    raw = value.encode("utf-8", "surrogateescape")      # (a lone surrogate must not crash the constructor)
+    raw = value.encode("utf-8", "surrogatepass")        # (a lone surrogate must not crash the constructor)
     for quoted in (urllib.parse.quote_from_bytes(raw, safe=""), urllib.parse.quote_from_bytes(raw, safe="/"),
                    urllib.parse.quote_from_bytes(raw, safe="").replace("%20", "+"),
                    urllib.parse.quote_from_bytes(raw, safe="/").replace("%20", "+")):
