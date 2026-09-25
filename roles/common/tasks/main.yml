@@ -15,6 +15,12 @@
     state: present
     update_cache: true
 
+# become_user below is secrets.admin_username, the OS account these two tasks must run as — an accepted, undefended
+# exception (scripts/check_secret_suppression.py's ACCEPTED_BECOME_USER_EXCEPTIONS): unlike a token, an account name
+# has no file-reference alternative (sudo/su need it as a literal argument), so Ansible's own connection-plugin
+# trace will print it at high verbosity regardless of no_log — found via epic 22 #05's independent review, which
+# also confirmed a username is not a credential in the traditional sense (knowing it grants no capability by
+# itself). `value:` (the actual git identity) IS protected by no_log, which is what it's there for.
 - name: Configure global git user.name for admin user
   tags: [common]
   community.general.git_config:

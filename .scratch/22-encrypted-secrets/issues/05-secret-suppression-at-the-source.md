@@ -43,14 +43,17 @@ v2.16.0, 2023-02). The render task itself also carries `no_log: true` (defense i
 **Suppression sweep.** Every task across `roles/*/tasks/` whose own arguments (module args, a template's rendered
 content followed through `src:`, or the `environment:` directive) reference a `secrets.*` value now carries
 `no_log: true` — applied uniformly regardless of whether the specific field felt "sensitive" (a username used for
-`owner:`/`become_user:` is treated the same as an API token), matching how the deploy wrapper's own redaction
-(ticket #02) already treats every decrypted value the same way regardless of field. Two bugs found and fixed along
-the way, both in code this ticket touched but neither literally in scope until found:
-- `owntracks`'s htpasswd generation used `hash_scheme: bcrypt`, not a real parameter of
-  `community.general.htpasswd` (the real one is `crypt_scheme`) — silently ignored by older Ansible, so every real
-  deployment has generated an `apr_md5_crypt` hash, which Caddy's `basic_auth` (bcrypt-only) cannot verify. Found
-  only because this ticket's own dynamic leak test is the first thing to have ever actually EXECUTED this task.
-  Fixed: `crypt_scheme: bcrypt`.
+`owner:` is treated the same as an API token), matching how the deploy wrapper's own redaction (ticket #02) already
+treats every decrypted value the same way regardless of field. One functional finding and one real bug along the
+way, both in code this ticket touched but neither literally in scope until found:
+- `owntracks`'s htpasswd generation used `hash_scheme: bcrypt`. This ticket's own dynamic leak test hit an
+  "unsupported parameter" error against it in its throwaway validation container — but round 1's independent
+  review, checking the module's real source, found `hash_scheme` is actually the CANONICAL parameter name in
+  current `community.general` (`crypt_scheme` is kept only as a backward-compat alias); the container's error was
+  specific to the old, Debian-bundled collection version (`apt-get install ansible` on Debian 12 pulls
+  community.general ~6.x, from before the rename) it happened to install. **Not a confirmed production bug** — a
+  reasonably current collection already treated `hash_scheme: bcrypt` as correct. Kept as `crypt_scheme: bcrypt`
+  anyway since that name works unmodified on both old and new collection versions, the more portable choice.
 - `backup`'s git-clone task passed the GitHub token via the `environment:` directive. Ansible inlines `environment:`
   values into the literal shell command it runs, and its connection plugin prints that command verbatim at high
   verbosity (`-vvv+`) — **regardless of the task's own `no_log: true`**, which only redacts a task's arguments and
@@ -91,5 +94,43 @@ complete a `--check` run end-to-end (`common`, `docker`, `authelia`, `silverbull
 `owntracks`/`adguard`/`conduit`/`gateway` hit unrelated check-mode/module limitations (owntracks's own htpasswd
 module doesn't declare check-mode support, so a later real file read fails for a reason having nothing to do with
 suppression) and are covered instead by the static checker and by hand for the specific tasks this ticket touched
-in each. This dynamic test is what actually found both bugs above — a genuine confirmation that "at verbosity" was
-the right bar to test against, not a formality.
+in each. This dynamic test is what actually found the `environment:` bug above — a genuine confirmation that "at
+verbosity" was the right bar to test against, not a formality.
+
+## Review round 1 (independent fresh-context subagent): CHANGES REQUIRED, fixed
+
+Independently reproduced the `environment:`-bypasses-`no_log` claim from scratch (confirmed) and found a second,
+real instance of the exact same underlying mechanism that this ticket's own sweep missed: **`become_user:` is
+inlined into the shell commands Ansible's become plugin runs (`setfacl`, `chown`, `chmod`) exactly the way
+`environment:` values are, printed verbatim by the connection plugin at high verbosity regardless of `no_log`** —
+reproduced independently a second time in this round against real ansible-core. `roles/common/tasks/main.yml`'s two
+git-identity tasks use `become_user: "{{ secrets.admin_username }}"` with `no_log: true`, which does not actually
+protect it. Unlike the `environment:` case, this has no fix: `become_user` must always be a literal account name
+(sudo/su act on it directly), so there is no file-reference redesign available the way there was for the GitHub
+token. Accepted as a documented, undefended exception — an OS username is not a credential in the traditional
+sense, knowing it grants no capability by itself — recorded at both call sites and as an explicit, narrow
+`ACCEPTED_BECOME_USER_EXCEPTIONS` allowlist in the checker (matching (file, task name), not a blanket exemption for
+`become_user` generally: any OTHER task using it with a secret is still a hard failure).
+
+Also found and fixed two undisclosed soundness gaps in the checker itself, both confirmed via a working fixture
+that passed cleanly when it should have failed: `vars:` and `loop:` were excluded from the scan, so a task computing
+an intermediate name from a secret in its own `vars:` block, or looping directly over a secrets structure, passed
+silently. Neither is currently exploited anywhere in this repo (confirmed by grep), but both are realistic Ansible
+idioms; fixed by including both in the scan (removed from `DIRECTIVE_KEYS`) and no new false positives resulted
+against the real repo. The checker now also gives `environment:`/`become_user:` their own always-fail check (never
+accepting `no_log: true` as sufficient for either, with a message saying so explicitly) instead of folding them into
+the generic "add no_log" path, which was itself misleading for exactly the reason this round exists.
+
+Also corrected: this ticket's own original notes overclaimed the `owntracks` `hash_scheme`/`crypt_scheme` finding as
+a confirmed production bug ("every real deployment has generated a hash Caddy's basic_auth cannot verify"). Round 1
+checked the module's actual current source and found `hash_scheme` is the canonical parameter — `crypt_scheme` is
+kept only as a backward-compat alias — so a reasonably current `community.general` install was already correct; the
+error this ticket's own validation container hit was specific to the old, Debian-bundled collection version it
+happened to install via a bare `apt-get install ansible`. Notes corrected above; the code change itself
+(`crypt_scheme: bcrypt`, which works unmodified on both old and new collection versions) is kept as the more
+portable choice, not reverted, but no longer described as fixing a proven production defect.
+
+New regression tests added to `tests/check-secret-suppression.sh` for all four newly-caught classes (`environment:`
+flagged even with `no_log: true` present, `become_user:` flagged when not on the accepted-exceptions list, a
+`vars:`-computed intermediate, a `loop:` directly over a secret), each verified to actually fail before the fix and
+pass after.

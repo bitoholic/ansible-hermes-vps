@@ -88,6 +88,30 @@ cat > "$T/roles/leaky/tasks/main.yml" <<'YML'
     - name: Violation nested inside a block
       ansible.builtin.command:
         cmd: "echo {{ secrets.nested_token }}"
+
+- name: environment leaks a secret even WITH no_log (no_log cannot protect this)
+  ansible.builtin.command:
+    cmd: /bin/true
+  environment:
+    FAKE_TOKEN: "{{ secrets.env_token }}"
+  no_log: true
+
+- name: become_user leaks a secret and is not on the accepted-exceptions list
+  ansible.builtin.command:
+    cmd: /bin/true
+  become_user: "{{ secrets.some_user }}"
+  no_log: true
+
+- name: A vars-computed intermediate still carries the original secret reference
+  ansible.builtin.command:
+    cmd: "echo {{ my_token }}"
+  vars:
+    my_token: "{{ secrets.vars_token }}"
+
+- name: Looping directly over a secret-bearing structure
+  ansible.builtin.debug:
+    msg: "{{ item }}"
+  loop: "{{ secrets.api_keys }}"
 YML
 
 set +e
@@ -100,9 +124,14 @@ for must_flag in \
   "Command argument leaks a secret without suppression" \
   "Registered result leaks a secret without suppression" \
   "A dynamic sub-template lookup is flagged conservatively" \
-  "Violation nested inside a block"; do
+  "Violation nested inside a block" \
+  "environment leaks a secret even WITH no_log" \
+  "become_user leaks a secret and is not on the accepted-exceptions list" \
+  "A vars-computed intermediate still carries the original secret reference" \
+  "Looping directly over a secret-bearing structure"; do
   grep -qF "$must_flag" <<<"$OUT" || fail "the checker did not flag: $must_flag"$'\n'"$OUT"
 done
+grep -qF "no_log CANNOT protect" <<<"$OUT" || fail "environment:/become_user: violations must say plainly that no_log does not fix them"
 
 for must_not_flag in \
   "Rendered template leaks a secret WITH suppression" \

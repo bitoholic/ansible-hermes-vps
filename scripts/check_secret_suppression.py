@@ -8,10 +8,10 @@ redaction protects every RUN regardless of which task leaked; this guard protect
 at lint time, before it ever runs.
 
 What it asserts
-  * Every task under roles/*/tasks/**/*.yml whose own module arguments (recursively, including the `environment:`
-    directive) reference a `secrets.NAME` / `secrets[...]` value carries `no_log: true` (a literal `true` — a Jinja
-    expression that might evaluate false is not accepted; the same "only a literal is safe" rule this repo already
-    applies elsewhere, e.g. the structural guard's SOPS metadata checks).
+  * Every task under roles/*/tasks/**/*.yml whose own module arguments (recursively) reference a `secrets.NAME` /
+    `secrets[...]` value carries `no_log: true` (a literal `true` — a Jinja expression that might evaluate false is
+    not accepted; the same "only a literal is safe" rule this repo already applies elsewhere, e.g. the structural
+    guard's SOPS metadata checks).
   * `ansible.builtin.assert`'s own `that:` list is exempt (a boolean comparison, not a value emission) — but its
     `fail_msg`/`success_msg` are scanned like any other argument, since interpolating a value into either WOULD
     print it.
@@ -21,15 +21,19 @@ What it asserts
     same way. A template that itself calls `lookup('template', ...)` to pull in another one (this repo's own
     docker-compose.yml.j2, which assembles per-service fragments this way) is treated as needing suppression
     outright, without trying to resolve the dynamic sub-lookup — a conservative default, not a proof of absence.
+  * `environment:` and `become_user:` are NEVER accepted as fixed by `no_log: true`, because they aren't: Ansible
+    inlines both into the literal shell command its connection plugin prints verbatim at high verbosity (-vvv+),
+    regardless of no_log — no_log only redacts a task's own arguments and registered result, not that separate
+    connection-level trace. A secret reference in either is ALWAYS a hard failure here, with a message saying so,
+    never a "just add no_log" one. Found the hard way, independently, twice: this ticket's own dynamic leak test
+    (tests/check-playbook-secret-leak.sh, which runs at -vvv) caught roles/backup's git clone passing a token
+    through `environment:`, and round 1's independent review caught roles/common's git-identity tasks passing the
+    admin username through `become_user:` — both fixed at the source (a private file + a path-only reference for
+    the token; accepted as an inherent, undefended limit for the username, documented at its own two call sites,
+    since `become_user` must always be a literal account name for `su`/`sudo` to act on regardless of the value's
+    origin — there is no file-reference equivalent for "become this user").
 
 What this CANNOT verify
-  * That `no_log: true` is even the right defense: a value passed via the `environment:` directive is inlined by
-    Ansible into the literal shell command it runs, which its connection plugin prints verbatim at high verbosity
-    (-vvv+) regardless of no_log — no_log only redacts a task's own arguments and result, not that separate
-    connection-level trace. This is invisible to a static check (the YAML looks identical either way); it was found
-    only by the DYNAMIC leak test (tests/check-playbook-secret-leak.sh, which runs at -vvv) catching a real instance
-    of it in this repo (roles/backup's git clone), fixed by passing a file PATH through `environment:` instead of
-    the value itself. A task using `environment:` with a secret should be treated as a hint to check this by hand.
   * A secret that reaches a rendered file, a registered result or a command's arguments WITHOUT the task's own YAML
     literally referencing `secrets.*` — for example a value read back from a file that a PRIOR task wrote from a
     secret (this repo has exactly one such case, roles/owntracks/tasks/parse_htpasswd.yml's `slurp` of a
@@ -53,13 +57,33 @@ import yaml
 SECRET_RE = re.compile(r"\{\{.*?secrets(?:\.[A-Za-z_][A-Za-z0-9_]*|\[[^\]]+\]).*?\}\}", re.DOTALL)
 DEFAULT_JINJA_RE = re.compile(r"default\(\s*'([^']+)'\s*(?:,\s*true\s*)?\)")
 
-# Task-level keys that are never module arguments and can never themselves emit a value the way a module's own
-# arguments (including `environment:`, which a real bug in this ticket's own audit found carrying a token) can.
+# Task-level keys that can never themselves emit a value: pure control flow / metadata that Ansible never
+# templates into a printed shell command or module argument. Deliberately NOT excluded (unlike an earlier version of
+# this guard): `vars:` (a task can compute an intermediate name from a secret here and use only that name elsewhere
+# in its args — the secret reference itself still needs to be seen) and `loop:` (a task can loop directly over a
+# secret-bearing structure). `environment:` and `become_user:` are also scanned, but through their own always-fail
+# check below, never the generic "add no_log" one — see the module docstring for why.
 DIRECTIVE_KEYS = {
     "name", "tags", "when", "register", "changed_when", "failed_when", "notify", "listen",
-    "loop", "loop_control", "vars", "become", "become_user", "ignore_errors", "no_log",
+    "loop_control", "become", "ignore_errors", "no_log",
     "check_mode", "delegate_to", "run_once", "any_errors_fatal", "throttle", "until",
-    "retries", "delay", "block", "rescue", "always", "tags",
+    "retries", "delay", "block", "rescue", "always",
+}
+
+# Keys no_log cannot protect at all (see module docstring): a secret here is always a hard failure, regardless of
+# no_log, and excluded from the generic scan below so it is never reported as "just add no_log" instead.
+NEVER_FIXABLE_BY_NO_LOG_KEYS = {"environment", "become_user"}
+
+# `become_user` must always be a literal account name — sudo/su act on it directly, so there is no file-reference
+# equivalent the way there is for a token (which is why the environment: cases in this repo could all be redesigned
+# away, but this one specific class cannot). The two tasks below use it with secrets.admin_username, the OS
+# username Ansible needs to run these as: not a credential in the traditional sense (knowing it grants no
+# capability by itself), and there is no fix available beyond accepting that Ansible's own connection-plugin trace
+# will show it at high verbosity. Explicit, narrow and justified — NOT a blanket exemption for `become_user:
+# elsewhere; any OTHER task using it with a secret is still a hard failure above.
+ACCEPTED_BECOME_USER_EXCEPTIONS = {
+    ("roles/common/tasks/main.yml", "Configure global git user.name for admin user"),
+    ("roles/common/tasks/main.yml", "Configure global git user.email for admin user"),
 }
 
 
@@ -80,7 +104,7 @@ def module_args_to_scan(task):
     """{key: value} of everything in this task that could itself emit a value, module name included."""
     scan = {}
     for key, value in task.items():
-        if key in DIRECTIVE_KEYS:
+        if key in DIRECTIVE_KEYS or key in NEVER_FIXABLE_BY_NO_LOG_KEYS:
             continue
         if key == "ansible.builtin.assert" or key == "assert":
             scan[key] = {k: v for k, v in (value or {}).items() if k != "that"}
@@ -129,7 +153,7 @@ def walk_tasks(tasks, file_path):
                 yield from walk_tasks(task[section], file_path)
 
 
-def check_file(path, role_dir, problems):
+def check_file(path, role_dir, problems, root):
     with open(path, "r", encoding="utf-8") as fh:
         try:
             tasks = yaml.safe_load(fh)
@@ -140,6 +164,22 @@ def check_file(path, role_dir, problems):
     for task, file_path in walk_tasks(tasks, path):
         name = task.get("name", "(unnamed task)")
         no_log = task.get("no_log") is True
+
+        # environment:/become_user: — never accepted as fixed by no_log; a hard failure whenever present, since
+        # Ansible's own connection-plugin trace prints these regardless (see module docstring) — except the two
+        # explicit, justified become_user cases in ACCEPTED_BECOME_USER_EXCEPTIONS (an OS username, not a
+        # credential, with no possible fix; see that constant's own comment).
+        rel_path = os.path.relpath(file_path, root)
+        for key in NEVER_FIXABLE_BY_NO_LOG_KEYS:
+            if key in task and contains_secret_ref(task[key]):
+                if key == "become_user" and (rel_path, name) in ACCEPTED_BECOME_USER_EXCEPTIONS:
+                    continue
+                problems.append(
+                    "%s: task %r passes a secret through `%s:`, which no_log CANNOT protect (Ansible's connection "
+                    "plugin prints it in its own trace at high verbosity regardless) — this needs a redesign, not "
+                    "no_log; see this guard's own docstring" % (file_path, name, key)
+                )
+
         scan = module_args_to_scan(task)
         leaks = contains_secret_ref(scan)
         if not leaks and "ansible.builtin.template" in task:
@@ -158,7 +198,7 @@ def run(root):
         if not os.path.isdir(tasks_dir):
             continue
         for path in sorted(glob.glob(os.path.join(tasks_dir, "**", "*.yml"), recursive=True)):
-            check_file(path, role_dir, problems)
+            check_file(path, role_dir, problems, root)
     return problems
 
 
