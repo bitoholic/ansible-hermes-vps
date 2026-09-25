@@ -186,7 +186,7 @@ cp "$T/sops.good" "$FIX_REPO/.sops.yaml"
 # --- review round 2: more hiding places, real-sops shapes -------------------------------------------------------------------
 mutate_store "plaintext appended to sops_version" 'sops_version is not a version' - 's/^sops_version=.*/sops_version=3.13.3+HUNTER2PLAINSECRET/'
 mutate_store "plaintext appended to sops_lastmodified" 'sops_lastmodified is not a timestamp' - 's/^(sops_lastmodified=.*)$/\1+HUNTER2/'
-mutate_store "a recipient with a bad bech32 checksum" 'is not an age public key' - 's/^(sops_age__list_0__map_recipient=age1)(.)/\1q/'
+mutate_store "a recipient with a bad bech32 checksum" 'is not an age public key' - 's/^(sops_age__list_0__map_recipient=age1)q/\1p/; t; s/^(sops_age__list_0__map_recipient=age1)[^q]/\1q/'
 mutate_store "a plaintext age recipient lookalike" 'is not an age public key' - 's/^(sops_age__list_0__map_recipient)=.*/\1=age1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq/'
 mutate_store "the age data key with a plaintext tail" 'is not an age-encrypted data key' - 's/^(sops_age__list_0__map_enc=.*)$/\1HUNTER2 plain text/'
 mutate_store "multi-group (Shamir) metadata" 'multi-group / Shamir stores are not used' 'sops_shamir_threshold=2'
@@ -194,11 +194,68 @@ mutate_store "multi-group (Shamir) metadata" 'multi-group / Shamir stores are no
 age-keygen -o "$T/keys/bg.txt" >/dev/null 2>&1; BG_PUB="$(age-keygen -y "$T/keys/bg.txt")"
 { printf '#\n# a comment\n'; for n in $fx_full_names; do echo "$n=value-$n"; done; echo "AUDIT_EXTRA_TERMS="; } > "$T/plain/two.env"
 fx_encrypt "$T/plain/two.env" "$FIX_REPO/secrets/secrets.enc.env" "$FIX_PUB" "$BG_PUB"
+printf 'creation_rules:\n  - path_regex: ^secrets/secrets\\.enc\\.env$\n    key_groups:\n      - age:\n          - %s\n          - %s\n' "$FIX_PUB" "$BG_PUB" > "$FIX_REPO/.sops.yaml"
 expect_ok "a REAL two-recipient store with comments, a bare # and an empty value"
+cp "$FIX_REPO/.sops.yaml" "$T/sops.two"; cp "$FIX_REPO/secrets/secrets.enc.env" "$T/store.two"
 # the second recipient's data key hidden plaintext: sops still decrypts with the first, the guard must not
 sed -i -E 's/^(sops_age__list_1__map_enc)=.*/\1=-----BEGIN AGE ENCRYPTED FILE-----\\nHUNTER2 plain text\\n-----END AGE ENCRYPTED FILE-----\\n/' "$FIX_REPO/secrets/secrets.enc.env"
 expect_fail "plaintext in an unused recipient's data key" 'sops_age__list_1__map_enc is not an age-encrypted data key'
 new_store "$T/plain/ok.env"; cp "$FIX_REPO/secrets/secrets.enc.env" "$T/store.good"
+
+
+# the store's recipients must be EXACTLY .sops.yaml's for the path: a removed recipient still in the store (updatekeys not run)...
+cp "$T/store.two" "$FIX_REPO/secrets/secrets.enc.env"; cp "$T/sops.good" "$FIX_REPO/.sops.yaml"
+expect_fail "a recipient in the store that .sops.yaml does not list (or was removed from it: updatekeys not run)" "store's recipients differ from .sops.yaml's"
+# ...and a recipient in .sops.yaml the store was never re-encrypted for
+new_store "$T/plain/ok.env"; cp "$T/sops.two" "$FIX_REPO/.sops.yaml"
+expect_fail "a recipient in .sops.yaml that the store is not encrypted for" "store's recipients differ from .sops.yaml's"
+# ...and a COMPUTED recipient (valid bech32 checksum, ~50 free characters of text) hidden in an unused slot
+cp "$T/store.two" "$FIX_REPO/secrets/secrets.enc.env"
+python3 - "$FIX_REPO/secrets/secrets.enc.env" <<'E'
+import re, sys
+CH = "qpzry9x8gf2tvdw0s3jn54khce6mua7l"
+def polymod(v):
+    gen = (0x3b6a57b2, 0x26508e6d, 0x1ea119fa, 0x3d4233dd, 0x2a1462b3); c = 1
+    for x in v:
+        top = c >> 25; c = (c & 0x1ffffff) << 5 ^ x
+        for i in range(5): c ^= gen[i] if (top >> i) & 1 else 0
+    return c
+hrp = "age"; body = ("hunter2" * 8)[:52]
+data = [CH.index(ch) for ch in body]
+expand = [ord(c) >> 5 for c in hrp] + [0] + [ord(c) & 31 for c in hrp]
+mod = polymod(expand + data + [0] * 6) ^ 1
+key = "age1" + body + "".join(CH[(mod >> 5 * (5 - i)) & 31] for i in range(6))
+t = open(sys.argv[1]).read()
+t = re.sub(r"(?m)^(sops_age__list_1__map_recipient)=.*$", lambda m: m.group(1) + "=" + key, t)
+open(sys.argv[1], "w").write(t)
+E
+cp "$T/sops.two" "$FIX_REPO/.sops.yaml"
+expect_fail "a computed, checksum-valid recipient hiding text in the second slot" "store's recipients differ from .sops.yaml's"
+! grep -q 'hunter2' <<<"$OUT" || fail "the guard printed the hidden text"
+new_store "$T/plain/ok.env"; cp "$FIX_REPO/secrets/secrets.enc.env" "$T/store.good"; cp "$T/sops.good" "$FIX_REPO/.sops.yaml"
+
+# --- trailing plaintext after ciphertext (sops' own regex has no end anchor: it decrypts with rc 0) ---------------------------
+mutate_store "trailing plaintext after a value's ciphertext" 'value of FIX_TOKEN is not encrypted' - 's/^(FIX_TOKEN=ENC\[.*\])$/\1hunter2plain/'
+mutate_store "trailing plaintext after sops_mac" 'sops_mac is not a SOPS MAC' - 's/^(sops_mac=ENC\[.*\])$/\1hunter2plain/'
+mutate_store "sops_mac that is not ciphertext at all" 'sops_mac is not a SOPS MAC' - 's/^sops_mac=.*/sops_mac=hunter2plain/'
+mutate_store "trailing plaintext after a comment's ciphertext" 'not a NAME=value line' '#ENC[AES256_GCM,data:aGVsbG8=,iv:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=,tag:AAAAAAAAAAAAAAAAAAAAAA==,type:comment]hunter2plain'
+# every value-weakening key in .sops.yaml is refused
+for key in unencrypted_suffix unencrypted_regex unencrypted_comment_regex encrypted_suffix encrypted_regex encrypted_comment_regex mac_only_encrypted; do
+  printf 'creation_rules:\n  - path_regex: ^secrets/secrets\\.enc\\.env$\n    %s: x\n    key_groups:\n      - age:\n          - %s\n' "$key" "$FIX_PUB" > "$FIX_REPO/.sops.yaml"
+  expect_fail ".sops.yaml setting $key" "$key"
+done
+cp "$T/sops.good" "$FIX_REPO/.sops.yaml"
+# an EMPTY value for a required name, and a symlinked store
+{ for n in $fx_full_names; do if [[ $n == FIX_TOKEN ]]; then echo "$n="; else echo "$n=value-$n"; fi; done; } > "$T/plain/emptyreq.env"; new_store "$T/plain/emptyreq.env"
+expect_fail "an empty value for a required name" 'the value of the required name FIX_TOKEN is empty'
+new_store "$T/plain/ok.env"; cp "$FIX_REPO/secrets/secrets.enc.env" "$T/store.good"
+cp "$T/store.good" "$T/store.target"; rm "$FIX_REPO/secrets/secrets.enc.env"; ln -s "$T/store.target" "$FIX_REPO/secrets/secrets.enc.env"
+expect_fail "a symlinked store" 'is a symlink'
+rm "$FIX_REPO/secrets/secrets.enc.env"; cp "$T/store.good" "$FIX_REPO/secrets/secrets.enc.env"
+# a long run of spaces after a manifest name must not make the content scan quadratic
+( cd "$FIX_REPO" && { printf 'FIX_TOKEN=a'; head -c 300000 /dev/zero | tr '\0' ' '; printf '\n'; } > spaces.txt && git add spaces.txt )
+start=$SECONDS; expect_ok "a file with a long run of spaces after a name"; (( SECONDS - start < 8 )) || fail "the content scan is slow on a long run of spaces ($((SECONDS - start)) s)"
+( cd "$FIX_REPO" && git rm -q --cached -f spaces.txt && rm spaces.txt )
 
 # --- .sops.yaml semantics -----------------------------------------------------------------------------------------------
 printf 'creation_rules:\n  - path_regex: secrets/secrets\\.enc\\.env$\n    key_groups:\n      - age:\n          - %s\n' "$FIX_PUB" > "$FIX_REPO/.sops.yaml"

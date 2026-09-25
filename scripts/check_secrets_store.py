@@ -22,8 +22,13 @@ What it asserts
     tracked file CONTENT looks like a plaintext secrets file (three or more distinct manifest names assigned to real-looking
     values). Names are reported, never values.
 
-What this CANNOT verify: that the ciphertext decrypts (needs a key — the deploy wrapper's preflight does that), that a
-value is not a weak secret, or history (epic 24 scans history).
+What this CANNOT verify (no key here):
+  * that the ciphertext decrypts — the deploy wrapper's preflight does (a value whose data is base64 of plaintext, or an
+    altered mac/IV/tag, fails the authentication check on decrypt);
+  * plaintext hidden as BASE64 inside an unused recipient's armoured data key (`sops_age__list_N__map_enc`, N >= 1): SOPS
+    decrypts with the first recipient and never checks the others, so the guard can bound its shape but not its content;
+  * base64 of plaintext inside an encrypted-COMMENT line: SOPS only warns (the wrapper's preflight refuses that warning);
+  * that a value is a strong secret, or anything in git history or the index (epic 24 scans history; this reads the tree).
 """
 import argparse
 import os
@@ -59,8 +64,8 @@ COMMENT_RE = re.compile(r"^#" + _ENC_BODY + r"$")
 # An age-encrypted data key as SOPS stores it in a dotenv value: PEM-style armour with literal `\n` separators and base64
 # lines only (a plaintext tail, or plaintext instead of base64, is refused). It is stored once per recipient.
 AGE_ENC_RE = re.compile(r"^-----BEGIN AGE ENCRYPTED FILE-----\\n(?:[A-Za-z0-9+/]{1,64}={0,2}\\n)+-----END AGE ENCRYPTED FILE-----\\n$")
-TIMESTAMP_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
-VERSION_RE = re.compile(r"^\d+\.\d+\.\d+$")
+TIMESTAMP_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$", re.ASCII)
+VERSION_RE = re.compile(r"^\d+\.\d+\.\d+$", re.ASCII)
 # The ONLY metadata names a SOPS dotenv store carries when encrypted to age recipients with default settings. Any other
 # `sops_*` name is refused: SOPS ignores it on decrypt, so it would be a place to hide a plaintext value.
 DEFAULT_METADATA = {"sops_unencrypted_suffix": "_unencrypted"}
@@ -144,6 +149,16 @@ def check_metadata(name, value):
     return "%s is not a SOPS metadata name this repository uses (a `sops_`-prefixed name is ignored by SOPS: it would hide a plaintext value)" % name
 
 
+def store_recipients(text):
+    """The age recipients named in the store's own metadata (public keys)."""
+    out = []
+    for line in text.splitlines():
+        m = re.match(r"^sops_age__list_\d+__map_recipient=(.*)$", line)
+        if m:
+            out.append(m.group(1))
+    return out
+
+
 def check_store_text(text, rel, root):
     """Problems with the structure of an encrypted dotenv store's text (names only, never values)."""
     problems, names, seen, metadata = [], [], set(), set()
@@ -168,6 +183,8 @@ def check_store_text(text, rel, root):
             problems.append("%s: the name %s appears more than once" % (rel, name))
         seen.add(name)
         names.append(name)
+        if value == "" and name in hs.required_names(root):
+            problems.append("%s: the value of the required name %s is empty" % (rel, name))
         if value != "" and not ENC_RE.match(value):      # (an empty value is an empty string — SOPS leaves it as such — and carries no secret)
             problems.append("%s: the value of %s is not encrypted (every value must be an ENC[AES256_GCM,...] blob)" % (rel, name))
     for required in ("sops_version", "sops_mac", "sops_lastmodified"):
@@ -183,6 +200,27 @@ def check_store_text(text, rel, root):
     if undeclared:
         problems.append("%s: names that are neither manifest names nor declared extras (by name): %s" % (rel, ", ".join(undeclared)))
     return problems
+
+
+def config_recipients(path, store_rel):
+    """The age recipients of the .sops.yaml rules whose path_regex matches the store's path (None if it cannot be read)."""
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            config = yaml.safe_load(fh) or {}
+        found = set()
+        for rule in config.get("creation_rules") or []:
+            if not isinstance(rule, dict) or not rule.get("path_regex") or not re.search(rule["path_regex"], store_rel):
+                continue
+            for group in rule.get("key_groups") or []:
+                if isinstance(group, dict):
+                    found |= {str(r) for r in (group.get("age") or [])}
+            if isinstance(rule.get("age"), str):
+                found |= {r.strip() for r in rule["age"].split(",") if r.strip()}
+            elif isinstance(rule.get("age"), list):
+                found |= {str(r) for r in rule["age"]}
+        return found
+    except (OSError, yaml.YAMLError, re.error, AttributeError, TypeError):
+        return None
 
 
 def check_sops_config(path, store_rel):
@@ -242,7 +280,9 @@ def looks_like_plaintext_secrets(text, names):
         name = m.group(1) or m.group(2)
         if name not in names:
             continue
-        value = re.split(r"\s+#", m.group(3))[0].strip().rstrip(",").strip().strip("'\"").strip()   # an inline comment is not part of the value
+        value = m.group(3)
+        cut = value.find(" #")                                 # (a plain find: a regex here went quadratic on long runs of spaces)
+        value = (value if cut < 0 else value[:cut]).strip().rstrip(",").strip().strip("'\"").strip()   # an inline comment is not part of the value
         if not value or any(h in value.lower() for h in PLACEHOLDER_HINTS) or FIXTURE_STYLE_RE.match(value):
             continue
         found.add(name)
@@ -260,6 +300,9 @@ def run(root):
 
     if config_present and not store_present:
         problems.append("the SOPS recipient configuration is present but the encrypted store %s is missing" % store_rel)
+    if store_present and os.path.islink(store_abs):
+        problems.append("the encrypted store %s is a symlink (its target would be read; refused)" % store_rel)
+        store_present = False
     if store_present:
         with open(store_abs, "r", encoding="utf-8", errors="replace") as fh:
             problems += check_store_text(fh.read(), store_rel, root)
@@ -269,6 +312,15 @@ def run(root):
             problems.append("an encrypted store is present but there is no .sops.yaml (recipients cannot be managed)")
     if config_present and os.path.isfile(config_abs):
         problems += check_sops_config(config_abs, store_rel)
+        if store_present:
+            # The store's recipients are PUBLIC and must be exactly the ones .sops.yaml lists for its path: an extra one hides
+            # up to ~50 characters of text in a valid-looking key, and a recipient removed from .sops.yaml but still in the
+            # store means `sops updatekeys` was not run — the removed key can still decrypt.
+            wanted = config_recipients(config_abs, store_rel)
+            actual = set(store_recipients(open(store_abs, "r", encoding="utf-8", errors="replace").read()))
+            if wanted is not None and wanted != actual:
+                problems.append("the store's recipients differ from .sops.yaml's for %s (%d only in the store, %d only in the configuration): run `sops updatekeys`"
+                                % (store_rel, len(actual - wanted), len(wanted - actual)))
 
     # --- store-independent checks -------------------------------------------------------------------------------
     if ".env" in tracked:
