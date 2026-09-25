@@ -251,7 +251,20 @@ mutate_store "a slot numbering gap" 'not numbered 0..' "sops_age__list_2__map_re
 sops_age__list_2__map_enc=$ARM"
 mutate_store "a repeated metadata line" 'metadata name sops_version appears more than once' "sops_version=3.13.3"
 BIG='-----BEGIN AGE ENCRYPTED FILE-----\n'; for i in $(seq 1 12); do BIG="${BIG}QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVo=\n"; done; BIG="${BIG}-----END AGE ENCRYPTED FILE-----\n"
-mutate_store "an oversized age data key (room to hide a blob)" 'sops_age__list_0__map_enc is not an age-encrypted data key' - "s/^sops_age__list_0__map_enc=.*/sops_age__list_0__map_enc=$BIG/"
+# (sed's replacement text reinterprets a literal \n as a real newline, which would split this across physical lines and
+# get rejected for the WRONG reason — a duplicate NAME= line rather than the armour-length bound; write it directly)
+restore_store
+python3 - "$FIX_REPO/secrets/secrets.enc.env" <<'E'
+import re, sys
+path = sys.argv[1]
+big = "-----BEGIN AGE ENCRYPTED FILE-----\n" + "QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVo=\n" * 14 + "-----END AGE ENCRYPTED FILE-----\n"
+text = open(path).read()
+text = re.sub(r"(?m)^sops_age__list_0__map_enc=.*$", "sops_age__list_0__map_enc=" + big, text)
+open(path, "w").write(text)
+E
+expect_fail "an oversized age data key (room to hide a blob)" 'sops_age__list_0__map_enc is not an age-encrypted data key'
+! grep -qE 'hunter2|my-plain-secret' <<<"$OUT" || fail "the guard printed the plaintext"
+restore_store
 # SOPS uses only the FIRST creation rule that matches the store's path (and key_groups over age): the guard must model that
 printf 'creation_rules:\n  - path_regex: ^secrets/secrets\\.enc\\.env$\n    key_groups:\n      - age:\n          - %s\n  - path_regex: .*\\.env$\n    key_groups:\n      - age:\n          - %s\n' "$FIX_PUB" "$BG_PUB" > "$FIX_REPO/.sops.yaml"
 expect_ok "a specific rule first and a wider rule second (the second is never used for the store)"
