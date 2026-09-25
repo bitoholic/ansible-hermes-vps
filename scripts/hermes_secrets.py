@@ -67,7 +67,7 @@ def load_manifest(root=REPO_ROOT):
 
 
 def load_extras(root=REPO_ROOT):
-    """Declared extras: names the store may hold that are not manifest names, as [(env, section, secret)].
+    """Declared extras: names the store may hold that are not manifest names, as [(env, section, secret, required)].
 
     The one place they are listed is EXTRA in scripts/generate-env.py; it is read from there so the wrapper,
     the guard, the helper and the audit can never disagree with the generator about it.
@@ -81,14 +81,35 @@ def load_extras(root=REPO_ROOT):
 
 def allowed_names(root=REPO_ROOT):
     """Every name the store may hold: all manifest names (required or not) and the declared extras."""
-    return {e["env"] for e in load_manifest(root)} | {env for env, _s, _x in load_extras(root)}
+    return {e["env"] for e in load_manifest(root)} | {extra[0] for extra in load_extras(root)}
 
 
 def required_names(root=REPO_ROOT):
     """Names that must be present in the store: required manifest names plus required declared extras."""
     names = [e["env"] for e in load_manifest(root) if e["required"]]
-    names += [env for env, _section, _secret in load_extras(root)]
+    names += [extra[0] for extra in load_extras(root) if extra[3]]
     return sorted(set(names))
+
+
+def name_set_problems(names, root=REPO_ROOT):
+    """THE name-set rule, defined once (used by the structural guard, the wrapper's preflight, the helper and the audit):
+
+      * every required manifest name (and required declared extra) is present;
+      * every name present is a manifest name or a declared extra;
+      * optional manifest entries with defaults, and optional extras, may be absent.
+
+    Returns (missing_required, undeclared), both sorted lists of NAMES (never values).
+    """
+    return apply_name_set(names, required_names(root), allowed_names(root))
+
+
+def apply_name_set(names, required, allowed):
+    """The pure form of the name-set rule (the rule's inputs computed by the caller — the wrapper computes them BEFORE any
+    secret is in memory)."""
+    present = set(names)
+    missing = sorted(n for n in required if n not in present)
+    undeclared = sorted(n for n in present if not NAME_RE.fullmatch(n) or n not in allowed)
+    return missing, undeclared
 
 
 # ---------------------------------------------------------------------------------------------
@@ -183,12 +204,12 @@ def preflight(root=REPO_ROOT, environ=None):
     except (OSError, ValueError, KeyError, TypeError, AttributeError, yaml.YAMLError) as exc:
         return None, ["cannot read the repository's secret manifest (%s)" % type(exc).__name__]
 
-    undeclared = [n for n in values if not NAME_RE.fullmatch(n) or n not in allowed]
+    missing, undeclared = apply_name_set(values.keys(), required, allowed)
     if undeclared:
         problems.append("the store holds name(s) that are neither manifest names nor declared extras (by name): "
-                        + ", ".join(sorted(undeclared)))
+                        + ", ".join(undeclared))
         return None, problems
-    missing = [n for n in required if not values.get(n)]
+    missing = sorted(set(missing) | {n for n in required if n in values and not values[n]})   # an empty value is missing too
     if missing:
         problems.append("required secrets missing from the store (by name): " + ", ".join(missing))
         return None, problems

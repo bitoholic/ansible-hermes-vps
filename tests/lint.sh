@@ -197,3 +197,10 @@ echo "role skip-tags guard OK"
 # vetted invocation shapes, pins Ansible's own file writes off, streams live and returns the child's status. Run as
 # a black box against a fixture tree with a throwaway key (no real key or secret is ever needed).
 ./tests/check-deploy-wrapper.sh
+
+# Structural guard for the encrypted secrets store (epic 22 ticket #03): a plaintext secrets file can't be committed —
+# the tracked store must be genuinely encrypted and satisfy the one name-set rule, .sops.yaml must scope recipients and
+# not weaken encryption, .env stays untracked and ignored, and no other tracked file looks like a plaintext secrets file.
+# The store's mandatory state is derived from the presence of .sops.yaml (neither present, as in a public export, is fine).
+./tests/check-secrets-store.sh
+

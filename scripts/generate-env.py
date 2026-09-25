@@ -20,11 +20,17 @@ MANIFEST = os.path.join(REPO, "group_vars", "all", "secrets.yml")
 TEMPLATE = os.path.join(REPO, ".env.template")
 SETUP = os.path.join(REPO, "setup-env.sh")
 
-# Operator-facing vars that are needed but not in the manifest.
-# Per-profile Hermes keys now live in the manifest (profile-scoped); TARGET_HOST drives
-# the ad-hoc ansible target.
+# Operator-facing vars that are needed but not in the manifest — the "declared extras" of the name-set rule (epic 22):
+# the ONE place they are listed. The encrypted store's structural guard, the secrets helper, the deploy wrapper's
+# preflight and epic 24's public-readiness audit all read this list (through scripts/hermes_secrets.py), so they can
+# never disagree about which names the store may hold.
+#   (name, section, secret?, required?)
+# TARGET_HOST drives the deployment target (read from the store by the deploy wrapper). AUDIT_EXTRA_TERMS is the
+# optional list of extra terms (hostnames, names, emails — comma-separated) that epic 24's audit also looks for; it
+# may be absent from the store.
 EXTRA = [
-    ("TARGET_HOST", "Operator / host", False),
+    ("TARGET_HOST", "Operator / host", False, True),
+    ("AUDIT_EXTRA_TERMS", "Operator / host", False, False),
 ]
 
 SECTION_ORDER = [
@@ -82,8 +88,8 @@ def load_entries():
         )
 
     # Operator/host extras first so TARGET_HOST prompts early.
-    for env, section, secret in EXTRA:
-        add(env, True, secret, section, env)
+    for env, section, secret, required in EXTRA:
+        add(env, required, secret, section, env)
 
     for key, val in manifest.items():
         env = val["env"]
