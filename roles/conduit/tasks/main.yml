@@ -40,6 +40,7 @@
     owner: llm_wiki
     group: llm_wiki
     mode: '0644'
+  no_log: true   # bakes in the registration secret
 
 # Bot provisioning (@hermes registration) moved to tasks/provision.yml (epic 16, #01)
 # — it needs the Conduit container actually running, which now happens later in the

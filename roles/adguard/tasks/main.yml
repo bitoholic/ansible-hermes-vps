@@ -41,3 +41,4 @@
     owner: llm_wiki
     group: llm_wiki
     mode: '0600'
+  no_log: true   # bakes in the admin bcrypt password hash

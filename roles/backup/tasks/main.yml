@@ -14,7 +14,7 @@
     wiki_volume_directory_path: "{{ silverbullet_compose_dir }}/bin"
     wiki_volume_directory_mode: '0755'
 
-- name: Deploy git credential helper (reads GITHUB_TOKEN from env, no token stored)
+- name: Deploy git credential helper (reads the token from a file, no token stored)
   tags: [backup]
   ansible.builtin.copy:
     src: git-credential-env
@@ -23,22 +23,60 @@
     owner: llm_wiki
     group: llm_wiki
 
+# Epic 22 #05: the token is written to a private file and referenced by PATH (in GITHUB_TOKEN_FILE), never passed as
+# an `environment:` VALUE — Ansible inlines `environment:` values into the literal shell command it runs, which its
+# connection plugin prints verbatim at high verbosity (-vvv+) regardless of no_log (no_log only redacts a task's own
+# arguments and result, not that separate connection-level trace; found by this ticket's own dynamic leak test,
+# which runs at -vvv). Same lifecycle as the Tailscale auth-key file above: written immediately before use, 0600
+# root, removed in `always:` whether the clone succeeded or failed.
 - name: Bootstrap clone of the private wiki repository (token-less URL)
   tags: [backup]
-  # No token in the URL: git authenticates via GIT_ASKPASS -> git-credential-env, which reads
-  # GITHUB_TOKEN from the environment. The token value is never written to .git/config.
-  ansible.builtin.git:
-    repo: "https://github.com/{{ secrets.github_repo_slug }}.git"
-    dest: "{{ silverbullet_data_dir }}"
-    version: "main"
-    clone: true
-    update: false
-  environment:
-    GITHUB_TOKEN: "{{ secrets.hermes_default_github_token }}"
-    GIT_ASKPASS: "{{ silverbullet_compose_dir }}/bin/git-credential-env"
-    GIT_TERMINAL_PROMPT: "0"
-  failed_when: false
-  ignore_errors: "{{ ansible_check_mode }}"
+  vars:
+    backup_github_token_file: /run/hermes-vps/backup-github-token
+  block:
+    - name: Ensure the backup GitHub token file's directory exists
+      ansible.builtin.file:
+        path: "{{ backup_github_token_file | dirname }}"
+        state: directory
+        owner: root
+        group: root
+        mode: '0700'
+
+    - name: Remove any leftover backup GitHub token file from an earlier interrupted run
+      ansible.builtin.file:
+        path: "{{ backup_github_token_file }}"
+        state: absent
+
+    - name: Write the GitHub token to its private file
+      ansible.builtin.copy:
+        content: "{{ secrets.hermes_default_github_token }}"
+        dest: "{{ backup_github_token_file }}"
+        owner: root
+        group: root
+        mode: '0600'
+      no_log: true
+
+    # No token in the URL: git authenticates via GIT_ASKPASS -> git-credential-env, which reads the token from
+    # GITHUB_TOKEN_FILE. The token value is never written to .git/config.
+    - name: Clone the private wiki repository
+      ansible.builtin.git:
+        repo: "https://github.com/{{ secrets.github_repo_slug }}.git"
+        dest: "{{ silverbullet_data_dir }}"
+        version: "main"
+        clone: true
+        update: false
+      environment:
+        GITHUB_TOKEN_FILE: "{{ backup_github_token_file }}"
+        GIT_ASKPASS: "{{ silverbullet_compose_dir }}/bin/git-credential-env"
+        GIT_TERMINAL_PROMPT: "0"
+      no_log: true   # repo: is a module argument sourced from the secrets dict (github_repo_slug)
+      failed_when: false
+      ignore_errors: "{{ ansible_check_mode }}"
+  always:
+    - name: Remove the backup GitHub token file
+      ansible.builtin.file:
+        path: "{{ backup_github_token_file }}"
+        state: absent
 
 - name: Set correct ownership on cloned repository files
   tags: [backup]
@@ -123,6 +161,7 @@
     src: llm-wiki-watcher.service.j2
     dest: /etc/systemd/system/llm-wiki-watcher.service
     mode: '0644'
+  no_log: true   # interpolates secrets.hermes_default_github_token
 
 - name: Enable and start llm-wiki watcher path
   tags: [backup]
@@ -146,3 +185,4 @@
       --branch {{ backup_working_branch }}
       --message '{{ backup_commit_message }}'
     user: "{{ secrets.admin_username }}"
+  no_log: true   # the token is embedded in `job:`, a module argument shown at verbosity

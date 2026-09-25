@@ -60,6 +60,7 @@
     group: llm_wiki
     mode: '0640'
     force: true
+  no_log: true   # bakes in the per-profile Context7 key, the GitHub token and the dashboard password hash
   loop: "{{ hermes_profiles }}"
 
 - name: Ensure Hermes profile SOUL.md files exist
@@ -81,6 +82,7 @@
     owner: llm_wiki
     group: llm_wiki
     mode: '0640'
+  no_log: true   # bakes in the profile's full set of resolved secrets (API keys, matrix credentials, git identity)
   loop: "{{ hermes_profiles }}"
 
 - name: Copy Hermes Dockerfile to hermes home
@@ -91,6 +93,7 @@
     owner: "{{ secrets.admin_username }}"
     group: llm_wiki
     mode: '0640'
+  no_log: true   # owner: is a module argument sourced from the secrets dict
 
 # Skill-pack installation moved to tasks/provision.yml (epic 16, #01) — it needs the
 # hermes-agent container actually running (docker exec), which now happens later in

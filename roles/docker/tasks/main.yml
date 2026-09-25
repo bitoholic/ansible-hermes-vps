@@ -64,6 +64,7 @@
     groups: docker
     append: true
     state: present
+  no_log: true   # name: is a module argument sourced from the secrets dict
 
 - name: Ensure Docker service is enabled and running
   tags: [docker]
@@ -114,11 +115,17 @@
     src: docker-compose.yml.j2
     dest: "{{ docker_compose_dir }}/docker-compose.yml"
     mode: '0644'
+  no_log: true   # every enabled service fragment interpolates secret values (API tokens, passwords) into this file
 
+# Epic 22 #05: `--quiet` validates without printing the fully-resolved, secret-bearing config to stdout (it still
+# writes a real error to stderr and exits non-zero on an invalid file) — this removes the leak at its source
+# instead of relying on no_log to hide a registered stdout nothing else needs. Needs Compose CLI >= v2.16.0
+# (2023-02), well below what installing "docker compose" as a plugin provides today; no separate preflight is
+# added since this repo already requires Compose v2 syntax throughout.
 - name: Validate consolidated docker-compose.yml syntax
   tags: [docker]
   ansible.builtin.command:
-    cmd: "docker compose -f {{ docker_compose_dir }}/docker-compose.yml config"
+    cmd: "docker compose -f {{ docker_compose_dir }}/docker-compose.yml config --quiet"
   changed_when: false
   register: docker_compose_config
   ignore_errors: "{{ ansible_check_mode }}"
@@ -199,6 +206,7 @@
     owner: "{{ secrets.admin_username }}"
     group: llm_wiki
     mode: '0640'
+  no_log: true   # owner: is a module argument sourced from the secrets dict
 
 # Epic 19, #01: Caddy's own build context — a dedicated directory (not
 # docker_compose_dir itself) so the build context doesn't accidentally pull in
@@ -224,6 +232,7 @@
     owner: "{{ secrets.admin_username }}"
     group: llm_wiki
     mode: '0640'
+  no_log: true   # owner: is a module argument sourced from the secrets dict
 
 # "Start consolidated docker compose stack" moved to tasks/start.yml (epic 16, #01) —
 # no longer runs automatically as part of this role's default sequence. It's invoked

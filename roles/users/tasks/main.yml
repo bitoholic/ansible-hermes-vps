@@ -31,3 +31,4 @@
     groups: llm_wiki
     append: true
     state: present
+  no_log: true   # name: is a module argument sourced from the secrets dict

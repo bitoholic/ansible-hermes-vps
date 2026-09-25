@@ -17,6 +17,7 @@
     - owntracks
     - beszel
     - adguard
+  no_log: true   # the loaded vars include owntracks_gateway_publish's basic_auth_hash
 
 - name: Validate gateway_routes shape
   tags: [gateway]
@@ -51,6 +52,7 @@
     src: Caddyfile.j2
     dest: "{{ gateway_caddyfile_dir }}/Caddyfile"
     mode: '0644'
+  no_log: true   # interpolates route.basic_auth_hash (owntracks) and secrets.acme_email/silverbullet_domain
   notify: Restart caddy
 
 # caddy-relay's config (epic 20) — same deploy directory as the Caddyfile above,

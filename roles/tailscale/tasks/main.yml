@@ -41,6 +41,27 @@
   when: tailscale_present.rc != 0
   changed_when: true
 
+# The role always logs in with `--authkey=file:...` (below) so the key never appears in process arguments; that
+# form needs a real minimum Tailscale version (see defaults/main.yml), so this fails clearly up front rather than
+# silently falling back to the argument form on an older install.
+- name: Query the installed Tailscale version
+  tags: [tailscale]
+  ansible.builtin.command:
+    cmd: tailscale version
+  register: tailscale_version_result
+  changed_when: false
+
+- name: Require a Tailscale version that supports the file-reference auth-key form
+  tags: [tailscale]
+  ansible.builtin.assert:
+    that:
+      - (tailscale_version_result.stdout_lines[0] | trim | regex_replace('^([0-9]+\.[0-9]+\.[0-9]+).*$', '\\1'))
+        is version(tailscale_min_version, '>=')
+    fail_msg: >-
+      Installed Tailscale ({{ tailscale_version_result.stdout_lines[0] | trim }}) is older than the minimum
+      {{ tailscale_min_version }} this role requires for `--authkey=file:...` (the key must never appear in
+      process arguments). Upgrade Tailscale and re-run.
+
 - name: Ensure tailscaled service is enabled and running
   tags: [tailscale]
   ansible.builtin.service:
@@ -63,18 +84,53 @@
 # the node to --accept-dns=false, a non-default preference; `tailscale up` refuses to change settings without
 # restating every non-default flag. Restating it only while the switch is on would let a later re-login FAIL
 # after the switch is turned back off (the preference would still be false), so both values are written.
+#
+# Epic 22 #05: the auth key is written to tailscale_authkey_file (0600, root, under /run's tmpfs) immediately
+# before this step and removed in `always:` whether the login succeeded or failed, so it never lingers and never
+# appears in process arguments — `tailscale up` reads it with `--authkey=file:...`, not the value itself. Any
+# leftover file from an earlier interrupted run is removed before a new one is written.
 - name: Bring up Tailscale (login via auth key)
   tags: [tailscale]
-  ansible.builtin.command:
-    cmd: >-
-      tailscale up --authkey={{ secrets.tailscale_authkey }} --hostname={{ inventory_hostname }}
-      --accept-dns={{ 'false' if (host_dns_resolver_owner_enabled | default(false) | bool) else 'true' }}
   when: >-
     tailscale_status is not defined or
     tailscale_status.rc != 0 or
     ((tailscale_status.stdout | string | length > 0) and
      ((tailscale_status.stdout | from_json).BackendState | default('') != 'Running'))
-  changed_when: true
+  block:
+    - name: Ensure the Tailscale auth-key file's directory exists
+      ansible.builtin.file:
+        path: "{{ tailscale_authkey_file | dirname }}"
+        state: directory
+        owner: root
+        group: root
+        mode: '0700'
+
+    - name: Remove any leftover Tailscale auth-key file from an earlier interrupted run
+      ansible.builtin.file:
+        path: "{{ tailscale_authkey_file }}"
+        state: absent
+
+    - name: Write the Tailscale auth key to its private file
+      ansible.builtin.copy:
+        content: "{{ secrets.tailscale_authkey }}"
+        dest: "{{ tailscale_authkey_file }}"
+        owner: root
+        group: root
+        mode: '0600'
+      no_log: true
+
+    - name: Log in to Tailscale (auth key read from a file, never a process argument)
+      ansible.builtin.command:
+        cmd: >-
+          tailscale up --authkey=file:{{ tailscale_authkey_file }} --hostname={{ inventory_hostname }}
+          --accept-dns={{ 'false' if (host_dns_resolver_owner_enabled | default(false) | bool) else 'true' }}
+      changed_when: true
+      no_log: true
+  always:
+    - name: Remove the Tailscale auth-key file
+      ansible.builtin.file:
+        path: "{{ tailscale_authkey_file }}"
+        state: absent
 
 # The VPS's own tailnet address(es) (epic 20): needed by the caddy-relay compose
 # fragment to know which interface to bind, so tailnet-facing traffic can reach it

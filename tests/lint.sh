@@ -210,3 +210,13 @@ echo "role skip-tags guard OK"
 # a throwaway repository tree with two workstation identities and a break-glass key, all throwaway.
 ./tests/check-secrets-helper.sh
 
+# Secret suppression at the source (epic 22 ticket #05): every task under roles/*/tasks/ whose own arguments
+# (including a rendered template's content and the environment: directive) reference a secrets.* value carries
+# no_log: true — a static, lint-time guard, the second layer under the deploy wrapper's own output redaction.
+./tests/check-secret-suppression.sh
+
+# Full-playbook leak check (epic 22 ticket #05): a local dry run of the real roles with crafted, distinctive fixture
+# secret values, at high verbosity AND with --diff, must never print one of them — proving suppression at the
+# source works independent of the deploy wrapper's redaction (which this run does not go through at all).
+./tests/check-playbook-secret-leak.sh
+

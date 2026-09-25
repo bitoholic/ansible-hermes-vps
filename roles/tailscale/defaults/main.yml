@@ -1,4 +1,16 @@
 ---
+# Epic 22 #05: the auth key is written here immediately before "tailscale up" and removed right after, whether the
+# login succeeded or failed — never left on disk, never in process arguments. /run is a tmpfs (cleared on reboot),
+# a second layer beyond the file's own lifecycle and permissions.
+tailscale_authkey_file: /run/hermes-vps/tailscale-authkey
+
+# The minimum Tailscale version that understands `--authkey=file:/path` (reads the key from a file instead of
+# taking it on the command line, so it never appears in process arguments or a task result). Verified against
+# https://tailscale.com/docs/reference/tailscale-cli/up and the tailscale/tailscale source history: introduced by
+# commit b822b5c79897fc5953af3e2dee22d389419b1146 ("let up --authkey be of form file:/path/to/secret"),
+# first released in v1.16.0 (2021-09-29).
+tailscale_min_version: "1.16.0"
+
 # DOCKER-USER firewall (epic 21 #02). The port classes themselves live in group_vars/all/main.yml.
 tailscale_docker_user_firewall_dir: /etc/hermes-vps/firewall
 tailscale_docker_user_firewall_loader: /usr/local/sbin/hermes-docker-user-rules

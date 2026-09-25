@@ -69,6 +69,7 @@
       password: "{{ secrets.matrix_bot_password }}"
       inhibit_login: true
     status_code: [200, 201]
+  no_log: true   # the registration token and bot password are module arguments (the request body)
   when: (conduit_hermes_available.status | default(0)) == 200
   changed_when: (conduit_hermes_available.status | default(0)) == 200
   ignore_errors: "{{ ansible_check_mode }}"

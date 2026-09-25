@@ -28,6 +28,7 @@
     owner: llm_wiki
     group: llm_wiki
     mode: '0600'
+  no_log: true   # bakes in the Authelia session/storage secrets and admin credentials
 
 - name: Render Authelia users database
   tags: [authelia]
@@ -37,3 +38,4 @@
     owner: llm_wiki
     group: llm_wiki
     mode: '0600'
+  no_log: true   # bakes in the admin password hash

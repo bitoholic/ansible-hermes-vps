@@ -38,8 +38,13 @@
     path: "{{ owntracks_htpasswd_path }}"
     name: "{{ secrets.owntracks_admin_username }}"
     password: "{{ secrets.owntracks_admin_password }}"
-    hash_scheme: bcrypt
+    # Found by epic 22 #05's own dynamic leak test, which is the first thing to have ever actually EXECUTED this
+    # task: the module's real parameter is `crypt_scheme`, not `hash_scheme` — the wrong name was silently ignored
+    # (module default: apr_md5_crypt), so every real deployment to date generated a hash Caddy's basic_auth (bcrypt
+    # only) cannot verify. Fixed here; not otherwise in this ticket's scope.
+    crypt_scheme: bcrypt
     mode: '0644'
+  no_log: true   # the plaintext password is a module argument, shown verbatim at verbosity without this
   register: owntracks_htpasswd_result
 
 # The recorder itself has NO HTTP authentication of any kind — OTR_AUTH_FILE is
