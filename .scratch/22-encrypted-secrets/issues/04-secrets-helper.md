@@ -115,3 +115,19 @@ each verified to catch its bug when reverted. Not changed: the reviewer's "an ed
 "import verifies via dict comparison rather than literally a digest" observations were explicitly flagged as
 judgment calls, not stated-acceptance-criterion violations — left as accepted, documented behavior rather than
 building a rollback layer under `sops edit` itself.
+
+## Review round 3 (independent fresh-context subagent): PASS
+
+No code defects. All three prior rounds' fixes were re-attacked empirically (not just re-read) and held: the
+bootstrap refusal, `fill`'s unconditional symlink check, `edit`'s unencrypted-comment check firing on both rc=0 and
+rc=200, the `re.escape`d bootstrap regex against a path with parens/spaces/multiple dots, and `remove-recipient`
+inheriting the same rollback guarantee as `add-recipient` (it has no bootstrap branch of its own). 9 of 10 fresh
+mutations were caught; the one miss (`write_atomic` made non-atomic) is the same already-documented, already-accepted
+black-box-testing limit from the initial implementation notes, not a new gap. Two non-blocking observations, accepted
+as documented behavior rather than fixed: a chmod-000 `.sops.yaml` is reported as "not valid YAML" (technically a
+permissions error, but the underlying OS error text is still shown, so an operator can still diagnose it); and
+`import` silently overwrites an existing store's full content on a re-run (consistent with its "one-time, attended
+migration" framing — the round-trip check correctly verifies what it claims, this is a footgun for a habitual re-run,
+not a false claim).
+
+**Ticket #04 is closed.**
