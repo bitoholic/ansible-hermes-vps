@@ -145,8 +145,8 @@ mutate_store "a stray plaintext line" 'not a NAME=value line' '# password is hun
 mutate_store "an unknown ciphertext type" 'value of FIX_TOKEN is not encrypted' - 's/^(FIX_TOKEN=ENC.*),type:str\]/\1,type:zzz]/'
 mutate_store "SOPS metadata: version removed" 'sops_version missing' - '/^sops_version=/d'
 mutate_store "SOPS metadata: last-modified removed" 'sops_lastmodified missing' - '/^sops_lastmodified=/d'
-mutate_store "SOPS metadata: the age data key removed" 'carries no age recipient entry' - '/^sops_age__list_0__map_enc=/d'
-mutate_store "SOPS metadata: the recipient removed" 'names no age recipient' - '/^sops_age__list_0__map_recipient=/d'
+mutate_store "SOPS metadata: the age data key removed" 'age slot 0 is unpaired' - '/^sops_age__list_0__map_enc=/d'
+mutate_store "SOPS metadata: the recipient removed" 'age slot 0 is unpaired' - '/^sops_age__list_0__map_recipient=/d'
 mutate_store "SOPS metadata: a non-default unencrypted suffix" 'sops_unencrypted_suffix has a non-default value' - 's/^sops_unencrypted_suffix=.*/sops_unencrypted_suffix=_x/'
 mutate_store "SOPS metadata: mac_only_encrypted" 'sops_mac_only_encrypted is not a SOPS metadata name' 'sops_mac_only_encrypted=true'
 mutate_store "SOPS metadata: a recipient that is not an age key" 'is not an age public key' - 's/^(sops_age__list_0__map_recipient)=.*/\1=nobody/'
@@ -239,6 +239,32 @@ mutate_store "trailing plaintext after a value's ciphertext" 'value of FIX_TOKEN
 mutate_store "trailing plaintext after sops_mac" 'sops_mac is not a SOPS MAC' - 's/^(sops_mac=ENC\[.*\])$/\1hunter2plain/'
 mutate_store "sops_mac that is not ciphertext at all" 'sops_mac is not a SOPS MAC' - 's/^sops_mac=.*/sops_mac=hunter2plain/'
 mutate_store "trailing plaintext after a comment's ciphertext" 'not a NAME=value line' '#ENC[AES256_GCM,data:aGVsbG8=,iv:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=,tag:AAAAAAAAAAAAAAAAAAAAAA==,type:comment]hunter2plain'
+# recipient slots: unpaired, duplicated, non-canonical and oversized slots hide text SOPS never reads (a single-recipient
+# store decrypts with slot 0 alone)
+ARM='-----BEGIN AGE ENCRYPTED FILE-----\nQUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVo=\n-----END AGE ENCRYPTED FILE-----\n'
+mutate_store "an extra data-key slot with no recipient line" 'age slot 1 is unpaired' "sops_age__list_1__map_enc=$ARM"
+RECIP0="$(grep '^sops_age__list_0__map_recipient=' "$FIX_REPO/secrets/secrets.enc.env" | cut -d= -f2)"
+mutate_store "a duplicated recipient with its own hidden data key" 'names the same age recipient more than once' "sops_age__list_1__map_recipient=$RECIP0
+sops_age__list_1__map_enc=$ARM"
+mutate_store "a non-canonical slot number" 'is not a SOPS metadata name' "sops_age__list_01__map_enc=$ARM"
+mutate_store "a slot numbering gap" 'not numbered 0..' "sops_age__list_2__map_recipient=$RECIP0
+sops_age__list_2__map_enc=$ARM"
+mutate_store "a repeated metadata line" 'metadata name sops_version appears more than once' "sops_version=3.13.3"
+BIG='-----BEGIN AGE ENCRYPTED FILE-----\n'; for i in $(seq 1 12); do BIG="${BIG}QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVo=\n"; done; BIG="${BIG}-----END AGE ENCRYPTED FILE-----\n"
+mutate_store "an oversized age data key (room to hide a blob)" 'sops_age__list_0__map_enc is not an age-encrypted data key' - "s/^sops_age__list_0__map_enc=.*/sops_age__list_0__map_enc=$BIG/"
+# SOPS uses only the FIRST creation rule that matches the store's path (and key_groups over age): the guard must model that
+printf 'creation_rules:\n  - path_regex: ^secrets/secrets\\.enc\\.env$\n    key_groups:\n      - age:\n          - %s\n  - path_regex: .*\\.env$\n    key_groups:\n      - age:\n          - %s\n' "$FIX_PUB" "$BG_PUB" > "$FIX_REPO/.sops.yaml"
+expect_ok "a specific rule first and a wider rule second (the second is never used for the store)"
+printf 'creation_rules:\n  - path_regex: .*\\.env$\n    key_groups:\n      - age:\n          - %s\n  - path_regex: ^secrets/secrets\\.enc\\.env$\n    key_groups:\n      - age:\n          - %s\n' "$BG_PUB" "$FIX_PUB" > "$FIX_REPO/.sops.yaml"
+expect_fail "a wide rule FIRST wins: the store must match ITS recipients" "store's recipients differ from .sops.yaml's"
+printf 'creation_rules:\n  - path_regex: ^secrets/secrets\\.enc\\.env$\n    age: %s\n    key_groups:\n      - age:\n          - %s\n' "$BG_PUB" "$FIX_PUB" > "$FIX_REPO/.sops.yaml"
+expect_ok "key_groups win over age in one rule"
+printf 'creation_rules:\n  - path_regex: ^secrets/secrets\\.enc\\.env$\n    age: %s,%s\n' "$FIX_PUB" "$BG_PUB" > "$FIX_REPO/.sops.yaml"
+cp "$T/store.two" "$FIX_REPO/secrets/secrets.enc.env"
+expect_ok "a comma-separated string of TWO recipients against a two-recipient store"
+printf 'creation_rules:\n  - notamapping\n' > "$FIX_REPO/.sops.yaml"
+expect_fail ".sops.yaml with a rule that is not a mapping" 'is not a mapping'
+cp "$T/sops.good" "$FIX_REPO/.sops.yaml"; cp "$T/store.good" "$FIX_REPO/secrets/secrets.enc.env"
 # every value-weakening key in .sops.yaml is refused
 for key in unencrypted_suffix unencrypted_regex unencrypted_comment_regex encrypted_suffix encrypted_regex encrypted_comment_regex mac_only_encrypted; do
   printf 'creation_rules:\n  - path_regex: ^secrets/secrets\\.enc\\.env$\n    %s: x\n    key_groups:\n      - age:\n          - %s\n' "$key" "$FIX_PUB" > "$FIX_REPO/.sops.yaml"

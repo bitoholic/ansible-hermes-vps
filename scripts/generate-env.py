@@ -143,6 +143,9 @@ def replace_between(content, marker, block):
 
 
 def main():
+    unknown = [a for a in sys.argv[1:] if a != "--check"]
+    if unknown:                                   # (an unrecognised argument such as --help must not silently regenerate files)
+        sys.exit("usage: generate-env.py [--check]   (no argument: regenerate .env.template and setup-env.sh)")
     check = "--check" in sys.argv[1:]
     entries = load_entries()
 

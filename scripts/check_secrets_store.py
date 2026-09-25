@@ -62,8 +62,9 @@ _ENC_BODY = r"ENC\[AES256_GCM,data:(?P<data>" + _B64 + r"),iv:[A-Za-z0-9+/]{43}=
 ENC_RE = re.compile(r"^" + _ENC_BODY + r"$")
 COMMENT_RE = re.compile(r"^#" + _ENC_BODY + r"$")
 # An age-encrypted data key as SOPS stores it in a dotenv value: PEM-style armour with literal `\n` separators and base64
-# lines only (a plaintext tail, or plaintext instead of base64, is refused). It is stored once per recipient.
-AGE_ENC_RE = re.compile(r"^-----BEGIN AGE ENCRYPTED FILE-----\\n(?:[A-Za-z0-9+/]{1,64}={0,2}\\n)+-----END AGE ENCRYPTED FILE-----\\n$")
+# lines only, at most 10 of them (a real native age file with one X25519 stanza is ~5), so a plaintext tail, plaintext
+# instead of base64, or a large hidden blob is refused. It is stored once per recipient.
+AGE_ENC_RE = re.compile(r"^-----BEGIN AGE ENCRYPTED FILE-----\\n(?:[A-Za-z0-9+/]{1,64}={0,2}\\n){1,10}-----END AGE ENCRYPTED FILE-----\\n$")
 TIMESTAMP_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$", re.ASCII)
 VERSION_RE = re.compile(r"^\d+\.\d+\.\d+$", re.ASCII)
 # The ONLY metadata names a SOPS dotenv store carries when encrypted to age recipients with default settings. Any other
@@ -139,7 +140,7 @@ def check_metadata(name, value):
         return None if TIMESTAMP_RE.match(value) else "sops_lastmodified is not a timestamp"
     if name in DEFAULT_METADATA:
         return None if value == DEFAULT_METADATA[name] else "%s has a non-default value (it changes which values SOPS encrypts)" % name
-    m = re.fullmatch(r"sops_age__list_(\d+)__map_(recipient|enc)", name)
+    m = re.fullmatch(r"sops_age__list_(0|[1-9][0-9]*)__map_(recipient|enc)", name)      # canonical numbers only
     if m:
         if m.group(2) == "recipient":
             return None if valid_age_recipient(value) else "%s is not an age public key" % name
@@ -161,7 +162,8 @@ def store_recipients(text):
 
 def check_store_text(text, rel, root):
     """Problems with the structure of an encrypted dotenv store's text (names only, never values)."""
-    problems, names, seen, metadata = [], [], set(), set()
+    required_now = set(hs.required_names(root))
+    problems, names, seen, metadata, metadata_lines = [], [], set(), set(), set()
     for number, line in enumerate(text.splitlines(), 1):
         if not line.strip():
             continue
@@ -173,6 +175,9 @@ def check_store_text(text, rel, root):
             continue
         name, value = m.group(1), m.group(2)
         if name.startswith("sops_"):
+            if name in metadata_lines:
+                problems.append("%s: the metadata name %s appears more than once" % (rel, name))
+            metadata_lines.add(name)
             problem = check_metadata(name, value)
             if problem:
                 problems.append("%s: %s" % (rel, problem))
@@ -183,17 +188,31 @@ def check_store_text(text, rel, root):
             problems.append("%s: the name %s appears more than once" % (rel, name))
         seen.add(name)
         names.append(name)
-        if value == "" and name in hs.required_names(root):
+        if value == "" and name in required_now:
             problems.append("%s: the value of the required name %s is empty" % (rel, name))
         if value != "" and not ENC_RE.match(value):      # (an empty value is an empty string — SOPS leaves it as such — and carries no secret)
             problems.append("%s: the value of %s is not encrypted (every value must be an ENC[AES256_GCM,...] blob)" % (rel, name))
     for required in ("sops_version", "sops_mac", "sops_lastmodified"):
         if required not in metadata:
             problems.append("%s carries no SOPS metadata (%s missing): it is not a SOPS-encrypted file" % (rel, required))
-    if not any(m.startswith("sops_age__list_") and m.endswith("__map_enc") for m in metadata):
+    # The recipient slots: indices exactly 0..n-1 (canonical numbers), each with ONE recipient line and ONE data-key line. An
+    # unpaired or extra slot is a place to hide a blob that SOPS never reads when the first recipient decrypts.
+    slots = {}
+    for m in metadata:
+        mm = re.fullmatch(r"sops_age__list_(0|[1-9][0-9]*)__map_(recipient|enc)", m)
+        if mm:
+            slots.setdefault(int(mm.group(1)), set()).add(mm.group(2))
+    if not slots:
         problems.append("%s carries no age recipient entry (sops_age__list_*): nobody could decrypt it" % rel)
-    if not any(m.startswith("sops_age__list_") and m.endswith("__map_recipient") for m in metadata):
-        problems.append("%s names no age recipient (sops_age__list_*__map_recipient)" % rel)
+    else:
+        if sorted(slots) != list(range(len(slots))):
+            problems.append("%s: the age recipient slots are not numbered 0..%d without gaps" % (rel, len(slots) - 1))
+        for index, kinds in sorted(slots.items()):
+            if kinds != {"recipient", "enc"}:
+                problems.append("%s: age slot %d is unpaired (it needs exactly one recipient and one data key)" % (rel, index))
+    recipients = store_recipients(text)
+    if len(recipients) != len(set(recipients)):
+        problems.append("%s names the same age recipient more than once" % rel)
     missing, undeclared = hs.name_set_problems(names, root)
     if missing:
         problems.append("%s: required names missing from the store (by name): %s" % (rel, ", ".join(missing)))
@@ -203,22 +222,26 @@ def check_store_text(text, rel, root):
 
 
 def config_recipients(path, store_rel):
-    """The age recipients of the .sops.yaml rules whose path_regex matches the store's path (None if it cannot be read)."""
+    """The age recipients SOPS would encrypt the store to: those of the FIRST creation rule whose path_regex matches the store's
+    path (SOPS uses only the first match — verified for both encrypt and updatekeys); `key_groups` win over `age` when both
+    are present. None if the file cannot be read."""
     try:
         with open(path, "r", encoding="utf-8") as fh:
             config = yaml.safe_load(fh) or {}
-        found = set()
         for rule in config.get("creation_rules") or []:
             if not isinstance(rule, dict) or not rule.get("path_regex") or not re.search(rule["path_regex"], store_rel):
                 continue
-            for group in rule.get("key_groups") or []:
-                if isinstance(group, dict):
-                    found |= {str(r) for r in (group.get("age") or [])}
-            if isinstance(rule.get("age"), str):
+            found = set()
+            if rule.get("key_groups"):
+                for group in rule["key_groups"]:
+                    if isinstance(group, dict):
+                        found |= {str(r) for r in (group.get("age") or [])}
+            elif isinstance(rule.get("age"), str):
                 found |= {r.strip() for r in rule["age"].split(",") if r.strip()}
             elif isinstance(rule.get("age"), list):
                 found |= {str(r) for r in rule["age"]}
-        return found
+            return found
+        return set()
     except (OSError, yaml.YAMLError, re.error, AttributeError, TypeError):
         return None
 
@@ -319,8 +342,8 @@ def run(root):
             wanted = config_recipients(config_abs, store_rel)
             actual = set(store_recipients(open(store_abs, "r", encoding="utf-8", errors="replace").read()))
             if wanted is not None and wanted != actual:
-                problems.append("the store's recipients differ from .sops.yaml's for %s (%d only in the store, %d only in the configuration): run `sops updatekeys`"
-                                % (store_rel, len(actual - wanted), len(wanted - actual)))
+                problems.append("the store's recipients differ from .sops.yaml's for %s (%d recipient(s) only in the store, %d only in the "
+                                "configuration): run `sops updatekeys`" % (store_rel, len(actual - wanted), len(wanted - actual)))
 
     # --- store-independent checks -------------------------------------------------------------------------------
     if ".env" in tracked:
