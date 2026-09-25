@@ -40,12 +40,13 @@ What this CANNOT verify
     just-generated htpasswd file, fixed by hand and not something this pattern-based guard can find on its own).
   * That `no_log: true` on a task actually suppresses everything a module might print (a module bug that ignores
     no_log is Ansible's own contract to keep, not this guard's).
-  * Anything outside roles/*/tasks/ (site.yml, group_vars, other playbooks) — the manifest and its callers are
-    covered by other guards (the single-seam check in tests/lint.sh, the resolver's own test). This includes
-    site.yml's own `ansible_user: "{{ secrets.admin_username }}"`, which has the identical never-fixable-by-no_log
-    property as `become_user:` above (Ansible's SSH connection plugin inlines it into every task's connection trace
-    for the whole play, regardless of any task's own no_log) — accepted and documented at its own call site for the
-    same reason: an OS username, not a credential, with no fix available.
+  * Anything outside roles/*/tasks/ (site.yml, group_vars, other playbooks, and roles/*/handlers/ — none currently
+    reference secrets.*, checked by hand, not by this guard) — the manifest and its callers are covered by other
+    guards (the single-seam check in tests/lint.sh, the resolver's own test). This includes site.yml's own
+    `ansible_user: "{{ secrets.admin_username }}"`, which has the identical never-fixable-by-no_log property as
+    `become_user:` above (Ansible's SSH connection plugin inlines it into every task's connection trace for the
+    whole play, regardless of any task's own no_log) — accepted and documented at its own call site for the same
+    reason: an OS username, not a credential, with no fix available.
 """
 import argparse
 import glob
@@ -57,8 +58,12 @@ import yaml
 
 # Only a REAL Jinja interpolation ({{ ... secrets.NAME ... }}) can ever emit a value — plain prose that merely
 # names a secrets.* variable (several of this repo's own "Validate ... prerequisites" assert fail_msg strings do
-# this deliberately, to tell the operator what to set) never does, and must not be flagged.
-SECRET_RE = re.compile(r"\{\{.*?secrets(?:\.[A-Za-z_][A-Za-z0-9_]*|\[[^\]]+\]).*?\}\}", re.DOTALL)
+# this deliberately, to tell the operator what to set) never does, and must not be flagged. `\s*` around `.`/`[`:
+# real Jinja tolerates whitespace there (`secrets .x`, `secrets. x`, `secrets ['x']` all render identically to
+# `secrets.x`) — an earlier version of this regex required zero whitespace and a reformatted expression could slip
+# through completely undetected, including past the environment:/become_user: hard-fail check below, which shares
+# this same pattern (found by round 3's independent review, verified with a live Jinja render).
+SECRET_RE = re.compile(r"\{\{.*?secrets\s*(?:\.\s*[A-Za-z_][A-Za-z0-9_]*|\[[^\]]+\]).*?\}\}", re.DOTALL)
 DEFAULT_JINJA_RE = re.compile(r"default\(\s*'([^']+)'\s*(?:,\s*true\s*)?\)")
 
 # Task-level keys that can never themselves emit a value: pure control flow / metadata that Ansible never
@@ -87,7 +92,10 @@ NEVER_FIXABLE_BY_NO_LOG_KEYS = {"environment", "become_user"}
 # name) — so silently repurposing an allowlisted task to pass a DIFFERENT, genuinely dangerous secret through
 # become_user (same file, same name, new expression) is still a hard failure, not silently waved through. Explicit,
 # narrow and justified — NOT a blanket exemption for `become_user:` elsewhere; any other task or expression is still
-# a hard failure above.
+# a hard failure above. Fragile by design (fail-safe, not fail-silent): reformatting the expression at either call
+# site (different quoting is fine — YAML normalizes that before this ever runs — but different internal whitespace,
+# e.g. adding/removing spaces around the dot, is not) makes the match miss and turns back into a loud failure here;
+# update this tuple to match if that ever happens deliberately.
 ACCEPTED_BECOME_USER_EXCEPTIONS = {
     ("roles/common/tasks/main.yml", "Configure global git user.name for admin user", "{{ secrets.admin_username }}"),
     ("roles/common/tasks/main.yml", "Configure global git user.email for admin user", "{{ secrets.admin_username }}"),

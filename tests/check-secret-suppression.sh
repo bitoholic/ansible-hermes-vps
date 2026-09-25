@@ -112,6 +112,34 @@ cat > "$T/roles/leaky/tasks/main.yml" <<'YML'
   ansible.builtin.debug:
     msg: "{{ item }}"
   loop: "{{ secrets.api_keys }}"
+
+- name: Looping over a literal list of secret-interpolated strings
+  ansible.builtin.debug:
+    msg: "{{ item }}"
+  loop:
+    - "{{ secrets.list_item_one }}"
+    - "{{ secrets.list_item_two }}"
+
+- name: Whitespace around the dot or bracket must not bypass detection
+  ansible.builtin.command:
+    cmd: "echo {{ secrets .spaced_dot }} {{ secrets. spaced_dot2 }} {{ secrets ['spaced_bracket'] }}"
+
+- name: A secret interpolation reflowed across multiple lines must still be caught
+  ansible.builtin.command:
+    cmd: |
+      echo {{
+        secrets.reflowed_secret
+      }}
+
+- name: A violation inside rescue must still be caught
+  block:
+    - name: A step that might fail
+      ansible.builtin.command:
+        cmd: /bin/false
+  rescue:
+    - name: Violation nested inside rescue
+      ansible.builtin.command:
+        cmd: "echo {{ secrets.rescue_token }}"
 YML
 
 set +e
@@ -128,7 +156,11 @@ for must_flag in \
   "environment leaks a secret even WITH no_log" \
   "become_user leaks a secret and is not on the accepted-exceptions list" \
   "A vars-computed intermediate still carries the original secret reference" \
-  "Looping directly over a secret-bearing structure"; do
+  "Looping directly over a secret-bearing structure" \
+  "Looping over a literal list of secret-interpolated strings" \
+  "Whitespace around the dot or bracket must not bypass detection" \
+  "A secret interpolation reflowed across multiple lines must still be caught" \
+  "Violation nested inside rescue"; do
   grep -qF "$must_flag" <<<"$OUT" || fail "the checker did not flag: $must_flag"$'\n'"$OUT"
 done
 grep -qF "no_log CANNOT protect" <<<"$OUT" || fail "environment:/become_user: violations must say plainly that no_log does not fix them"

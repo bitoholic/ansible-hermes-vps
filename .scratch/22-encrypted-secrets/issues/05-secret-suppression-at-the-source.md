@@ -164,3 +164,25 @@ python3-apt, a real Docker daemon, destroyed afterward) and passed clean; the ro
 unused anywhere in the repo and that ordinary module arguments (`ansible.builtin.user`'s `password:`,
 `community.general.git_config`'s own args) do NOT share this bypass class — they're JSON-embedded in the AnsiballZ
 payload, not inlined into a printed shell command, so plain `no_log` correctly protects them.
+
+## Review round 3 (independent fresh-context subagent): CHANGES REQUIRED, fixed
+
+Re-verified round 2's allowlist fix by reverting it in a scratch copy and confirming the regression test genuinely
+catches the revert (it does). Found one real, previously-undiscovered **code defect** in the checker's own core
+pattern: `SECRET_RE` required zero whitespace between `secrets` and the following `.`/`[`, but real Jinja tolerates
+whitespace there (`secrets .x`, `secrets. x`, `secrets ['x']` all render identically to `secrets.x`, confirmed with
+a live Jinja render) — a reformatted expression could bypass detection completely, including bypassing the
+`environment:`/`become_user:` hard-fail path, which shares the same regex. Not currently exploited anywhere in the
+real repo, but a real, cheap-to-trigger gap in the exact class of soundness issue rounds 1 and 2 already found and
+fixed twice in this same file. Fixed: `\s*` added around the dot/bracket; verified against all three bypass forms,
+confirmed the fix is what makes the difference (reverting it and re-running the new fixture reproduces the miss).
+
+Also closed three test-coverage gaps found by fresh mutation testing (the underlying code already handled all three
+correctly — only the fixtures were missing, so a future regression in any of them would have shipped silently):
+`contains_secret_ref`'s list recursion (a literal YAML list of secret-interpolated strings under `loop:`), the
+`SECRET_RE` regex's `re.DOTALL` flag (an expression reflowed across multiple lines inside `{{ }}`), and
+`walk_tasks`'s recursion into `rescue:` blocks (only `block:` had a fixture). Each new fixture was verified to
+actually fail when its corresponding code path is reverted, not just added and trusted. Minor documentation
+additions: a note on the allowlist's own fragility (a deliberate fail-safe, not a bug — reformatting an allowlisted
+expression's internal whitespace turns back into a loud failure, by design), and `roles/*/handlers/` added to the
+checker's "what this cannot verify" list (checked by hand: none currently reference `secrets.*`).
