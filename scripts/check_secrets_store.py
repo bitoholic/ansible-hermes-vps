@@ -49,8 +49,19 @@ def _load(name):
 
 hs = _load("hermes_secrets")
 
-ENC_RE = re.compile(r"^ENC\[AES256_GCM,data:[A-Za-z0-9+/=]*,iv:[A-Za-z0-9+/=]+,tag:[A-Za-z0-9+/=]+,type:(str|int|float|bytes|bool|comment)\]$")
-COMMENT_RE = re.compile(r"^#(ENC\[AES256_GCM,.*\])$")
+# The real shape of a SOPS value (AES-256-GCM: a 32-byte IV = 44 base64 characters, a 16-byte tag = 24, data of the
+# value's length): it does not prove the ciphertext decrypts (no key here), but text such as `ENC[AES256_GCM,data:hunter2,
+# iv:AAAA,tag:BBBB,type:str]` — plaintext dressed as ciphertext — does not pass.
+_B64 = r"(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?"
+_ENC_BODY = r"ENC\[AES256_GCM,data:(?P<data>" + _B64 + r"),iv:[A-Za-z0-9+/]{43}=,tag:[A-Za-z0-9+/]{22}==,type:(?P<type>str|int|float|bytes|bool|comment)\]"
+ENC_RE = re.compile(r"^" + _ENC_BODY + r"$")
+COMMENT_RE = re.compile(r"^#" + _ENC_BODY + r"$")
+AGE_ENC_RE = re.compile(r"^-----BEGIN AGE ENCRYPTED FILE-----\\n")
+TIMESTAMP_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
+VERSION_RE = re.compile(r"^\d+\.\d+\.\d+")
+# The ONLY metadata names a SOPS dotenv store carries when encrypted to age recipients with default settings. Any other
+# `sops_*` name is refused: SOPS ignores it on decrypt, so it would be a place to hide a plaintext value.
+DEFAULT_METADATA = {"sops_unencrypted_suffix": "_unencrypted"}
 NAME_LINE_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)=(.*)$")
 AGE_RECIPIENT_RE = re.compile(r"^age1[a-z0-9]{58}$")
 WEAKENING_KEYS = ("unencrypted_suffix", "unencrypted_regex", "unencrypted_comment_regex", "encrypted_suffix",
@@ -60,7 +71,7 @@ PLACEHOLDER_HINTS = ("%s", "$", "{{", "<", ">", "[", "...", "xxx", "changeme", "
                      "test", "fake", "dummy", "canary", "fixture", "sample")
 FIXTURE_STYLE_RE = re.compile(r"^[A-Z0-9_,]+$")      # WIKI_KEY, AUTHELIA_HASH, U1,U2: a test fixture's stand-in, not a real credential
 TEXT_SIZE_LIMIT = 1_000_000
-SAFE_ENV_SUFFIXES = (".template", ".example", ".sample")
+SAFE_ENV_SUFFIXES = (".template", ".example", ".sample", ".j2")
 
 
 def git(root, *args):
@@ -73,6 +84,30 @@ def tracked_files(root):
     if proc.returncode != 0:
         raise RuntimeError("not a git repository (the guard reads the tracked file list): %s" % root)
     return [f for f in proc.stdout.decode("utf-8", "replace").split("\0") if f]
+
+
+def untracked_files(root):
+    """Files a `git add -A` would pick up next: untracked and not ignored."""
+    proc = git(root, "ls-files", "-z", "--others", "--exclude-standard")
+    return [f for f in proc.stdout.decode("utf-8", "replace").split("\0") if f] if proc.returncode == 0 else []
+
+
+def check_metadata(name, value):
+    """A problem with one `sops_*` line of the store, or None. Only the exact metadata names, each with its shape."""
+    if name == "sops_version":
+        return None if VERSION_RE.match(value) else "sops_version is not a version"
+    if name == "sops_mac":
+        return None if ENC_RE.match(value) else "sops_mac is not a SOPS MAC (an ENC[AES256_GCM,...] blob)"
+    if name == "sops_lastmodified":
+        return None if TIMESTAMP_RE.match(value) else "sops_lastmodified is not a timestamp"
+    if name in DEFAULT_METADATA:
+        return None if value == DEFAULT_METADATA[name] else "%s has a non-default value (it changes which values SOPS encrypts)" % name
+    m = re.fullmatch(r"sops_age__list_(\d+)__map_(recipient|enc)", name)
+    if m:
+        if m.group(2) == "recipient":
+            return None if AGE_RECIPIENT_RE.match(value) else "%s is not an age public key" % name
+        return None if AGE_ENC_RE.match(value) else "%s is not an age-encrypted data key" % name
+    return "%s is not a SOPS metadata name this repository uses (a `sops_`-prefixed name is ignored by SOPS: it would hide a plaintext value)" % name
 
 
 def check_store_text(text, rel, root):
@@ -89,19 +124,25 @@ def check_store_text(text, rel, root):
             continue
         name, value = m.group(1), m.group(2)
         if name.startswith("sops_"):
-            metadata.add(name)
+            problem = check_metadata(name, value)
+            if problem:
+                problems.append("%s: %s" % (rel, problem))
+            else:
+                metadata.add(name)
             continue
         if name in seen:
             problems.append("%s: the name %s appears more than once" % (rel, name))
         seen.add(name)
         names.append(name)
-        if not ENC_RE.match(value):
+        if value != "" and not ENC_RE.match(value):      # (an empty value is an empty string — SOPS leaves it as such — and carries no secret)
             problems.append("%s: the value of %s is not encrypted (every value must be an ENC[AES256_GCM,...] blob)" % (rel, name))
-    for required in ("sops_version", "sops_mac"):
+    for required in ("sops_version", "sops_mac", "sops_lastmodified"):
         if required not in metadata:
             problems.append("%s carries no SOPS metadata (%s missing): it is not a SOPS-encrypted file" % (rel, required))
     if not any(m.startswith("sops_age__list_") and m.endswith("__map_enc") for m in metadata):
         problems.append("%s carries no age recipient entry (sops_age__list_*): nobody could decrypt it" % rel)
+    if not any(m.startswith("sops_age__list_") and m.endswith("__map_recipient") for m in metadata):
+        problems.append("%s names no age recipient (sops_age__list_*__map_recipient)" % rel)
     missing, undeclared = hs.name_set_problems(names, root)
     if missing:
         problems.append("%s: required names missing from the store (by name): %s" % (rel, ", ".join(missing)))
@@ -140,7 +181,8 @@ def check_sops_config(path, store_rel):
                 problems.append(".sops.yaml rule %d has an invalid path_regex" % (i + 1))
         recipients = []
         for group in rule.get("key_groups") or []:
-            recipients += [r for r in (group.get("age") or [])]
+            if isinstance(group, dict):
+                recipients += [r for r in (group.get("age") or [])]
         if isinstance(rule.get("age"), str):
             recipients += [r.strip() for r in rule["age"].split(",") if r.strip()]
         if not recipients:
@@ -156,14 +198,18 @@ def check_sops_config(path, store_rel):
 def looks_like_plaintext_secrets(text, names):
     """Distinct manifest/extra NAMES assigned real-looking values at the start of a line."""
     found = set()
-    for line in text.splitlines():
-        m = re.match(r"^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)=(.*)$", line)
-        if not m or m.group(1) not in names:
+    for line in text.lstrip("\ufeff").splitlines():
+        # NAME=value, export NAME=value, NAME = value, `- NAME=value` (compose), `NAME: value` (YAML), "NAME": "value", (JSON)
+        m = re.match(r"^\s*(?:\{\s*)?(?:-\s+)?(?:export\s+)?(?:([A-Za-z_][A-Za-z0-9_]*)\s*=|[\"']?([A-Za-z_][A-Za-z0-9_]*)[\"']?\s*:(?=\s))\s*(.*)$", line)
+        if not m:
             continue
-        value = re.split(r"\s+#", m.group(2))[0].strip().strip("'\"").strip()       # an inline comment is not part of the value
+        name = m.group(1) or m.group(2)
+        if name not in names:
+            continue
+        value = re.split(r"\s+#", m.group(3))[0].strip().rstrip(",").strip().strip("'\"").strip()   # an inline comment is not part of the value
         if not value or any(h in value.lower() for h in PLACEHOLDER_HINTS) or FIXTURE_STYLE_RE.match(value):
             continue
-        found.add(m.group(1))
+        found.add(name)
     return found
 
 
@@ -191,18 +237,18 @@ def run(root):
     # --- store-independent checks -------------------------------------------------------------------------------
     if ".env" in tracked:
         problems.append(".env is tracked by git (a plaintext secrets file must never be committed)")
-    if git(root, "check-ignore", "-q", ".env").returncode != 0:
+    if git(root, "-c", "core.excludesFile=/dev/null", "check-ignore", "-q", ".env").returncode != 0:      # (not via a user-global ignore)
         problems.append(".env is not git-ignored (it must stay ignored as a tripwire against committing it by accident)")
 
     names = hs.allowed_names(root)
-    for path in tracked:
-        base = os.path.basename(path)
+    for path in tracked + untracked_files(root):
+        base = os.path.basename(path).lower()
         if path == store_rel:
             continue
         if base == ".env" and path != ".env":
-            problems.append("%s: a tracked file named .env" % path)
+            problems.append("%s: a file named .env (tracked, or untracked and not ignored: `git add -A` would commit it)" % path)
         elif base.endswith(".env") or base == ".envrc" or (base.startswith(".env.") and not base.endswith(SAFE_ENV_SUFFIXES)):
-            problems.append("%s: a tracked file with the name of a plaintext secrets file" % path)
+            problems.append("%s: a file with the name of a plaintext secrets file (tracked, or untracked and not ignored)" % path)
         full = os.path.join(root, path)
         try:
             if not os.path.isfile(full) or os.path.getsize(full) > TEXT_SIZE_LIMIT:

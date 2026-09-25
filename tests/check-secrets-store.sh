@@ -113,7 +113,7 @@ expect_ok "the good configuration again"
 ( cd "$FIX_REPO" && printf '.env\n' > .gitignore )
 ( cd "$FIX_REPO" && printf 'x=1\n' > .env && git add -f .env ); expect_fail ".env tracked" '.env is tracked by git'
 ( cd "$FIX_REPO" && git rm -q --cached -f .env && rm .env )
-( cd "$FIX_REPO" && printf 'a=1\n' > backup.env && git add backup.env ); expect_fail "a tracked *.env file" 'backup.env: a tracked file with the name of a plaintext secrets file'
+( cd "$FIX_REPO" && printf 'a=1\n' > backup.env && git add backup.env ); expect_fail "a tracked *.env file" 'backup.env: a file with the name of a plaintext secrets file'
 ( cd "$FIX_REPO" && git rm -q --cached -f backup.env && rm backup.env )
 ( cd "$FIX_REPO" && printf 'export FIX_TOKEN=Kj83hd92Lx\nFIX_DOMAIN=my-real.domain.tld\nFIX_UNICODE="qW9zXc7Vb2"\n' > notes.txt && git add notes.txt )
 expect_fail "a tracked file whose CONTENT looks like a plaintext secrets file" 'notes.txt: looks like a plaintext secrets file'
@@ -126,6 +126,62 @@ expect_fail "a tracked file whose CONTENT looks like a plaintext secrets file" '
 expect_ok "the template, fixture-style values and documentation"
 ( cd "$FIX_REPO" && printf 'FIX_TOKEN=Kj83hd92Lx\nFIX_DOMAIN=Vb2mN7qW9z\n' > two.txt && git add two.txt )
 expect_ok "only two names assigned (below the threshold)"
+
+# --- hiding places for plaintext inside a store that otherwise looks right (review round 1) ----------------------------
+restore_store() { cp "$T/store.good" "$FIX_REPO/secrets/secrets.enc.env"; }
+new_store "$T/plain/ok.env"; cp "$FIX_REPO/secrets/secrets.enc.env" "$T/store.good"; expect_ok "the good store"
+mutate_store() {  # mutate_store <label> <expected message> <line to append | ->  [sed expression]
+  restore_store
+  if [[ "$3" != "-" ]]; then printf '%s\n' "$3" >> "$FIX_REPO/secrets/secrets.enc.env"; fi
+  if [[ -n "${4:-}" ]]; then sed -i -E "$4" "$FIX_REPO/secrets/secrets.enc.env"; fi
+  expect_fail "$1" "$2"
+  ! grep -qE 'hunter2|my-plain-secret' <<<"$OUT" || fail "$1: the guard printed the plaintext"
+  restore_store
+}
+mutate_store "a plaintext value under a sops_-prefixed name (SOPS ignores such names)" 'sops_HUNTER is not a SOPS metadata name' 'sops_HUNTER=my-plain-secret'
+mutate_store "plaintext dressed as ciphertext" 'value of FIX_TOKEN is not encrypted' - 's/^FIX_TOKEN=.*/FIX_TOKEN=ENC[AES256_GCM,data:hunter2secret,iv:AAAA,tag:BBBB,type:str]/'
+mutate_store "a plaintext comment line" 'not a NAME=value line' '#ENC[AES256_GCM,token=hunter2-plain-secret]'
+mutate_store "a stray plaintext line" 'not a NAME=value line' '# password is hunter2'
+mutate_store "an unknown ciphertext type" 'value of FIX_TOKEN is not encrypted' - 's/^(FIX_TOKEN=ENC.*),type:str\]/\1,type:zzz]/'
+mutate_store "SOPS metadata: version removed" 'sops_version missing' - '/^sops_version=/d'
+mutate_store "SOPS metadata: last-modified removed" 'sops_lastmodified missing' - '/^sops_lastmodified=/d'
+mutate_store "SOPS metadata: the age data key removed" 'carries no age recipient entry' - '/^sops_age__list_0__map_enc=/d'
+mutate_store "SOPS metadata: the recipient removed" 'names no age recipient' - '/^sops_age__list_0__map_recipient=/d'
+mutate_store "SOPS metadata: a non-default unencrypted suffix" 'sops_unencrypted_suffix has a non-default value' - 's/^sops_unencrypted_suffix=.*/sops_unencrypted_suffix=_x/'
+mutate_store "SOPS metadata: mac_only_encrypted" 'sops_mac_only_encrypted is not a SOPS metadata name' 'sops_mac_only_encrypted=true'
+mutate_store "SOPS metadata: a recipient that is not an age key" 'is not an age public key' - 's/^(sops_age__list_0__map_recipient)=.*/\1=nobody/'
+# a real store with an EMPTY optional value (SOPS leaves an empty value as an empty string) passes
+{ for n in $fx_full_names; do echo "$n=value-$n"; done; echo "AUDIT_EXTRA_TERMS="; } > "$T/plain/empty.env"; new_store "$T/plain/empty.env"
+expect_ok "an empty optional value"
+{ for n in $fx_full_names; do [[ $n == TARGET_HOST ]] || echo "$n=value-$n"; done; } > "$T/plain/nohost.env"; new_store "$T/plain/nohost.env"
+expect_fail "a store without the required declared extra TARGET_HOST" 'required names missing from the store (by name): TARGET_HOST'
+new_store "$T/plain/ok.env"; cp "$FIX_REPO/secrets/secrets.enc.env" "$T/store.good"
+
+# --- more plaintext-file names and shapes ---------------------------------------------------------------------------
+for f in .envrc .env.local sub/.env .ENV prod.ENV; do
+  ( cd "$FIX_REPO" && mkdir -p "$(dirname "$f")" && printf 'a=1\n' > "$f" && git add -f "$f" ); expect_fail "a tracked $f" "$f: a file "  # (either wording: named .env, or the name of a plaintext secrets file)
+  ( cd "$FIX_REPO" && git rm -q --cached -f "$f" && rm -f "$f" )
+done
+( cd "$FIX_REPO" && printf 'a=1\n' > secrets.env ); expect_fail "an UNTRACKED, un-ignored *.env (git add -A would commit it)" 'secrets.env: a file with the name of a plaintext secrets file'
+rm -f "$FIX_REPO/secrets.env"
+( cd "$FIX_REPO" && printf 'x\n' > .env.j2 && git add .env.j2 ); expect_ok "a .env.j2 template"
+( cd "$FIX_REPO" && git rm -q --cached -f .env.j2 && rm .env.j2 )
+( cd "$FIX_REPO" && printf 'FIX_TOKEN: Kj83hd92Lx\nFIX_DOMAIN: Vb2mN7qW9z\nFIX_UNICODE: qW9zXc7Vb2\n' > vars.yml && git add vars.yml ); expect_fail "a YAML-style plaintext file" 'vars.yml: looks like a plaintext secrets file'
+( cd "$FIX_REPO" && printf '{"FIX_TOKEN": "Kj83hd92Lx",\n "FIX_DOMAIN": "Vb2mN7qW9z",\n "FIX_UNICODE": "qW9zXc7Vb2"}\n' > vars.yml && git add vars.yml ); expect_fail "a JSON plaintext file" 'vars.yml'
+( cd "$FIX_REPO" && printf '\xef\xbb\xbfFIX_TOKEN = Kj83hd92Lx\nFIX_DOMAIN = Vb2mN7qW9z\n- FIX_UNICODE=qW9zXc7Vb2\n' > vars.yml && git add vars.yml ); expect_fail "a BOM-prefixed plaintext file with spaced and list forms" 'vars.yml'
+( cd "$FIX_REPO" && git rm -q --cached -f vars.yml && rm vars.yml )
+expect_ok "no stray files left"
+# a store that is git-ignored would never be committed
+( cd "$FIX_REPO" && git rm -q --cached -f secrets/secrets.enc.env && printf '.env\nsecrets/\n' > .gitignore ); expect_fail "a git-ignored store" 'is git-ignored'
+( cd "$FIX_REPO" && printf '.env\n' > .gitignore && git add secrets/secrets.enc.env )
+# .sops.yaml forms
+printf 'creation_rules:\n  - path_regex: ^secrets/secrets\\.enc\\.env$\n    mac_only_encrypted: true\n    key_groups:\n      - age:\n          - %s\n' "$FIX_PUB" > "$FIX_REPO/.sops.yaml"
+expect_fail ".sops.yaml with mac_only_encrypted" 'mac_only_encrypted'
+printf 'creation_rules:\n  - path_regex: ^secrets/secrets\\.enc\\.env$\n    key_groups: [null]\n' > "$FIX_REPO/.sops.yaml"
+expect_fail ".sops.yaml with a null key group (must not crash)" 'lists no age recipient'
+printf 'creation_rules:\n  - path_regex: ^secrets/secrets\\.enc\\.env$\n    age: %s\n' "$FIX_PUB" > "$FIX_REPO/.sops.yaml"
+expect_ok ".sops.yaml with a comma-separated string of recipients"
+cp "$T/sops.good" "$FIX_REPO/.sops.yaml"
 
 # --- the guard needs no key --------------------------------------------------------------------------------------
 [[ ! -e "$FIX_HOME/.config/sops" ]] || fail "test setup: a key file exists in the fixture HOME"
