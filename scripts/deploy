@@ -55,7 +55,12 @@ import configparser  # noqa: E402
 
 import importlib.util  # noqa: E402
 
-if sys.version_info < (3, 11):    # PYTHONSAFEPATH (used to keep the repository out of a child's sys.path) needs 3.11+
+def python_supported(version_info):
+    """PYTHONSAFEPATH (used to keep the repository out of a child's sys.path) needs Python 3.11+."""
+    return tuple(version_info[:2]) >= (3, 11)
+
+
+if not python_supported(sys.version_info):
     sys.exit("deploy: Python 3.11 or newer is required")
 
 
@@ -396,8 +401,10 @@ def _sink(stream):
 def run_child(cmd, cwd, env, secret_values):
     out_sink, err_sink = _sink(sys.stdout), _sink(sys.stderr)
     proc = None
+    signalled = {"at": None}
 
     def forward(signum, _frame):
+        signalled["at"] = signalled["at"] or time.monotonic()
         if proc is None:                      # arrived before the child existed: stop cleanly (scratch is removed)
             raise SystemExit(128 + signum)
         try:
@@ -441,13 +448,18 @@ def run_child(cmd, cwd, env, secret_values):
         exited = time.monotonic()
         for t, st in zip(threads, states):
             while t.is_alive() and (st["writing"] or time.monotonic() - max(st["last"], exited) < 5):
-                t.join(timeout=0.25)
+                if signalled["at"] is not None and not st["writing"] and time.monotonic() - signalled["at"] > 5:
+                    break      # told to stop (TERM/HUP/QUIT) and nothing is being delivered: do not wait on a chatty grandchild
+                try:
+                    t.join(timeout=0.25)
+                except KeyboardInterrupt:
+                    continue   # ^C to the wrapper alone: keep delivering the output and report the child's status
         for s, handler in old.items():
             signal.signal(s, handler)
     return 128 - status if status < 0 else status
 
 
-MAX_SCRATCH_PARENT = 45   # ssh control sockets: <dir>/<10 hex>+<17> must stay under the 108-byte unix socket limit
+MAX_SCRATCH_PARENT = 40   # ssh control sockets (Ansible's, and verify-live's under TMPDIR) must stay under the 108-byte unix socket limit
 
 
 def private_scratch():
@@ -578,7 +590,8 @@ def main(argv):
         try:
             return run_child(cmd, root, env, list(values.values()))
         except (OSError, ValueError) as exc:
-            print("deploy: cannot start %s: %s" % (os.path.basename(cmd[0]), getattr(exc, "strerror", None) or type(exc).__name__), file=sys.stderr)
+            reason = "a store value or an argument contains a NUL byte" if isinstance(exc, ValueError) else (exc.strerror or type(exc).__name__)
+            print("deploy: cannot start %s: %s" % (os.path.basename(cmd[0]), reason), file=sys.stderr)
             return EX_CONFIG
     finally:
         if scratch:

@@ -58,6 +58,10 @@ grep -qE "CPDIR=$FIX_RUN/hermes-deploy-[^/ ]+/cp([ \"]|\$)" <<<"$OUT" || fail "s
 grep -qF "PROCTMP=$FIX_RUN/hermes-deploy-" <<<"$OUT" || fail "TMPDIR was not pinned to the wrapper's private scratch directory"
 # a runtime directory too long for ssh's control-socket path must not be used (it would break every deployment)
 LONG="$T/$(printf 'x%.0s' $(seq 1 40))/run"; mkdir -p "$LONG"
+# ...and one only a little over the cap (ssh's socket path must keep a margin for verify-live's longer name under TMPDIR)
+pad=$(( 43 - ${#T} - 5 )); MID="$T/$(printf 'y%.0s' $(seq 1 $pad))/run"; mkdir -p "$MID"
+FX_RUN_OVERRIDE="$MID" fx_deploy --tags localtmp
+[[ $RC -eq 0 ]] && grep -q 'LOCALTMP=' <<<"$OUT" && ! grep -qF "$MID" <<<"$OUT" || fail "a runtime directory of ${#MID} characters (over the scratch-parent cap) was used"
 FX_RUN_OVERRIDE="$LONG" fx_deploy --tags localtmp
 [[ $RC -eq 0 ]] && grep -q 'LOCALTMP=' <<<"$OUT" && ! grep -qF "$LONG" <<<"$OUT" || fail "a runtime directory too long for ssh control sockets was used as the scratch parent"
 echo "exit status equals the child's (playbook and script mode); scripts receive the store's values; the key source is not passed on; Ansible's local temp is private"
@@ -248,8 +252,12 @@ grep -q 'TMPDIR-PRIVATE' <<<"$OUT" || fail "a registered script's TMPDIR is not 
 rm -f "$FIX_REPO/re.py" "$FIX_REPO/yaml.py" "$FIX_REPO/json.py"
 # a consumer that closes the pipe (| head) must not turn a successful child into exit status 120
 ( cd / && env -i PATH="$PATH" HOME="$FIX_HOME" XDG_RUNTIME_DIR="$FIX_RUN" TMPDIR="$FIX_TMP" HERMES_SECRETS_KEY_FILE="$FIX_KEY" \
-    "$FIX_REPO/scripts/deploy" --script big-output 2>"$T/head.err" | head -c 10 >/dev/null; exit "${PIPESTATUS[0]}" ); hrc=$?
+    "$FIX_REPO/scripts/deploy" --script big-output 2>"$T/head.err" | head -c 10 >/dev/null; exit "${PIPESTATUS[0]}" ) && hrc=0 || hrc=$?
 [[ $hrc -eq 0 ]] && ! grep -q 'Exception ignored' "$T/head.err" || fail "a closed consumer changed the wrapper's exit status or printed an exception (rc=$hrc)"
+# a stderr consumer that goes away while stdout is still live must not disturb stdout or the exit status
+errout=$( ( cd / && env -i PATH="$PATH" HOME="$FIX_HOME" XDG_RUNTIME_DIR="$FIX_RUN" TMPDIR="$FIX_TMP" HERMES_SECRETS_KEY_FILE="$FIX_KEY" \
+    "$FIX_REPO/scripts/deploy" --script errclose 2> >(head -c 0) ) ) && erc=0 || erc=$?
+[[ $erc -eq 0 && "$errout" == *OUT-LATE* ]] || fail "a closed stderr consumer disturbed stdout or the exit status (rc=$erc, stdout='$errout')"
 # ^C sent to the wrapper alone: it keeps waiting for the child and reports its status (no traceback, play completes)
 # (a background job in a non-interactive shell starts with SIGINT IGNORED, which Python would then keep: reset it first,
 # or the signal below would be a no-op and this test vacuous)
@@ -258,13 +266,34 @@ rm -f "$FIX_REPO/re.py" "$FIX_REPO/yaml.py" "$FIX_REPO/json.py"
     "$FIX_REPO/scripts/deploy" --tags slow >"$T/int.out" 2>&1 ) &
 ipid=$!
 for _ in $(seq 1 60); do sleep 0.2; grep -q 'STREAM-FIRST' "$T/int.out" 2>/dev/null && break; done
-kill -INT "$ipid"; wait "$ipid"; irc=$?
+kill -INT "$ipid"; wait "$ipid" && irc=0 || irc=$?
 [[ $irc -eq 0 ]] && grep -q 'STREAM-LAST' "$T/int.out" && ! grep -q Traceback "$T/int.out" || { cat "$T/int.out" >&2; fail "SIGINT to the wrapper alone must not abort it (rc=$irc)"; }
 # the TAIL of the output must survive a slow consumer: a child that writes 125 KB and exits, read by a consumer that
 # starts reading late, must deliver every byte (the wrapper waits for a thread that is blocked WRITING)
 got=$( ( cd / && env -i PATH="$PATH" HOME="$FIX_HOME" XDG_RUNTIME_DIR="$FIX_RUN" TMPDIR="$FIX_TMP" HERMES_SECRETS_KEY_FILE="$FIX_KEY" \
     "$FIX_REPO/scripts/deploy" --script medium 2>/dev/null | ( sleep 8; wc -c ) ) )
 [[ "$got" -eq 125001 ]] || fail "output was lost behind a slow consumer ($got of 125001 bytes delivered)"
+for i in $(seq 1 10); do
+  got=$( ( cd / && env -i PATH="$PATH" HOME="$FIX_HOME" XDG_RUNTIME_DIR="$FIX_RUN" TMPDIR="$FIX_TMP" HERMES_SECRETS_KEY_FILE="$FIX_KEY" \
+      "$FIX_REPO/scripts/deploy" --script medium 2>/dev/null | wc -c ) )
+  [[ "$got" -eq 125001 ]] || fail "output tail lost with a fast consumer, run $i ($got of 125001 bytes)"
+done
+# ^C to the wrapper alone WHILE it is delivering output to a slow consumer (the drain wait) must not lose output or abort
+mkfifo "$T/fifo"; ( exec < "$T/fifo"; sleep 6; wc -c > "$T/fifo.count" ) &   # opens the fifo NOW (so the wrapper starts), reads late
+( cd / && exec env -i PATH="$PATH" HOME="$FIX_HOME" XDG_RUNTIME_DIR="$FIX_RUN" TMPDIR="$FIX_TMP" HERMES_SECRETS_KEY_FILE="$FIX_KEY" \
+    python3 -c 'import os, signal, sys; signal.signal(signal.SIGINT, signal.SIG_DFL); os.execv(sys.argv[1], sys.argv[1:])' \
+    "$FIX_REPO/scripts/deploy" --script medium >"$T/fifo" 2>"$T/fifo.err" ) &
+fpid=$!
+sleep 2; kill -INT "$fpid"; wait "$fpid" && frc=0 || frc=$?
+for _ in $(seq 1 60); do [[ -s "$T/fifo.count" ]] && break; sleep 0.5; done
+[[ $frc -eq 0 && "$(cat "$T/fifo.count" 2>/dev/null)" -eq 125001 ]] && ! grep -q Traceback "$T/fifo.err" || fail "^C during the drain wait lost output or aborted the wrapper (rc=$frc, bytes=$(cat "$T/fifo.count" 2>/dev/null))"
+# a chatty grandchild holding the pipes must not outlive a SIGTERM (the wrapper is in its drain wait then)
+( cd / && exec env -i PATH="$PATH" HOME="$FIX_HOME" XDG_RUNTIME_DIR="$FIX_RUN" TMPDIR="$FIX_TMP" HERMES_SECRETS_KEY_FILE="$FIX_KEY" \
+    "$FIX_REPO/scripts/deploy" --script chatty >"$T/chatty.out" 2>&1 ) &
+cpid=$!
+for _ in $(seq 1 50); do sleep 0.2; grep -q 'parent-done' "$T/chatty.out" 2>/dev/null && break; done
+sleep 1; kill -TERM "$cpid"; cstart=$SECONDS; wait "$cpid" || true
+(( SECONDS - cstart < 12 )) || fail "SIGTERM did not cut short the wait on a chatty grandchild ($((SECONDS - cstart)) s)"
 # a grandchild that keeps the pipes open after the child exits must not hold the wrapper (bounded wait)
 start=$SECONDS; fx_deploy --script grandchild
 [[ $RC -eq 0 ]] && grep -q 'parent-done' <<<"$OUT" || fail "the grandchild script should have returned 0 (rc=$RC)"
@@ -419,6 +448,7 @@ spec = importlib.util.spec_from_loader("deploy_mod", loader)
 mod = importlib.util.module_from_spec(spec); loader.exec_module(mod)
 env = {k: v for k, v in os.environ.items() if not k.startswith(("ANSIBLE_", "_ANSIBLE_"))}
 env["ANSIBLE_CONFIG"] = os.path.join(root, "ansible.cfg")
+assert mod.python_supported((3, 11, 0)) and mod.python_supported((3, 14, 1)) and not mod.python_supported((3, 10, 9)), "python version guard"
 problems = mod.effective_config_problems(root, env, {})
 if problems:
     print("\n".join(problems)); sys.exit(1)
