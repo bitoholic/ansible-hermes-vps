@@ -15,12 +15,14 @@ What it asserts
   * `ansible.builtin.assert`'s own `that:` list is exempt (a boolean comparison, not a value emission) — but its
     `fail_msg`/`success_msg` are scanned like any other argument, since interpolating a value into either WOULD
     print it.
-  * A `template:` task's `src:` is followed to the referenced .j2 file (resolved against the role's own
-    `templates/` directory; a `{{ ... | default('literal.j2') }}` expression is resolved via its literal default,
-    a `src:` this guard cannot resolve statically is not followed further) and that file's raw text is searched the
-    same way. A template that itself calls `lookup('template', ...)` to pull in another one (this repo's own
-    docker-compose.yml.j2, which assembles per-service fragments this way) is treated as needing suppression
-    outright, without trying to resolve the dynamic sub-lookup — a conservative default, not a proof of absence.
+  * An `ansible.builtin.template` (or its short name, `template:`) task's `src:` is followed to the referenced .j2
+    file (resolved against the role's own `templates/` directory; a `{{ ... | default('literal.j2') }}` expression
+    is resolved via its literal default — single or double quotes, any whitespace around the quotes/parens all
+    accepted — a `src:` this guard cannot resolve statically is not followed further) and that file's raw text is
+    searched the same way. A template that itself calls `lookup('template', ...)` to pull in another one (this
+    repo's own docker-compose.yml.j2, which assembles per-service fragments this way) is treated as needing
+    suppression outright, without trying to resolve the dynamic sub-lookup — a conservative default, not a proof
+    of absence.
   * `environment:` and `become_user:` are NEVER accepted as fixed by `no_log: true`, because they aren't: Ansible
     inlines both into the literal shell command its connection plugin prints verbatim at high verbosity (-vvv+),
     regardless of no_log — no_log only redacts a task's own arguments and registered result, not that separate
@@ -64,7 +66,17 @@ import yaml
 # through completely undetected, including past the environment:/become_user: hard-fail check below, which shares
 # this same pattern (found by round 3's independent review, verified with a live Jinja render).
 SECRET_RE = re.compile(r"\{\{.*?secrets\s*(?:\.\s*[A-Za-z_][A-Za-z0-9_]*|\[[^\]]+\]).*?\}\}", re.DOTALL)
-DEFAULT_JINJA_RE = re.compile(r"default\(\s*'([^']+)'\s*(?:,\s*true\s*)?\)")
+# Single or double quotes, optional whitespace before the `(` and around the literal: real Jinja/Python grammar
+# accepts all of `default('x.j2')`, `default ('x.j2')`, `default("x.j2")` identically. An earlier version of this
+# regex only accepted the single-quote, no-space form, so a `src:` written in any other valid style was silently
+# never followed (found by round 4's independent review).
+DEFAULT_JINJA_RE = re.compile(r"default\s*\(\s*['\"]([^'\"]+)['\"]\s*(?:,\s*true\s*)?\)")
+
+# The two spellings Ansible accepts for the same module: the fully-qualified name, and its short name (resolved via
+# ansible.builtin's implicit search path — extremely common in practice). An earlier version of this guard only
+# recognized the FQCN, so a task written as `template:` (valid, and never exercised in this repo's own tasks today,
+# but a realistic style choice) was silently never followed (found by round 4's independent review).
+TEMPLATE_MODULE_NAMES = ("ansible.builtin.template", "template")
 
 # Task-level keys that can never themselves emit a value: pure control flow / metadata that Ansible never
 # templates into a printed shell command or module argument. Deliberately NOT excluded (unlike an earlier version of
@@ -197,11 +209,16 @@ def check_file(path, role_dir, problems, root):
 
         scan = module_args_to_scan(task)
         leaks = contains_secret_ref(scan)
-        if not leaks and "ansible.builtin.template" in task:
-            src = task["ansible.builtin.template"].get("src", "") if isinstance(task["ansible.builtin.template"], dict) else ""
-            resolved = resolve_template_src(str(src), templates_dir)
-            if resolved and template_needs_suppression(resolved):
-                leaks = True
+        if not leaks:
+            for module_name in TEMPLATE_MODULE_NAMES:
+                if module_name not in task:
+                    continue
+                args = task[module_name]
+                src = args.get("src", "") if isinstance(args, dict) else ""
+                resolved = resolve_template_src(str(src), templates_dir)
+                if resolved and template_needs_suppression(resolved):
+                    leaks = True
+                break
         if leaks and not no_log:
             problems.append("%s: task %r references a secret without no_log: true" % (file_path, name))
 

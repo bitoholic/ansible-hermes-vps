@@ -35,6 +35,18 @@ cat > "$T/roles/leaky/templates/dynamic.j2" <<'J2'
 {% endfor %}
 J2
 
+cat > "$T/roles/leaky/templates/dq.j2" <<'J2'
+value = {{ secrets.dq_secret }}
+J2
+
+cat > "$T/roles/leaky/templates/spacedcall.j2" <<'J2'
+value = {{ secrets.spaced_call_secret }}
+J2
+
+cat > "$T/roles/leaky/templates/shortform.j2" <<'J2'
+value = {{ secrets.shortform_secret }}
+J2
+
 cat > "$T/roles/leaky/tasks/main.yml" <<'YML'
 ---
 - name: Rendered template leaks a secret without suppression
@@ -140,6 +152,40 @@ cat > "$T/roles/leaky/tasks/main.yml" <<'YML'
     - name: Violation nested inside rescue
       ansible.builtin.command:
         cmd: "echo {{ secrets.rescue_token }}"
+
+- name: A double-quoted default() must still resolve the template src
+  ansible.builtin.template:
+    src: "{{ which | default(\"dq.j2\") }}"
+    dest: /tmp/dq-output
+
+- name: A spaced default( call must still resolve the template src
+  ansible.builtin.template:
+    src: "{{ which | default ('spacedcall.j2') }}"
+    dest: /tmp/spaced-output
+
+- name: The short module name template must be followed just like the FQCN
+  template:
+    src: shortform.j2
+    dest: /tmp/shortform-output
+
+- name: A genuinely interpolated fail_msg must be caught, unlike bare prose
+  ansible.builtin.assert:
+    that:
+      - secrets.interpolated_fail_check is defined
+    fail_msg: "the value is {{ secrets.interpolated_fail_check }}"
+
+- name: A non-literal no_log expression must not be accepted as suppression
+  ansible.builtin.command:
+    cmd: "echo {{ secrets.non_literal_no_log_token }}"
+  no_log: "{{ some_flag | default(false) }}"
+YML
+
+mkdir -p "$T/roles/leaky/tasks/nested"
+cat > "$T/roles/leaky/tasks/nested/sub.yml" <<'YML'
+---
+- name: A violation in a nested tasks subdirectory must still be caught
+  ansible.builtin.command:
+    cmd: "echo {{ secrets.nested_dir_token }}"
 YML
 
 set +e
@@ -160,7 +206,13 @@ for must_flag in \
   "Looping over a literal list of secret-interpolated strings" \
   "Whitespace around the dot or bracket must not bypass detection" \
   "A secret interpolation reflowed across multiple lines must still be caught" \
-  "Violation nested inside rescue"; do
+  "Violation nested inside rescue" \
+  "A double-quoted default() must still resolve the template src" \
+  "A spaced default( call must still resolve the template src" \
+  "The short module name template must be followed just like the FQCN" \
+  "A genuinely interpolated fail_msg must be caught, unlike bare prose" \
+  "A non-literal no_log expression must not be accepted as suppression" \
+  "A violation in a nested tasks subdirectory must still be caught"; do
   grep -qF "$must_flag" <<<"$OUT" || fail "the checker did not flag: $must_flag"$'\n'"$OUT"
 done
 grep -qF "no_log CANNOT protect" <<<"$OUT" || fail "environment:/become_user: violations must say plainly that no_log does not fix them"

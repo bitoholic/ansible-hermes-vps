@@ -186,3 +186,26 @@ actually fail when its corresponding code path is reverted, not just added and t
 additions: a note on the allowlist's own fragility (a deliberate fail-safe, not a bug — reformatting an allowlisted
 expression's internal whitespace turns back into a loud failure, by design), and `roles/*/handlers/` added to the
 checker's "what this cannot verify" list (checked by hand: none currently reference `secrets.*`).
+
+## Review round 4 (independent fresh-context subagent): CHANGES REQUIRED, fixed
+
+Two more real code defects in the same soundness class rounds 1-3 already hammered on, both hand-built (not
+mutations) against the real, unmutated checker:
+- `DEFAULT_JINJA_RE` (used to resolve a `template:` task's `src:` through a `{{ ... | default('literal.j2') }}`
+  expression) only accepted single quotes with zero whitespace before the `(` — real Jinja/Python grammar accepts
+  double quotes and a space just as validly (`default ("x.j2")`), and the round's independent review built a real
+  template leak using each unaccepted style and confirmed the checker said "OK" both times, while the exact same
+  leak in the "expected" style was correctly flagged. Fixed: quotes and whitespace both now optional/either-style.
+- The template-following logic only recognized the fully-qualified `ansible.builtin.template`, never Ansible's
+  equally valid short name `template:` — a task written that way had its `src:` never resolved or scanned at all.
+  Fixed: both spellings now checked.
+
+Neither is currently exploited in the real repo (all real template tasks use the FQCN with the single-quote,
+no-space `default()` form), but the same standard applied to round 3's whitespace-regex bug applies here too.
+
+Also closed three test-coverage gaps found by fresh mutation testing (the code was already correct in all three —
+only the fixtures were missing): `ansible.builtin.assert`'s scan-exemption widened to also strip `fail_msg`/
+`success_msg` (no existing fixture used a GENUINELY interpolated fail_msg, only the always-prose one); `no_log`
+accepting any truthy value instead of requiring the literal `True` the docstring already promised (no fixture used
+a non-literal `no_log:` expression); and the recursive `tasks/**/*.yml` glob regressing to non-recursive (no fixture
+used a nested tasks subdirectory). All three verified to actually fail their corresponding mutation when reverted.
