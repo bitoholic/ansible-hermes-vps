@@ -153,3 +153,49 @@ Both findings are code/config defects (not test-only): finding 1 is a real gap i
 ticket exists to build; finding 2 is a real test-suite correctness gap that would silently validate stale or
 missing output under exactly the write-restricted conditions this ticket introduces. Both are fixed and
 re-verified; proceeding to round 2.
+
+## Review round 2 (independent fresh-context subagent): PASS — two non-blocking cleanups applied anyway
+
+Round 1's two fixes independently re-derived from scratch and confirmed sound, including the `~/.ansible/cp`
+question the round 1 fix didn't explicitly rule out: nothing in this repo ever opens a real SSH connection from a
+sandboxed, non-exempted process (every test playbook and fixture uses `connection: local`), so `~/.ansible/tmp/**`
+alone is sufficient. No blocking findings. Two cheap, non-blocking cleanups were suggested and applied:
+
+1. `roles/tailscale/tasks/main.yml` hardcoded `/tmp/tailscale-install.sh` for a production role task (not a test
+   fixture) — reachable only via `tests/check-tailscale.sh`'s opt-in `TAILSCALE_LIVE=1` path, which this epic's own
+   hard rule keeps out of automated testing (operator-validated on the real VPS). Non-blocking (a portability gap,
+   not a leak), fixed anyway by switching to `ansible_env.TMPDIR` with the same `/tmp` fallback.
+2. The ticket's own "Implementation / Files added/changed" summary (line 37) still named the pre-round-1, too-broad
+   `~/.ansible/**` value instead of the fixed `~/.ansible/tmp/**` — a stale cross-reference in this file's own
+   narrative, not in the enforced settings. Corrected.
+
+Also added a documentation-only residual note to `.claude/README.md` (stale `ansible-tmp-*` fixture residue isn't
+covered by `denyRead`, but never holds a real secret) per round 2's informational (non-defect) observation.
+Re-verified: full `tests/check-deploy-wrapper.sh` and `tests/lint.sh` reruns both clean. Proceeding to round 3.
+
+## Review round 3 (independent fresh-context subagent): CHANGES REQUESTED — one documentation gap fixed
+
+One blocking (documentation-only) finding: `.claude/README.md`'s Tier 1 limit section and its "what protects the
+exempted wrapper" list were written entirely in terms of *playbook* mode's protections (fixed flag set, pinned
+Ansible config) and never named *registered-script* mode as an equally — arguably more easily — reachable path to
+the same limit. `scripts/deploy`'s registry loader (`hermes_secrets.load_registry`) does no integrity checking on
+`scripts/registered-scripts.conf` or a registered script's own contents (only path-containment, existence, and the
+executable bit), so an agent can add a small new script plus one registry line and reach the full decrypted
+environment with no sandbox, no argument-shape constraints, and no config pinning at all — a real gap in
+criterion #14's "documented as a list" requirement, since a reader of the README alone would come away with a
+too-narrow picture of the wrapper's attack surface. **Fixed**: added an explicit caveat to list item 2 and a new
+paragraph under the Tier 1 limit section naming `registered-scripts.conf` and registered scripts specifically as
+reaching the identical limit by a smaller edit. Documentation-only — no settings or code change, no
+re-verification of live sandbox behavior needed. Independent review also confirmed the round-2 `tailscale` fix is
+correct (site.yml's tailscale play sets `gather_facts: true` and `become: true`, so `ansible_env.TMPDIR` is
+populated in the same execution context that consumes it, and the fallback degrades to the exact prior behavior
+when unset) and found no further hardcoded `/tmp` paths anywhere in the repository.
+
+**Ticket #08 is closed** after 3 review rounds — round 3 found only a documentation completeness gap (no code or
+settings defect), now fixed. All 9 acceptance criteria hold: mechanism verified from current docs; both wrapper
+invocation shapes exempted by command name; filesystem denyRead covers the key/`.env` for everything but the
+wrapper; permission rules allow only vetted shapes; what protects the exempted wrapper is documented as a list,
+now including registered-script mode's narrower protection; an end-to-end check under the real sandbox is
+recorded (with the real-VPS-SSH portion deliberately operator-deferred, consistent with this epic's standing rule);
+the accidents-not-a-determined-actor framing is stated; the Tier 2 upgrade path is documented with no wrapper
+rewrite required; no secrets or operator-specific paths appear in the settings or documentation.

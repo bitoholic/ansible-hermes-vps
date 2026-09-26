@@ -90,7 +90,11 @@ Being exempted from the sandbox is not "safe by default" — the wrapper is trus
    unsandboxed at all; nothing else is.
 2. **The wrapper's own refusals** (epic 22 #01) — it parses its own arguments and refuses extra
    variables, ad-hoc modules, foreign playbooks, other inventories/connections, and anything outside
-   its fixed flag set, regardless of what an agent asks it to do.
+   its fixed flag set, regardless of what an agent asks it to do. This applies to *playbook mode*.
+   *Registered-script mode* (`scripts/deploy --script NAME`) has a narrower protection here: the
+   wrapper only checks that `NAME` resolves, inside the repository, to an existing, executable file
+   listed in the committed `scripts/registered-scripts.conf` — it does not vet, hash, or sign the
+   script's own contents. See the Tier 1 limit below for what this means in practice.
 3. **The pinned Ansible configuration and cleared environment** (epic 22 #01) — inherited
    `ANSIBLE_*` settings are cleared, the effective configuration is refused if it would make Ansible
    write a log, a callback's output, or a persistent fact cache to disk, and Ansible's own local temp
@@ -107,6 +111,21 @@ redactor. This is a deliberate, accepted limit, not an oversight: the age key li
 machine the agent runs commands on, so Tier 1 stops *accidents* (reading the key file, dumping the
 environment, an unredacted diff) but not a *determined actor* with edit access to this repository's
 own code. Closing this gap is exactly what Tier 2 is for.
+
+**Registered-script mode is exactly as unprotected, and easier to reach.** `scripts/deploy`'s registry
+loader (`hermes_secrets.load_registry`) does no integrity checking at all — no checksum, no signature —
+on either `scripts/registered-scripts.conf` or the script file a registered name points to; it only
+checks that the resolved path stays inside the repository, exists, and is executable. An agent can
+`Write` a brand-new script anywhere under this repo, add one line to `registered-scripts.conf`
+registering it, and run it via `scripts/deploy --script <name>` — which is excluded from the sandbox by
+command name exactly like every other `scripts/deploy` invocation, and pre-approved by
+`permissions.allow: ["Bash(scripts/deploy:*)"]` with no prompt. Unlike playbook mode, a registered
+script has none of the fixed-flag-set or Ansible-configuration constraints — it can do anything a shell
+script can do with the fully decrypted secrets environment. This is not a narrower case of the wrapper-
+editing limit above; it is the *same* limit reached by a smaller edit (one new file plus one registry
+line, vs. patching the wrapper's own argument-parsing/refusal logic), and is called out separately here
+because it would be easy to read the "wrapper's own refusals" protection as covering both invocation
+shapes equally — it does not.
 
 ## Tier 2 upgrade path (documented, not built — out of scope for this epic)
 
