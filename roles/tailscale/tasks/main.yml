@@ -26,18 +26,24 @@
   changed_when: false
   failed_when: false
 
+- name: Determine the remote temp directory for the install script
+  tags: [tailscale]
+  ansible.builtin.set_fact:
+    tailscale_install_script: "{{ (ansible_env.TMPDIR | default('/tmp', true)) }}/tailscale-install.sh"
+  when: tailscale_present.rc != 0
+
 - name: Download the official Tailscale install script
   tags: [tailscale]
   ansible.builtin.get_url:
     url: https://tailscale.com/install.sh
-    dest: /tmp/tailscale-install.sh
+    dest: "{{ tailscale_install_script }}"
     mode: '0755'
   when: tailscale_present.rc != 0
 
 - name: Install Tailscale
   tags: [tailscale]
   ansible.builtin.command:
-    cmd: /tmp/tailscale-install.sh
+    cmd: "{{ tailscale_install_script }}"
   when: tailscale_present.rc != 0
   changed_when: true
 

@@ -34,8 +34,9 @@ own examples: `"docker"`, `"kubectl"`). Full rationale recorded in `.claude/READ
 - `.claude/settings.json` (new, committed): `sandbox.enabled: true`; `excludedCommands: ["scripts/deploy"]`
   (criterion #2 — both of the wrapper's invocation shapes match, since the exemption is by command name, not
   argument shape); `filesystem.denyRead` for `~/.config/sops/age/**`, `~/.ssh/**`, `./.env` (criterion #3);
-  `filesystem.allowWrite` for `/run/user/**`, `/dev/shm/**`, `~/.ansible/**` (see "Sandbox-caused regression" below —
-  needed for any non-exempted Ansible run to create its own scratch/temp state, not part of the original design);
+  `filesystem.allowWrite` for `/run/user/**`, `/dev/shm/**`, `~/.ansible/tmp/**` (see "Sandbox-caused regression"
+  below — needed for any non-exempted Ansible run to create its own scratch/temp state, not part of the original
+  design; narrowed from an initial, too-broad `~/.ansible/**` by round 1's review, see that section);
   `permissions.allow`/`deny` for the wrapper's own invocation and the secrets helper's non-decrypting subcommands
   vs. its decrypting ones, plus direct `sops`/`env`/`printenv` (criterion #4).
 - `.claude/README.md` (new, committed): the verified mechanism, the full deny/allow rationale, what protects the

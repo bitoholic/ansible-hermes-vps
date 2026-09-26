@@ -74,6 +74,12 @@ scoped to exactly the subdirectory the observed failure needed, `~/.ansible/tmp/
 Found by epic 22 #08's own round 1 review, not the original design — recorded here per that review's
 own finding.
 
+One residual noted by round 2's review: `~/.ansible/tmp` is not in `denyRead`, so stale `ansible-tmp-*`
+residue left behind by a killed or crashed non-exempted `ansible-playbook` run could later be read back
+by any sandboxed Bash command. This never holds a real secret — the exempted wrapper's own runs never
+write there at all (see above), so anything that could ever land there comes only from this repo's own
+local test fixtures and their canary values, not the real store.
+
 ## What actually protects the exempted wrapper, once exempted (the list this ticket's own
 acceptance criteria ask for)
 
