@@ -39,6 +39,22 @@ What it asserts
     origin — there is no file-reference equivalent for "become this user").
 
 What this CANNOT verify
+  * ANY indirection that reaches `secrets` without the literal token `secrets` immediately followed by `.`/`[`
+    somewhere in the task's own YAML — this is a fundamental limit of static regex/text matching, not a specific
+    bug to patch away, and this guard does not attempt to enumerate every such technique. Confirmed, concrete
+    example (round 6's independent review, reproduced against real ansible-core): Ansible's `vars` magic variable
+    (a dict of every variable in scope, including the resolved `secrets` fact) and the `vars` lookup plugin render
+    a secret identically via `{{ vars['secrets']['NAME'] }}`, `{{ vars['secrets'].NAME }}`, or
+    `{{ lookup('vars', 'secrets').NAME }}` — none of which this guard's `SECRET_RE` matches, since the literal
+    token `secrets` never appears followed by `.`/`[` in any of them. This defeats BOTH the generic no_log scan and
+    the `environment:`/`become_user:` hard-fail path the same way. Not currently exploited anywhere in this repo
+    (checked by hand: no `vars[` or `lookup('vars', ...)` usage exists). Deliberately NOT chased further: Jinja has
+    an open-ended supply of indirection techniques beyond this one (`hostvars`, a dynamically-built attribute name,
+    a custom or piped lookup, string concatenation reconstructing the name `secrets` at render time...) — patching
+    each one as it's found would not converge on a complete static guard, only on a longer list of enumerated
+    special cases. If a future task is EVER seen using `vars`/`hostvars`/a lookup plugin anywhere near `secrets`,
+    treat that as a signal to review it by hand, the same way `environment:`/`become_user:` already ask for manual
+    judgment on their own accepted, undefended cases above.
   * A secret that reaches a rendered file, a registered result or a command's arguments WITHOUT the task's own YAML
     literally referencing `secrets.*` — for example a value read back from a file that a PRIOR task wrote from a
     secret (this repo has exactly one such case, roles/owntracks/tasks/parse_htpasswd.yml's `slurp` of a

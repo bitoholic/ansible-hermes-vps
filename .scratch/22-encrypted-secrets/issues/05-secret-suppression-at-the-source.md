@@ -242,3 +242,41 @@ but not individually disclosed. Docstring updated to say so.
 This is the fifth real-defect-finding round in the same file, each narrower than the last. The operator was
 consulted directly at this point (the protocol's own 5-round cap) and chose to fix this finding and run one more
 review round rather than accept it as a documented limitation or close the ticket as-is.
+
+## Review round 6 (independent fresh-context subagent, past the protocol's own cap at the operator's explicit
+choice): CHANGES REQUIRED — accepted as a documented limitation, no further code change
+
+Found one more real, reproduced bypass, but of a qualitatively different kind than rounds 1–5: Ansible's `vars`
+magic variable (a dict of every variable in scope, including the resolved `secrets` fact) and the `vars` lookup
+plugin render a secret identically via `{{ vars['secrets']['NAME'] }}`, `{{ vars['secrets'].NAME }}`, or
+`{{ lookup('vars', 'secrets').NAME }}` — none of which contain the literal token `secrets` followed by `.`/`[`, so
+none match `SECRET_RE`. This defeats both the generic no_log scan and the `environment:`/`become_user:` hard-fail
+path the same way. Reproduced against real ansible-core and against the real, unmutated checker. Not currently
+exploited anywhere in the real repo.
+
+Unlike rounds 1–5 — each a specific, enumerable syntactic variant (whitespace, quoting, module short names, lookup
+aliases, include forms) — this is an INDIRECTION mechanism, and Jinja/Ansible has an open-ended supply of those
+(`vars`, `hostvars`, a dynamically-built attribute name, a custom or piped lookup, string concatenation
+reconstructing the name `secrets` at render time...). Patching each one as found would not converge on a complete
+static guard, only a longer list of enumerated special cases — a fundamentally different situation from rounds
+1–5's genuinely closable gaps. Presented to the operator as an explicit strategic choice (fix this one instance and
+continue the review loop, vs. accept the general class as a documented limit) rather than another automatic round;
+the operator chose to accept it as a documented, honest limitation — the same treatment this ticket already gives
+`environment:`/`become_user:`'s own undefended cases — rather than continue chasing individual indirection
+techniques. The checker's own docstring now states this plainly, names the concrete `vars`/`lookup('vars', ...)`
+example, and asks that any FUTURE task seen using `vars`/`hostvars`/a lookup plugin anywhere near `secrets` be
+reviewed by hand, the same way `environment:`/`become_user:` already ask for manual judgment on their own cases. No
+code change beyond the docstring; the checker's existing detection and all prior rounds' fixes are unaffected and
+continue to hold for everything they were built to catch.
+
+Two further minor, non-blocking observations from the same round (checker reports success on a nonexistent or
+non-directory `--root`, and silently skips a YAML file whose top level isn't a task list) were noted but left
+unaddressed at the operator's direction — not currently reachable by any real invocation of this checker (the one
+test that uses it always passes either the correct real root or a `mktemp -d` result), and a file shaped that way
+would fail `ansible-playbook --syntax-check` regardless.
+
+**Ticket #05 is closed.** Six review rounds (five within protocol, one beyond it at the operator's explicit choice)
+produced five real, fixed code defects plus one accepted, documented indirection limitation — all in
+`scripts/check_secret_suppression.py`; the production role code itself (Tailscale, resolver, compose validation,
+the `no_log` sweep, `owntracks`, `backup`) held up unchanged since round 0 across every round's fresh production-code
+audits.
