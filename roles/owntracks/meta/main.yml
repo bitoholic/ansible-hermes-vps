@@ -1,6 +1,8 @@
 ---
-# OwnTracks resolves the htpasswd file's ownership from wiki_volume_uid/gid before
-# the docker role renders the stack that bind-mounts it, so it pulls wiki_volume
-# itself (same seam as the docker role, epic 12 #08 Part B).
+# OwnTracks needs wiki_volume_uid/gid to own its own storage/config directories (tasks/main.yml's two
+# `wiki_volume: tasks_from: ensure_directory` calls), so it pulls wiki_volume itself (same seam as the docker
+# role, epic 12 #08 Part B). NOT for the htpasswd file's own ownership — corrected epic 22 #07 review round 2:
+# that file has never been owned by wiki_volume_uid/gid (it wasn't set at all until this ticket made it
+# root:root explicitly), and no container has bind-mounted it since an earlier cleanup removed that mount.
 dependencies:
   - role: wiki_volume
