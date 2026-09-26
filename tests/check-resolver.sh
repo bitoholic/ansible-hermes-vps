@@ -32,7 +32,7 @@ ansible-playbook tests/test_resolver.yml --check -e secrets_enforce_required=fal
 echo "== resolver fails fast on a missing required secret (--check path) =="
 # For each required secret, unset exactly that one (everything else remains
 # exported) and assert the resolver fails fast naming it in the failure.
-LOG=/tmp/hermes-resolver-fail.log
+LOG="${TMPDIR:-/tmp}/hermes-resolver-fail.log"
 for pair in "AUTHELIA_ADMIN_PASSWORD_HASH:authelia_admin_password_hash" \
             "OWNTRACKS_ADMIN_PASSWORD:owntracks_admin_password" \
             "SYNCPLAY_PASSWORD:syncplay_password" \

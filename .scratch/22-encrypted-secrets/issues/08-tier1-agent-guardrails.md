@@ -74,8 +74,15 @@ script.
    inherit the real wrapper's trust) failed with `Read-only file system: '/home/jacek/.ansible/tmp/...'`: Ansible's
    own local-temp fallback, and `scripts/deploy`'s own `private_scratch()` preference order
    (`XDG_RUNTIME_DIR`/`/dev/shm`/`/tmp`), both hit the sandbox's baseline write restrictions, none of which this
-   ticket had configured. **Fixed** by adding `/run/user/**`, `/dev/shm/**`, `~/.ansible/**` to
-   `sandbox.filesystem.allowWrite`.
+   ticket had configured. **Originally fixed** (before round 1 review) by adding `/run/user/**`, `/dev/shm/**`,
+   `~/.ansible/**` to `sandbox.filesystem.allowWrite` — **round 1's review correctly flagged `~/.ansible/**` as too
+   broad**: it also grants sandboxed write access to `~/.ansible/collections`, one of exactly two paths
+   `scripts/deploy`'s own `effective_collections_path()`/`CFG_PATH_VALUES` explicitly trusts and loads collections
+   from on its real, exempted run — a sandboxed process could plant a malicious collection there, invisible to
+   `git diff`, for the next real deploy to load with full secrets access. **Re-fixed** by narrowing to
+   `~/.ansible/tmp/**` only, the exact subdirectory the observed failure needed (see `.claude/README.md`'s new "Why
+   `allowWrite` is scoped to `~/.ansible/tmp/**`" section for the full reasoning); re-verified via a clean rerun of
+   both `tests/check-deploy-wrapper.sh` and the full `tests/lint.sh`.
 
 2. **Hardcoded `/tmp/...` paths in the pre-existing test suite.** After fix 1, `tests/lint.sh` failed at
    `ansible-playbook --syntax-check site.yml >/tmp/hermes-syntax.log`: `Read-only file system`. Bare `/tmp` (as
@@ -114,3 +121,34 @@ run directly, independent of any Bash sandbox restriction — the string literal
 binary, so no permission setting could have changed the outcome. Proceeding is safe: after the binary upgrade, the
 exact same test (`tests/check-deploy-wrapper.sh`'s `SOPS_AGE_KEY_CMD` assertion) passes cleanly, confirming the
 wrapper's Tier 2 passthrough design already worked correctly and only the local validation tool was stale.
+
+## Review round 1 (independent fresh-context subagent): CHANGES REQUESTED — both findings fixed
+
+All 9 checklist items independently verified as PASS against the actual settings/README content (not just the
+ticket's own claims) — including a second, independent re-fetch of the sandboxing docs, independent enumeration of
+all 8 `scripts/secrets` subcommands against the allow/deny lists, a direct text comparison of the Tier 2 docstring
+claim, and independent confirmation of the sops 3.10.0/`SOPS_AGE_KEY_CMD` changelog claim. Two blocking findings:
+
+1. **A genuine, undisclosed security regression**: `sandbox.filesystem.allowWrite: ["~/.ansible/**"]` (added to fix
+   the write-restriction regression described above) also grants sandboxed write access to
+   `~/.ansible/collections`, a path the exempted wrapper explicitly trusts for collection loading on its real run —
+   letting a sandboxed process plant a malicious collection there for the next real deploy to load, unprotected by
+   anything in the wrapper's own `PLUGIN_DIR_NAMES` scan (which only walks the repo tree) and invisible to
+   `git diff`. **Fixed**: narrowed to `~/.ansible/tmp/**`, the exact subdirectory the original failure needed;
+   `.claude/README.md` gained a new section explaining why the broader form was wrong and what the narrower form
+   still permits. Re-verified: full `tests/check-deploy-wrapper.sh` and `tests/lint.sh` reruns both clean.
+2. **An incomplete sweep**: four `check-*.sh` scripts (`check-tailnet-caddy-access.sh`,
+   `check-second-wave-services.sh`, `check-cloudflare-proxied-ingress.sh`, `check-custom-services.sh`) still
+   hardcoded `/tmp/docker_compose_test/docker-compose.yml` — now mismatched with `test_docker_compose.yml`'s fixed
+   `${TMPDIR:-/tmp}/docker_compose_test` render location — and `check-resolver.sh` hardcoded
+   `/tmp/hermes-resolver-fail.log` in the identical pattern this ticket otherwise fixed everywhere else. **Fixed**:
+   all five switched to the same `${TMPDIR:-/tmp}` convention. A repo-wide re-sweep after the fix found no further
+   occurrences — the remaining `/tmp/...` literals in `tests/check-secret-suppression.sh` (inert fixture text
+   scanned only by a static analyzer) and in `test_boot_ordering.yml`/`test_docker_user_rules.yml` (usage-comment
+   examples whose real callers already pass a `mktemp -d` path) were independently confirmed as non-issues by the
+   same review.
+
+Both findings are code/config defects (not test-only): finding 1 is a real gap in the security boundary this
+ticket exists to build; finding 2 is a real test-suite correctness gap that would silently validate stale or
+missing output under exactly the write-restricted conditions this ticket introduces. Both are fixed and
+re-verified; proceeding to round 2.

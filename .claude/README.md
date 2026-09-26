@@ -50,6 +50,30 @@ never touch the key at all: `check` (reads only the store's ciphertext structure
 (creates a *new* identity; never reads an existing one, and `age-keygen` itself already refuses to
 overwrite one — see epic 22 #04's own notes).
 
+## Why `allowWrite` is scoped to `~/.ansible/tmp/**`, not all of `~/.ansible`
+
+The sandbox denies writes outside a small allowlist by default. A *sandboxed* (non-exempted)
+`ansible-playbook` invocation — any of this repo's own local test playbooks (`tests/test_*.yml`,
+run directly by `tests/lint.sh`, never through `scripts/deploy`) or a throwaway fixture copy of the
+wrapper invoked by absolute path (`tests/support/deploy-fixture.sh`, deliberately outside
+`excludedCommands` — a fixture copy must not inherit the real wrapper's trust) — has no scratch
+directory pinned for it the way the exempted wrapper pins its own (`ANSIBLE_LOCAL_TEMP` under a
+private, wrapper-owned directory; see below), so it falls back to Ansible's own default local-temp
+location, `~/.ansible/tmp`. Without write access there, any such run fails outright
+(`Read-only file system: '~/.ansible/tmp/...'`), which is why this entry exists at all.
+
+It is **not** `~/.ansible/**`, because `~/.ansible/collections` is one of exactly two paths (`scripts/deploy`'s own `CFG_PATH_VALUES`, the other being `/usr/share/ansible/collections`) the exempted wrapper
+explicitly trusts and loads Ansible collections from on its real, unsandboxed run
+(`effective_collections_path()` → `ANSIBLE_COLLECTIONS_PATH`). Granting sandboxed write access to that
+same tree would let an untrusted sandboxed command plant or overwrite a collection there — invisible to
+`git diff`, since nothing under `~/.ansible` is part of this repository — that the *next real deploy*
+would then load with the full decrypted secrets environment. That is a strictly worse bypass than the
+documented Tier 1 limit below (which at least requires editing a tracked file), so `allowWrite` is
+scoped to exactly the subdirectory the observed failure needed, `~/.ansible/tmp/**`, leaving
+`~/.ansible/collections` (and everything else under `~/.ansible`) outside the sandboxed write surface.
+Found by epic 22 #08's own round 1 review, not the original design — recorded here per that review's
+own finding.
+
 ## What actually protects the exempted wrapper, once exempted (the list this ticket's own
 acceptance criteria ask for)
 

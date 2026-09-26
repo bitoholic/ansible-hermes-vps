@@ -32,7 +32,7 @@ echo "== custom services guard (owntracks + syncplay) =="
 ansible-playbook tests/test_docker_compose.yml
 echo "docker compose render OK"
 if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
-  docker compose -f /tmp/docker_compose_test/docker-compose.yml config -q
+  docker compose -f "${TMPDIR:-/tmp}/docker_compose_test/docker-compose.yml" config -q
   echo "docker compose config OK"
 else
   echo "SKIP docker compose config (docker not available)"
