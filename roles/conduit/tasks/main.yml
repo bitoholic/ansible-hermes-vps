@@ -39,7 +39,7 @@
     dest: "{{ conduit_compose_dir }}/conduit.toml"
     owner: llm_wiki
     group: llm_wiki
-    mode: '0644'
+    mode: '0600'   # epic 22 #07: was 0644 (world-readable); the conduit container runs as llm_wiki, owner-only suffices
   no_log: true   # bakes in the registration secret
 
 # Bot provisioning (@hermes registration) moved to tasks/provision.yml (epic 16, #01)

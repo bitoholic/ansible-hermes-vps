@@ -18,18 +18,25 @@
         state: directory
         mode: '0755'
   tasks:
+    # mode matches the real role task (roles/conduit/tasks/main.yml) — epic 22 ticket #07.
     - ansible.builtin.template:
         src: "{{ playbook_dir }}/../roles/conduit/templates/conduit.toml.j2"
         dest: "{{ conduit_compose_dir }}/conduit.toml"
+        mode: '0600'
     # legacy per-role compose template removed (ticket 07)
     - ansible.builtin.slurp:
         path: "{{ conduit_compose_dir }}/conduit.toml"
       register: rendered_toml
+    - ansible.builtin.stat:
+        path: "{{ conduit_compose_dir }}/conduit.toml"
+      register: conduit_toml_stat
     - ansible.builtin.assert:
         that:
           - "'registration_token = \"test-reg-secret\"' in (rendered_toml.content | b64decode)"
           - "'allow_federation = false' in (rendered_toml.content | b64decode)"
           - "'allow_registration = true' in (rendered_toml.content | b64decode)"
+          - conduit_toml_stat.stat.mode == '0600'
         fail_msg: >-
           Conduit render invariants violated: registration token must come from the
-          shared secret (not a literal), federation must stay off, and federation is off.
+          shared secret (not a literal), federation must stay off, and federation is off,
+          and conduit.toml must be mode 0600 (epic 22 #07: was 0644, world-readable).

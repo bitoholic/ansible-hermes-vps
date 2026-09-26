@@ -41,4 +41,14 @@ fi
 grep -q "backup_sync sync" "$ROLE/templates/llm-wiki-watcher.service.j2" || { echo "FAIL: watcher ExecStart does not call 'backup_sync sync'"; exit 1; }
 grep -q "create-pr" "$MAIN" || { echo "FAIL: cron does not call 'backup_sync create-pr'"; exit 1; }
 
+# 5. epic 22 #07: the watcher service unit bakes in a real GitHub token in its Environment= line;
+# it must deploy root:root 0600, not the systemd-unit-conventional 0644 (world-readable) — this role's
+# own test suite is entirely static (no Ansible render here), so the assertion is on the task itself.
+if ! awk '/Deploy llm-wiki watcher service unit/,/no_log: true/' "$MAIN" | grep -q "mode: '0600'"; then
+  echo "FAIL: llm-wiki-watcher.service must render mode 0600 (bakes in a real GitHub token)"; exit 1
+fi
+if ! awk '/Deploy llm-wiki watcher service unit/,/no_log: true/' "$MAIN" | grep -q "owner: root"; then
+  echo "FAIL: llm-wiki-watcher.service must render owner: root"; exit 1
+fi
+
 echo "backup role adapter guard OK"

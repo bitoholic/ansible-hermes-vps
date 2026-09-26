@@ -46,12 +46,17 @@
     group: "{{ gateway_caddyfile_group }}"
     mode: '0775'
 
+# Epic 22 #07: root:root 0600, not world-readable — bakes in route.basic_auth_hash and the stack domain. The caddy
+# container itself has no `user:` directive (roles/gateway/files/Dockerfile's own comment confirms it still runs as
+# root), so root-only is exactly its actual reader, not a guess.
 - name: Deploy Caddyfile (gateway adapter)
   tags: [gateway]
   ansible.builtin.template:
     src: Caddyfile.j2
     dest: "{{ gateway_caddyfile_dir }}/Caddyfile"
-    mode: '0644'
+    owner: root
+    group: root
+    mode: '0600'
   no_log: true   # interpolates route.basic_auth_hash (owntracks) and secrets.acme_email/silverbullet_domain
   notify: Restart caddy
 

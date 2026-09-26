@@ -109,12 +109,18 @@
     state: present
     driver: bridge
 
+# Epic 22 #07: root:docker, not world-readable — this file bakes in every enabled service's secrets as plain
+# environment values. root and the docker group (the admin user is already a member, see "Ensure admin user is in
+# the docker group" above) can both read it; `docker compose` itself parses this file client-side as the invoking
+# user, so group-read is what keeps that working, not root alone.
 - name: Render consolidated docker-compose.yml
   tags: [docker]
   ansible.builtin.template:
     src: docker-compose.yml.j2
     dest: "{{ docker_compose_dir }}/docker-compose.yml"
-    mode: '0644'
+    owner: root
+    group: docker
+    mode: '0640'
   no_log: true   # every enabled service fragment interpolates secret values (API tokens, passwords) into this file
 
 # Epic 22 #05: `--quiet` validates without printing the fully-resolved, secret-bearing config to stdout (it still

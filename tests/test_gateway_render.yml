@@ -71,12 +71,25 @@
       vars:
         gateway_routes: "{{ silverbullet_gateway_publish + hermes_gateway_publish + authelia_gateway_publish + conduit_gateway_publish + owntracks_gateway_publish + beszel_gateway_publish + adguard_gateway_publish }}"
 
+    # mode matches the real role task (roles/gateway/tasks/main.yml) — epic 22 #07.
     - name: Render the gateway Caddyfile adapter
       ansible.builtin.template:
         src: "{{ playbook_dir }}/../roles/gateway/templates/Caddyfile.j2"
         dest: /tmp/gateway_test_render/Caddyfile
+        mode: '0600'
       vars:
         gateway_routes: "{{ silverbullet_gateway_publish + hermes_gateway_publish + authelia_gateway_publish + conduit_gateway_publish + owntracks_gateway_publish + beszel_gateway_publish + adguard_gateway_publish }}"
+
+    - name: Stat rendered Caddyfile
+      ansible.builtin.stat:
+        path: /tmp/gateway_test_render/Caddyfile
+      register: caddyfile_stat
+
+    - name: Assert the Caddyfile is not world-readable (epic 22 #07)
+      ansible.builtin.assert:
+        that:
+          - caddyfile_stat.stat.mode == '0600'
+        fail_msg: "Caddyfile must be mode 0600 (root:root) — it bakes in route.basic_auth_hash and the stack domain"
 
     # Regression guard removed — the template change (moving Conduit from hardcoded block to
     # gateway loop, adding tls_mode/port fields, and adding matrix. prefix) is an intentional

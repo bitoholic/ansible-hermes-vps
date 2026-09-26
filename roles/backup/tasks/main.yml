@@ -155,12 +155,18 @@
     dest: /etc/systemd/system/llm-wiki-watcher.path
     mode: '0644'
 
+# Epic 22 #07: found during the ticket's own audit, not in the original 3 files it named — this unit's
+# Environment= line bakes in a real GitHub token, and systemd unit files under /etc/systemd/system/ are
+# conventionally 0644 (this one was too), meaning any local account could read the token with a plain `cat`.
+# systemd itself always runs as root and reads this file regardless of mode, so root:root 0600 costs nothing.
 - name: Deploy llm-wiki watcher service unit
   tags: [backup]
   ansible.builtin.template:
     src: llm-wiki-watcher.service.j2
     dest: /etc/systemd/system/llm-wiki-watcher.service
-    mode: '0644'
+    owner: root
+    group: root
+    mode: '0600'
   no_log: true   # interpolates secrets.hermes_default_github_token
 
 - name: Enable and start llm-wiki watcher path

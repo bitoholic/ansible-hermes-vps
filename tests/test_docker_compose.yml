@@ -94,11 +94,25 @@
         mode: '0755'
 
   tasks:
+    # Epic 22 #07: mode matches the real role task (roles/docker/tasks/main.yml) — root:docker in a real
+    # deploy; this local render can't set group ownership without root/a "docker" group existing on the test
+    # host, so only mode is asserted below (the same value regardless of who owns the file).
     - name: Render consolidated docker-compose.yml
       ansible.builtin.template:
         src: "{{ playbook_dir }}/../roles/docker/templates/docker-compose.yml.j2"
         dest: "{{ docker_compose_dir }}/docker-compose.yml"
-        mode: '0644'
+        mode: '0640'
+
+    - name: Stat rendered docker-compose.yml
+      ansible.builtin.stat:
+        path: "{{ docker_compose_dir }}/docker-compose.yml"
+      register: compose_stat
+
+    - name: Assert docker-compose.yml is not world-readable (epic 22 #07)
+      ansible.builtin.assert:
+        that:
+          - compose_stat.stat.mode == '0640'
+        fail_msg: "docker-compose.yml must be mode 0640 (root:docker), not world-readable — it bakes in every enabled service's secrets"
 
     - name: Slurp rendered docker-compose.yml for assertions
       ansible.builtin.slurp:
