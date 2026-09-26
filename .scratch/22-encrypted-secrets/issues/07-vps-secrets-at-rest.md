@@ -59,3 +59,18 @@ tolerate the tightened permissions (in particular: does `docker compose` truly w
 membership alone, does Caddy's own bind-mount read succeed at 0600 root-owned) is confirmed only by an attended
 real deploy, not by anything in this repo's test suite — noted here per the criterion's own framing, not treated
 as done.
+
+## Review round 3 (independent fresh-context subagent): PASS
+
+A genuinely independent, from-scratch audit — not a re-check of the existing table — built by grepping every
+`roles/*/templates/**/*.j2` for `secrets\.` and tracing each hit back to its rendering task, enumerating every
+`cron`/`lineinfile`/`blockinfile`/`htpasswd` use repo-wide, and checking `site.yml` itself directly (including the
+sudoers file at `/etc/sudoers.d/{{ secrets.admin_username }}`, already `root:root 0440`, and the SSH
+`authorized_key` write, a public key, not secret material) — produced the same 11-row set the audit table already
+documented, with no further code defects and no further documentation gaps. Two candidates traced to ground and
+correctly excluded (`ssh_hardening`'s `AllowUsers` line, the sudoers file) since they only interpolate a username,
+not secret material, consistent with the repo's own established non-credential treatment of `admin_username`
+elsewhere. All 5 acceptance criteria hold under fresh verification; rounds 1-2's fixes are intact with no
+regressions.
+
+**Ticket #07 is closed.**
