@@ -44,10 +44,13 @@ grep -q "create-pr" "$MAIN" || { echo "FAIL: cron does not call 'backup_sync cre
 # 5. epic 22 #07: the watcher service unit bakes in a real GitHub token in its Environment= line;
 # it must deploy root:root 0600, not the systemd-unit-conventional 0644 (world-readable) — this role's
 # own test suite is entirely static (no Ansible render here), so the assertion is on the task itself.
-if ! awk '/Deploy llm-wiki watcher service unit/,/no_log: true/' "$MAIN" | grep -q "mode: '0600'"; then
+# Anchored to the start of the line (mod indentation): a decoy mention inside a comment on an unrelated line in
+# this same range would not satisfy this, only the real YAML field.
+WATCHER_TASK="$(awk '/Deploy llm-wiki watcher service unit/,/no_log: true/' "$MAIN")"
+if ! grep -qE "^\s*mode: '0600'" <<<"$WATCHER_TASK"; then
   echo "FAIL: llm-wiki-watcher.service must render mode 0600 (bakes in a real GitHub token)"; exit 1
 fi
-if ! awk '/Deploy llm-wiki watcher service unit/,/no_log: true/' "$MAIN" | grep -q "owner: root"; then
+if ! grep -qE "^\s*owner: root" <<<"$WATCHER_TASK"; then
   echo "FAIL: llm-wiki-watcher.service must render owner: root"; exit 1
 fi
 

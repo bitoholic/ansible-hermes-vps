@@ -43,7 +43,14 @@
     # as a backward-compat alias (roughly v8.0+) — but crypt_scheme also works unmodified on the older collection
     # versions that only ever had that name, so it's the more portable choice across whatever version is installed.
     crypt_scheme: bcrypt
-    mode: '0644'
+    owner: root
+    group: root
+    mode: '0600'   # epic 22 #07: was 0644 (world-readable, no owner set); no running container reads this file
+    # directly (parse_htpasswd.yml slurps the admin's own line once and bakes the resulting hash into the gateway
+    # Caddyfile, already root:root 0600 in this same ticket) — its real readers are Ansible/root and the operator
+    # editing it by hand (who already needs sudo for the other files this ticket tightened the same way). The
+    # operator does hand-add other real users' lines here over time (see parse_htpasswd.yml's own comment); root
+    # ownership doesn't block that, only unprivileged reads.
   no_log: true   # the plaintext password is a module argument, shown verbatim at verbosity without this
   register: owntracks_htpasswd_result
 

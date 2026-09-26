@@ -59,6 +59,19 @@ if ! grep -q 'OTR_STORAGEDIR=/store' "$OWNTRACKS_FRAGMENT"; then
 fi
 echo "recorder-auth regression guard OK"
 
+# 2d: epic 22 #07 — the htpasswd generation task bakes in a bcrypt hash of the admin password (and, over time,
+# hand-added real users' hashes too, per parse_htpasswd.yml's own comment) with no running container reading it
+# (Caddy reads only the resulting hash baked into the Caddyfile, already root:root 0600) — must be root:root 0600,
+# not the module's own 0644 default with no owner set (world-readable).
+HTPASSWD_TASK="$(awk '/Generate htpasswd for owntracks basic auth/,/register: owntracks_htpasswd_result/' roles/owntracks/tasks/main.yml)"
+if ! grep -qE "^\s*mode: '0600'" <<<"$HTPASSWD_TASK"; then
+  echo "FAIL: owntracks htpasswd generation must render mode 0600 (was 0644, world-readable)"; exit 1
+fi
+if ! grep -qE "^\s*owner: root" <<<"$HTPASSWD_TASK"; then
+  echo "FAIL: owntracks htpasswd generation must render owner: root"; exit 1
+fi
+echo "owntracks htpasswd file permissions guard OK"
+
 # 2c: owntracks role must run before gateway (htpasswd must exist before Caddy's
 # basic_auth block is rendered from it). Epic 15 ticket #01 replaced the original
 # list-position check here with a real roles/gateway/meta/main.yml dependency — see
