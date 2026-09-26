@@ -92,7 +92,13 @@
           # address comma-joined onto a normal hostname address silently
           # mis-parses as a URL host+path match instead of a second listener.
           # Total block count is therefore routes + gated routes, not just routes.
-          - "(rendered | regex_findall('\\.test\\.example\\.com[^{]*\\{')) | length == (gateway_routes | length) + gated_route_count"
+          # [^{\n]* (not just [^{]*): a site block header always has its `{` on the SAME line as the
+          # hostname, so this must not span line breaks — otherwise it also matches the unrelated
+          # `auth.test.example.com` inside the mfa_auth snippet's authelia_url query string (epic 22
+          # #06: domain de-hardcoding put the real domain there instead of a value that could never
+          # coincidentally equal this test's stub), since some later, unrelated `{` would still close
+          # the match across everything in between.
+          - "(rendered | regex_findall('\\.test\\.example\\.com[^{\\n]*\\{')) | length == (gateway_routes | length) + gated_route_count"
           - "(rendered | regex_findall('reverse_proxy ')) | length == (gateway_routes | length) + gated_route_count"
           - "rendered is search('wiki\\.test\\.example\\.com \\{')"
           - "rendered is search('dash\\.test\\.example\\.com \\{')"

@@ -74,9 +74,8 @@ python3 scripts/generate-env.py --check
 # gateway surface unchanged, and bot registration is idempotent by contract.
 ./tests/check-conduit.sh
 
-# Gateway Caddyfile render test (epic 03 ticket #04): byte-equivalence regression vs the legacy
-# Caddyfile, one site block per route with mfa_auth applied unless mfa: false, fail-fast on
-# malformed routes.
+# Gateway Caddyfile render test (epic 03 ticket #04): one site block per route with mfa_auth
+# applied unless mfa: false, fail-fast on malformed routes.
 ./tests/check-gateway-render.sh
 
 # Custom Docker services (epic 12 ticket #07): OwnTracks + Syncplay compose render

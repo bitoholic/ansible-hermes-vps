@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Renders the gateway Caddyfile adapter from gateway_routes and asserts its external behavior
-# (epic 03 ticket #04 guard): byte-equivalence regression vs the legacy SilverBullet Caddyfile,
-# one site block per route with mfa_auth applied unless mfa: false, and fail-fast on malformed
-# routes. Ensures the ingress can't drift from the declared route list.
+# (epic 03 ticket #04 guard, later ticket #00 dropped the legacy Caddyfile byte-equivalence
+# check when Conduit's route moved off a hardcoded block): one site block per route with
+# mfa_auth applied unless mfa: false, and fail-fast on malformed routes. Ensures the ingress
+# can't drift from the declared route list.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

@@ -98,7 +98,7 @@
   # v6-connecting tailnet client was silently treated as "not tailscale" before this).
   @not_tailscale not remote_ip {{ tailscale_subnet }} {{ tailscale_subnet_v6 }}
   forward_auth @not_tailscale authelia:9091 {
-    uri /api/authz/forward-auth?authelia_url=https://auth.<secret-silverbullet-domain>
+    uri /api/authz/forward-auth?authelia_url=https://auth.{{ secrets.silverbullet_domain }}
     copy_headers Remote-User Remote-Groups Remote-Name Remote-Email
   }
 }
