@@ -7,8 +7,8 @@
     secrets:
       conduit_registration_secret: "test-reg-secret"
       matrix_bot_password: "test-bot-pass"
-    conduit_compose_dir: /tmp/conduit_test
-    conduit_data_dir: /tmp/conduit_test/data
+    conduit_compose_dir: "{{ lookup('ansible.builtin.env', 'TMPDIR') | default('/tmp', true) }}/conduit_test"
+    conduit_data_dir: "{{ conduit_compose_dir }}/data"
     conduit_image: matrixconduit/matrix-conduit:latest
     conduit_port: 8008
     conduit_server_name: test-server

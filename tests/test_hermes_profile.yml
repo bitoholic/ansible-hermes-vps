@@ -28,7 +28,7 @@
         file: "{{ playbook_dir }}/../group_vars/all/main.yml"
     # Redirect the deploy root to a temp dir so the test never touches /opt.
     - ansible.builtin.set_fact:
-        hermes_home: "/tmp/hermes_test_profile"
+        hermes_home: "{{ lookup('ansible.builtin.env', 'TMPDIR') | default('/tmp', true) }}/hermes_test_profile"
         templates_dir: "{{ playbook_dir }}/../roles/hermes/templates"
         files_dir: "{{ playbook_dir }}/../roles/hermes/files"
   tasks:

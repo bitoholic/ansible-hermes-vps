@@ -30,8 +30,8 @@ for tool in sops age age-keygen; do
   fi
 done
 
-ansible-playbook --syntax-check site.yml >/tmp/hermes-syntax.log
-ansible-playbook --syntax-check tests/test_playbook.yml >/tmp/hermes-test-syntax.log
+ansible-playbook --syntax-check site.yml >"${TMPDIR:-/tmp}/hermes-syntax.log"
+ansible-playbook --syntax-check tests/test_playbook.yml >"${TMPDIR:-/tmp}/hermes-test-syntax.log"
 ansible-lint site.yml tests/test_playbook.yml tests/test_resolver.yml tests/test_docker_user_rules.yml tests/test_boot_ordering.yml
 
 # Single-seam contract: only the `secrets` resolver role may read credentials from the

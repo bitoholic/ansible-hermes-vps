@@ -11,6 +11,7 @@
       profiles:
         default:
           context7_api_key: stub-c7-default
+    hermes_cfg_test_dir: "{{ lookup('ansible.builtin.env', 'TMPDIR') | default('/tmp', true) }}"
   pre_tasks:
     - ansible.builtin.include_vars:
         file: "{{ playbook_dir }}/../group_vars/all/main.yml"
@@ -18,7 +19,7 @@
     - name: Render shared config.yaml.j2 per profile
       ansible.builtin.template:
         src: "{{ playbook_dir }}/../roles/hermes/templates/config.yaml.j2"
-        dest: "/tmp/hermes_cfg_{{ item.name }}.yaml"
+        dest: "{{ hermes_cfg_test_dir }}/hermes_cfg_{{ item.name }}.yaml"
       loop: "{{ hermes_profiles }}"
 
     - name: Assert per-profile structural invariants
@@ -34,6 +35,6 @@
         fail_msg: "config.yaml mismatch for profile {{ item.name }}: {{ cfg }}"
       loop: "{{ hermes_profiles }}"
       vars:
-        cfg: "{{ lookup('file', '/tmp/hermes_cfg_' ~ item.name ~ '.yaml') | from_yaml }}"
+        cfg: "{{ lookup('file', hermes_cfg_test_dir ~ '/hermes_cfg_' ~ item.name ~ '.yaml') | from_yaml }}"
       loop_control:
         label: "{{ item.name }}"

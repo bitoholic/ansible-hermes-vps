@@ -8,7 +8,7 @@
   gather_facts: false
   # In a real run these come from the resolver + the per-role gateway_publish contributions.
   vars:
-    gateway_caddyfile_dir: /tmp/gateway_test_render
+    gateway_caddyfile_dir: "{{ lookup('ansible.builtin.env', 'TMPDIR') | default('/tmp', true) }}/gateway_test_render"
     gateway_caddyfile_owner: "{{ ansible_user }}"
     gateway_caddyfile_group: "{{ ansible_user }}"
     secrets:
@@ -48,7 +48,7 @@
   tasks:
     - name: Ensure temp render dir exists
       ansible.builtin.file:
-        path: /tmp/gateway_test_render
+        path: "{{ gateway_caddyfile_dir }}"
         state: directory
         mode: '0755'
 
@@ -75,14 +75,14 @@
     - name: Render the gateway Caddyfile adapter
       ansible.builtin.template:
         src: "{{ playbook_dir }}/../roles/gateway/templates/Caddyfile.j2"
-        dest: /tmp/gateway_test_render/Caddyfile
+        dest: "{{ gateway_caddyfile_dir }}/Caddyfile"
         mode: '0600'
       vars:
         gateway_routes: "{{ silverbullet_gateway_publish + hermes_gateway_publish + authelia_gateway_publish + conduit_gateway_publish + owntracks_gateway_publish + beszel_gateway_publish + adguard_gateway_publish }}"
 
     - name: Stat rendered Caddyfile
       ansible.builtin.stat:
-        path: /tmp/gateway_test_render/Caddyfile
+        path: "{{ gateway_caddyfile_dir }}/Caddyfile"
       register: caddyfile_stat
 
     - name: Assert the Caddyfile is not world-readable (epic 22 #07)
@@ -215,7 +215,7 @@
           - "rendered is search('servers unix//caddy-relay-socket/caddy-relay\\.sock\\|0666 \\{\\n    listener_wrappers \\{\\n      proxy_protocol \\{\\n        allow 127\\.0\\.0\\.1/32 ::1/128\\n      \\}\\n      tls\\n    \\}\\n  \\}')"
         fail_msg: "Gateway Caddyfile shape mismatch: {{ rendered }}"
       vars:
-        rendered: "{{ lookup('file', '/tmp/gateway_test_render/Caddyfile') }}"
+        rendered: "{{ lookup('file', gateway_caddyfile_dir ~ '/Caddyfile') }}"
         gateway_routes: "{{ silverbullet_gateway_publish + hermes_gateway_publish + authelia_gateway_publish + conduit_gateway_publish + owntracks_gateway_publish + beszel_gateway_publish + adguard_gateway_publish }}"
         gated_route_count: >-
           {{ (gateway_routes | selectattr('mfa') | list | length) +
@@ -231,7 +231,7 @@
     - name: Render a synthetic tailnet_only route
       ansible.builtin.template:
         src: "{{ playbook_dir }}/../roles/gateway/templates/Caddyfile.j2"
-        dest: /tmp/gateway_test_render/Caddyfile.tailnet_only
+        dest: "{{ gateway_caddyfile_dir }}/Caddyfile.tailnet_only"
       vars:
         gateway_routes:
           - host: monitor
@@ -253,7 +253,7 @@
           - "rendered_tailnet_only is search('monitor\\.test\\.example\\.com \\{\\n  bind unix//caddy-relay-socket/caddy-relay\\.sock\\|0666\\n  log\\n  tls internal\\n  import tailnet_only\\n  reverse_proxy beszel-hub:8090\\n\\}')"
         fail_msg: "tailnet_only route did not render the expected hard-block shape: {{ rendered_tailnet_only }}"
       vars:
-        rendered_tailnet_only: "{{ lookup('file', '/tmp/gateway_test_render/Caddyfile.tailnet_only') }}"
+        rendered_tailnet_only: "{{ lookup('file', gateway_caddyfile_dir ~ '/Caddyfile.tailnet_only') }}"
 
     # A route could in principle set both mfa: true and tailnet_only: true. This
     # renders that combination and proves the one thing the Jinja layer can
@@ -273,7 +273,7 @@
     - name: Render a synthetic route with both mfa and tailnet_only set
       ansible.builtin.template:
         src: "{{ playbook_dir }}/../roles/gateway/templates/Caddyfile.j2"
-        dest: /tmp/gateway_test_render/Caddyfile.both_flags
+        dest: "{{ gateway_caddyfile_dir }}/Caddyfile.both_flags"
       vars:
         gateway_routes:
           - host: monitor
@@ -288,7 +288,7 @@
           - "rendered_both_flags is search('monitor\\.test\\.example\\.com \\{\\n  bind unix//caddy-relay-socket/caddy-relay\\.sock\\|0666\\n  log\\n  tls internal\\n  import tailnet_only\\n  import mfa_auth\\n  reverse_proxy beszel-hub:8090\\n\\}')"
         fail_msg: "route with mfa+tailnet_only both set did not render safely: {{ rendered_both_flags }}"
       vars:
-        rendered_both_flags: "{{ lookup('file', '/tmp/gateway_test_render/Caddyfile.both_flags') }}"
+        rendered_both_flags: "{{ lookup('file', gateway_caddyfile_dir ~ '/Caddyfile.both_flags') }}"
 
     - name: Malformed route (non-boolean tailnet_only) must fail fast
       block:

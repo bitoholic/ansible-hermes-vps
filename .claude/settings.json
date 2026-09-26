@@ -1,0 +1,44 @@
+{
+  "sandbox": {
+    "enabled": true,
+    "excludedCommands": [
+      "scripts/deploy"
+    ],
+    "filesystem": {
+      "denyRead": [
+        "~/.config/sops/age/**",
+        "~/.ssh/**",
+        "./.env"
+      ],
+      "allowWrite": [
+        "/run/user/**",
+        "/dev/shm/**",
+        "~/.ansible/**"
+      ]
+    }
+  },
+  "permissions": {
+    "allow": [
+      "Bash(scripts/deploy)",
+      "Bash(scripts/deploy:*)",
+      "Bash(scripts/secrets check)",
+      "Bash(scripts/secrets init-key)",
+      "Bash(scripts/secrets init-key:*)"
+    ],
+    "deny": [
+      "Bash(sops decrypt:*)",
+      "Bash(sops exec:*)",
+      "Bash(env)",
+      "Bash(env:*)",
+      "Bash(printenv:*)",
+      "Bash(scripts/secrets fill:*)",
+      "Bash(scripts/secrets edit:*)",
+      "Bash(scripts/secrets rotate:*)",
+      "Bash(scripts/secrets add-recipient:*)",
+      "Bash(scripts/secrets remove-recipient:*)",
+      "Bash(scripts/secrets import:*)",
+      "Read(~/.config/sops/age/**)",
+      "Read(.env)"
+    ]
+  }
+}

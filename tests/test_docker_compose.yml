@@ -7,7 +7,7 @@
   connection: local
   gather_facts: false
   vars:
-    docker_compose_dir: /tmp/docker_compose_test
+    docker_compose_dir: "{{ lookup('ansible.builtin.env', 'TMPDIR') | default('/tmp', true) }}/docker_compose_test"
     docker_project_name: test-hermes-vps
     docker_enabled_services:
       - caddy
@@ -379,7 +379,7 @@
     - name: Render AdGuard Home configuration
       ansible.builtin.template:
         src: "{{ playbook_dir }}/../roles/adguard/templates/AdGuardHome.yaml.j2"
-        dest: /tmp/docker_compose_test/AdGuardHome.yaml
+        dest: "{{ docker_compose_dir }}/AdGuardHome.yaml"
       vars:
         secrets:
           adguard_admin_username: admin
@@ -397,4 +397,4 @@
           - "'schema_version' not in adguard_config"
         fail_msg: "AdGuardHome.yaml does not match the confirmed minimal shape: {{ adguard_config }}"
       vars:
-        adguard_config: "{{ lookup('file', '/tmp/docker_compose_test/AdGuardHome.yaml') | from_yaml }}"
+        adguard_config: "{{ lookup('file', docker_compose_dir ~ '/AdGuardHome.yaml') | from_yaml }}"
