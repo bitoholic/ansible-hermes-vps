@@ -25,6 +25,10 @@ export ADMIN_SSH_PUBLIC_KEY="ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQCtestkey"
 export OWNTRACKS_ADMIN_PASSWORD=OTR_PASS
 export SYNCPLAY_PASSWORD=SYNC_PASS
 export CLOUDFLARE_API_TOKEN=CF_TOKEN
+export WINDSCRIBE_PRIVATE_KEY=WS_PRIVATE_KEY
+export WINDSCRIBE_ADDRESS=10.0.0.1/32
+export WINDSCRIBE_PRESHARED_KEY=WS_PSK
+export EXIT_NODE_TAILSCALE_AUTHKEY=tskey-exit-test
 
 echo "== resolver resolves expected values =="
 ansible-playbook tests/test_resolver.yml --check -e secrets_enforce_required=false
@@ -36,7 +40,11 @@ LOG="${TMPDIR:-/tmp}/hermes-resolver-fail.log"
 for pair in "AUTHELIA_ADMIN_PASSWORD_HASH:authelia_admin_password_hash" \
             "OWNTRACKS_ADMIN_PASSWORD:owntracks_admin_password" \
             "SYNCPLAY_PASSWORD:syncplay_password" \
-            "CLOUDFLARE_API_TOKEN:cloudflare_api_token"; do
+            "CLOUDFLARE_API_TOKEN:cloudflare_api_token" \
+            "WINDSCRIBE_PRIVATE_KEY:exit_node_windscribe_private_key" \
+            "WINDSCRIBE_ADDRESS:exit_node_windscribe_address" \
+            "WINDSCRIBE_PRESHARED_KEY:exit_node_windscribe_preshared_key" \
+            "EXIT_NODE_TAILSCALE_AUTHKEY:exit_node_tailscale_authkey"; do
   env_var="${pair%%:*}"
   manifest_key="${pair##*:}"
   unset "$env_var"
@@ -56,5 +64,9 @@ for pair in "AUTHELIA_ADMIN_PASSWORD_HASH:authelia_admin_password_hash" \
     OWNTRACKS_ADMIN_PASSWORD)     export OWNTRACKS_ADMIN_PASSWORD=OTR_PASS ;;
     SYNCPLAY_PASSWORD)            export SYNCPLAY_PASSWORD=SYNC_PASS ;;
     CLOUDFLARE_API_TOKEN)         export CLOUDFLARE_API_TOKEN=CF_TOKEN ;;
+    WINDSCRIBE_PRIVATE_KEY)       export WINDSCRIBE_PRIVATE_KEY=WS_PRIVATE_KEY ;;
+    WINDSCRIBE_ADDRESS)           export WINDSCRIBE_ADDRESS=10.0.0.1/32 ;;
+    WINDSCRIBE_PRESHARED_KEY)     export WINDSCRIBE_PRESHARED_KEY=WS_PSK ;;
+    EXIT_NODE_TAILSCALE_AUTHKEY)  export EXIT_NODE_TAILSCALE_AUTHKEY=tskey-exit-test ;;
   esac
 done

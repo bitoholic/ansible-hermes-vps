@@ -219,3 +219,9 @@ echo "role skip-tags guard OK"
 # source works independent of the deploy wrapper's redaction (which this run does not go through at all).
 ./tests/check-playbook-secret-leak.sh
 
+# Exit-node schema/list validation (epic 23 ticket #02): the exit_node_schema's own shape, the default London +
+# Warsaw list and a three-entry fixture pass validation, and malformed entries (duplicate/invalid/missing name,
+# empty region, missing city, empty list) and a malformed hostname prefix (an IP-shaped deploy target, a dotted
+# or over-long explicit override) all fail fast naming the offending value. No compose rendering yet (ticket #03).
+./tests/check-exit-nodes-render.sh
+

@@ -45,6 +45,7 @@ SECTION_ORDER = [
     "Hermes profiles",
     "Git / GitHub",
     "Admin / host",
+    "Exit nodes (Windscribe)",
     "Other",
 ]
 
@@ -62,6 +63,8 @@ def section_for_key(key):
         return "Git / GitHub"
     if key.startswith("admin_"):
         return "Admin / host"
+    if key.startswith("exit_node_"):
+        return "Exit nodes (Windscribe)"
     return "Other"
 
 

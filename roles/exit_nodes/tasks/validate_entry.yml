@@ -1,0 +1,35 @@
+---
+# Epic 23 #02: generic per-field schema check for one exit_nodes entry (`exit_node`, set by the
+# loop in validate.yml) — same generic-engine shape as roles/gateway/tasks/validate_route.yml
+# (walks exit_nodes_schema instead of one hand-written assert per field), extended with a
+# `pattern` constraint (a full-string regex) that gateway's schema doesn't need today.
+- name: "Assert exit-node field satisfies its schema constraint: {{ exit_node_field.field }}"
+  ansible.builtin.assert:
+    that:
+      - not exit_node_field_required or exit_node_field_present
+      - not exit_node_field_present or exit_node_field_type != 'string' or exit_node_field_value is string
+      - not exit_node_field_present or not exit_node_field_non_empty or (exit_node_field_value | string | length > 0)
+      - >-
+        not exit_node_field_present or not exit_node_field_has_pattern or
+        (exit_node_field_value | string | regex_search(exit_node_field_pattern)) is not none
+    fail_msg: >-
+      {{ "exit_nodes entry '" ~ (exit_node.name | default('?')) ~ "': field '" ~ exit_node_field.field ~ "' " ~
+      ('is required but missing'
+       if (not exit_node_field_present)
+       else ('must be a string, got ' ~ (exit_node_field_value | string))
+       if (exit_node_field_type == 'string' and exit_node_field_value is not string)
+       else 'must not be empty'
+       if (exit_node_field_non_empty and (exit_node_field_value | string | length) == 0)
+       else ('must match ' ~ exit_node_field_pattern ~ ', got ' ~ (exit_node_field_value | string))) }}
+  vars:
+    exit_node_field_required: "{{ exit_node_field.required | default(false) }}"
+    exit_node_field_present: "{{ exit_node_field.field in exit_node }}"
+    exit_node_field_type: "{{ exit_node_field.type | default('') }}"
+    exit_node_field_non_empty: "{{ exit_node_field.non_empty | default(false) }}"
+    exit_node_field_has_pattern: "{{ exit_node_field.pattern is defined }}"
+    exit_node_field_pattern: "{{ exit_node_field.pattern | default('') }}"
+    exit_node_field_value: "{{ exit_node[exit_node_field.field] | default(None) }}"
+  loop: "{{ exit_nodes_schema }}"
+  loop_control:
+    loop_var: exit_node_field
+    label: "{{ exit_node_field.field }}"

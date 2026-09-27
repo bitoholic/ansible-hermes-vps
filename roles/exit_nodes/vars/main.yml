@@ -1,0 +1,35 @@
+---
+# Exit-node schema (epic 23 #02): same schema-driven approach as the gateway route schema
+# (roles/gateway/vars/main.yml) — adding a field here plus its constraint is enough for
+# tasks/validate_entry.yml to enforce it generically; there's no hand-copied assert list left to
+# drift from this.
+#
+# Named vars/main.yml (not vars/schema.yml) for the same reason as the gateway role's own
+# comment: Ansible's role-compilation auto-loads vars/main.yml whenever this role is invoked for
+# real; a differently-named file under vars/ never is. Test playbooks that exercise validation
+# without a real role invocation include_vars this file directly (see tests/test_exit_nodes_render.yml).
+#
+# `pattern` (a full-string regex, checked with regex_search) is a constraint kind the gateway
+# schema doesn't need today — no gateway field needs character-class validation — so it is
+# introduced here rather than backported onto that schema.
+#
+# exit_nodes_label_pattern is shared between the `name` field below and the standalone
+# exit_nodes_hostname_prefix check in tasks/validate.yml: both fill a half of the same composed
+# tailnet hostname, "<prefix>-ws-<name>", so both must be lowercase letters, digits and hyphens,
+# starting and ending with a letter or digit, at most 20 characters — the same rule the epic 23
+# spec states once and applies to both halves.
+exit_nodes_label_pattern: '^[a-z0-9](?:[a-z0-9-]{0,18}[a-z0-9])?$'
+
+exit_nodes_schema:
+  - field: name
+    required: true
+    type: string
+    pattern: "{{ exit_nodes_label_pattern }}"
+  - field: region
+    required: true
+    type: string
+    non_empty: true
+  - field: city
+    required: true
+    type: string
+    non_empty: true

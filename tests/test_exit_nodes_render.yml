@@ -1,0 +1,294 @@
+---
+# Exit-node schema/list validation test (epic 23 ticket #02).
+# Mirrors tests/test_gateway_render.yml's shape: assert the schema's own shape, run the real
+# defaults through validate.yml as a positive guard, then prove each negative case fails fast.
+- hosts: localhost
+  connection: local
+  gather_facts: false
+  pre_tasks:
+    - ansible.builtin.include_vars:
+        file: "{{ playbook_dir }}/../roles/exit_nodes/defaults/main.yml"
+    - ansible.builtin.include_vars:
+        file: "{{ playbook_dir }}/../roles/exit_nodes/vars/main.yml"
+
+  tasks:
+    - name: Exit-node schema declares exactly the 3 currently-live fields
+      ansible.builtin.assert:
+        that:
+          - (exit_nodes_schema | map(attribute='field') | list | sort) == (['name', 'region', 'city'] | sort)
+          - exit_nodes_schema | selectattr('required', 'undefined') | list | length == 0
+        fail_msg: "exit_node schema (vars/main.yml) fields mismatch: {{ exit_nodes_schema | map(attribute='field') | list }}"
+
+    # Positive guard: the real default exit_nodes list, against a real (non-IP) inventory_hostname,
+    # must pass shape validation — intentionally NOT rescued, matching gateway's own real-config guard.
+    - name: Real default exit_nodes must pass shape validation
+      ansible.builtin.include_tasks:
+        file: "{{ playbook_dir }}/../roles/exit_nodes/tasks/validate.yml"
+      vars:
+        inventory_hostname: vps.test.example.com
+
+    - name: Assert the default list yields London and Warsaw with the expected hostname prefix
+      ansible.builtin.assert:
+        that:
+          - exit_nodes | map(attribute='name') | list == ['london', 'warsaw']
+          - (exit_nodes | selectattr('name', 'equalto', 'london') | first).region == 'United Kingdom'
+          - (exit_nodes | selectattr('name', 'equalto', 'london') | first).city == 'London'
+          - (exit_nodes | selectattr('name', 'equalto', 'warsaw') | first).region == 'Poland'
+          - (exit_nodes | selectattr('name', 'equalto', 'warsaw') | first).city == 'Warsaw'
+          - derived_prefix == 'vps'
+        fail_msg: "default exit_nodes list does not match the epic 23 spec's initial locations"
+      vars:
+        derived_prefix: >-
+          {{ exit_nodes_hostname_prefix }}
+        inventory_hostname: vps.test.example.com
+
+    # A three-entry fixture proves scaling is one list entry, no other change (ticket #04 covers
+    # this fully once the compose render exists; this proves the validation side of it now).
+    - name: A three-entry fixture must pass shape validation
+      ansible.builtin.include_tasks:
+        file: "{{ playbook_dir }}/../roles/exit_nodes/tasks/validate.yml"
+      vars:
+        inventory_hostname: vps.test.example.com
+        exit_nodes:
+          - name: london
+            region: United Kingdom
+            city: London
+          - name: warsaw
+            region: Poland
+            city: Warsaw
+          - name: newyork
+            region: United States
+            city: New York
+
+    - name: Malformed exit_nodes (duplicate name) must fail fast
+      block:
+        - ansible.builtin.include_tasks:
+            file: "{{ playbook_dir }}/../roles/exit_nodes/tasks/validate.yml"
+          vars:
+            inventory_hostname: vps.test.example.com
+            exit_nodes:
+              - name: london
+                region: United Kingdom
+                city: London
+              - name: london
+                region: Poland
+                city: Warsaw
+      rescue:
+        - ansible.builtin.set_fact:
+            duplicate_name_failed_fast: true
+            duplicate_name_error_msg: "{{ ansible_failed_result.msg | default('') }}"
+      always:
+        - ansible.builtin.assert:
+            that:
+              - duplicate_name_failed_fast | default(false)
+              - "'london' in duplicate_name_error_msg"
+            fail_msg: >-
+              exit_nodes validation did NOT fail fast naming the duplicated value;
+              got: {{ duplicate_name_error_msg | default('nothing') }}
+
+    - name: Malformed exit_nodes (name with an uppercase letter) must fail fast naming the entry
+      block:
+        - ansible.builtin.include_tasks:
+            file: "{{ playbook_dir }}/../roles/exit_nodes/tasks/validate.yml"
+          vars:
+            inventory_hostname: vps.test.example.com
+            exit_nodes:
+              - name: London
+                region: United Kingdom
+                city: London
+      rescue:
+        - ansible.builtin.set_fact:
+            bad_name_failed_fast: true
+            bad_name_error_msg: >-
+              {{ ansible_failed_result.results | default([ansible_failed_result])
+                 | selectattr('failed', 'defined') | selectattr('failed')
+                 | map(attribute='msg') | list | join('; ') }}
+      always:
+        - ansible.builtin.assert:
+            that:
+              - bad_name_failed_fast | default(false)
+              - "'name' in bad_name_error_msg"
+            fail_msg: >-
+              exit_nodes validation did NOT fail fast with a name-specific message;
+              got: {{ bad_name_error_msg | default('nothing') }}
+
+    - name: Malformed exit_nodes (name starting with a hyphen) must fail fast
+      block:
+        - ansible.builtin.include_tasks:
+            file: "{{ playbook_dir }}/../roles/exit_nodes/tasks/validate.yml"
+          vars:
+            inventory_hostname: vps.test.example.com
+            exit_nodes:
+              - name: "-london"
+                region: United Kingdom
+                city: London
+      rescue:
+        - ansible.builtin.set_fact:
+            leading_hyphen_failed_fast: true
+            leading_hyphen_error_msg: >-
+              {{ ansible_failed_result.results | default([ansible_failed_result])
+                 | selectattr('failed', 'defined') | selectattr('failed')
+                 | map(attribute='msg') | list | join('; ') }}
+      always:
+        - ansible.builtin.assert:
+            that:
+              - leading_hyphen_failed_fast | default(false)
+              - "'-london' in leading_hyphen_error_msg"
+            fail_msg: >-
+              exit_nodes validation did NOT fail fast naming the bad value;
+              got: {{ leading_hyphen_error_msg | default('nothing') }}
+
+    - name: Malformed exit_nodes (name over 20 characters) must fail fast
+      block:
+        - ansible.builtin.include_tasks:
+            file: "{{ playbook_dir }}/../roles/exit_nodes/tasks/validate.yml"
+          vars:
+            inventory_hostname: vps.test.example.com
+            exit_nodes:
+              - name: "this-name-is-far-too-long-for-a-dns-label"
+                region: United Kingdom
+                city: London
+      rescue:
+        - ansible.builtin.set_fact:
+            overlong_name_failed_fast: true
+            overlong_name_error_msg: >-
+              {{ ansible_failed_result.results | default([ansible_failed_result])
+                 | selectattr('failed', 'defined') | selectattr('failed')
+                 | map(attribute='msg') | list | join('; ') }}
+      always:
+        - ansible.builtin.assert:
+            that:
+              - overlong_name_failed_fast | default(false)
+              - "'this-name-is-far-too-long-for-a-dns-label' in overlong_name_error_msg"
+            fail_msg: >-
+              exit_nodes validation did NOT fail fast naming the bad value;
+              got: {{ overlong_name_error_msg | default('nothing') }}
+
+    - name: Malformed exit_nodes (empty region) must fail fast naming the entry
+      block:
+        - ansible.builtin.include_tasks:
+            file: "{{ playbook_dir }}/../roles/exit_nodes/tasks/validate.yml"
+          vars:
+            inventory_hostname: vps.test.example.com
+            exit_nodes:
+              - name: london
+                region: ""
+                city: London
+      rescue:
+        - ansible.builtin.set_fact:
+            empty_region_failed_fast: true
+            empty_region_error_msg: >-
+              {{ ansible_failed_result.results | default([ansible_failed_result])
+                 | selectattr('failed', 'defined') | selectattr('failed')
+                 | map(attribute='msg') | list | join('; ') }}
+      always:
+        - ansible.builtin.assert:
+            that:
+              - empty_region_failed_fast | default(false)
+              - "'region' in empty_region_error_msg"
+            fail_msg: >-
+              exit_nodes validation did NOT fail fast with a region-specific message;
+              got: {{ empty_region_error_msg | default('nothing') }}
+
+    - name: Malformed exit_nodes (missing city) must fail fast
+      block:
+        - ansible.builtin.include_tasks:
+            file: "{{ playbook_dir }}/../roles/exit_nodes/tasks/validate.yml"
+          vars:
+            inventory_hostname: vps.test.example.com
+            exit_nodes:
+              - name: london
+                region: United Kingdom
+      rescue:
+        - ansible.builtin.set_fact:
+            missing_city_failed_fast: true
+      always:
+        - ansible.builtin.assert:
+            that:
+              - missing_city_failed_fast | default(false)
+            fail_msg: "exit_nodes validation did NOT fail fast on a missing city"
+
+    - name: An empty exit_nodes list must fail fast
+      block:
+        - ansible.builtin.include_tasks:
+            file: "{{ playbook_dir }}/../roles/exit_nodes/tasks/validate.yml"
+          vars:
+            inventory_hostname: vps.test.example.com
+            exit_nodes: []
+      rescue:
+        - ansible.builtin.set_fact:
+            empty_list_failed_fast: true
+      always:
+        - ansible.builtin.assert:
+            that:
+              - empty_list_failed_fast | default(false)
+            fail_msg: "exit_nodes validation did NOT fail fast on an empty list"
+
+    # The hostname prefix half: an IP-shaped target must fail fast (never silently truncate to a
+    # bare-digit label — see defaults/main.yml), and so must an explicit override with a dot or
+    # more than 20 characters.
+    - name: An IPv4 deploy target must fail fast on the derived hostname prefix
+      block:
+        - ansible.builtin.include_tasks:
+            file: "{{ playbook_dir }}/../roles/exit_nodes/tasks/validate.yml"
+          vars:
+            inventory_hostname: "203.0.113.5"
+      rescue:
+        - ansible.builtin.set_fact:
+            ipv4_target_failed_fast: true
+            ipv4_target_error_msg: "{{ ansible_failed_result.msg | default('') }}"
+      always:
+        - ansible.builtin.assert:
+            that:
+              - ipv4_target_failed_fast | default(false)
+              - "'203.0.113.5' in ipv4_target_error_msg"
+            fail_msg: >-
+              exit_nodes validation did NOT fail fast naming the IPv4 target as the bad prefix;
+              got: {{ ipv4_target_error_msg | default('nothing') }}
+
+    - name: An IPv6 deploy target must fail fast on the derived hostname prefix
+      block:
+        - ansible.builtin.include_tasks:
+            file: "{{ playbook_dir }}/../roles/exit_nodes/tasks/validate.yml"
+          vars:
+            inventory_hostname: "2001:db8::1"
+      rescue:
+        - ansible.builtin.set_fact:
+            ipv6_target_failed_fast: true
+      always:
+        - ansible.builtin.assert:
+            that:
+              - ipv6_target_failed_fast | default(false)
+            fail_msg: "exit_nodes validation did NOT fail fast on an IPv6 deploy target"
+
+    - name: An explicit dotted hostname-prefix override must fail fast
+      block:
+        - ansible.builtin.include_tasks:
+            file: "{{ playbook_dir }}/../roles/exit_nodes/tasks/validate.yml"
+          vars:
+            inventory_hostname: vps.test.example.com
+            exit_nodes_hostname_prefix: "vps.example"
+      rescue:
+        - ansible.builtin.set_fact:
+            dotted_prefix_failed_fast: true
+      always:
+        - ansible.builtin.assert:
+            that:
+              - dotted_prefix_failed_fast | default(false)
+            fail_msg: "exit_nodes validation did NOT fail fast on a dotted hostname-prefix override"
+
+    - name: An over-long explicit hostname-prefix override must fail fast
+      block:
+        - ansible.builtin.include_tasks:
+            file: "{{ playbook_dir }}/../roles/exit_nodes/tasks/validate.yml"
+          vars:
+            inventory_hostname: vps.test.example.com
+            exit_nodes_hostname_prefix: "this-prefix-is-far-too-long"
+      rescue:
+        - ansible.builtin.set_fact:
+            overlong_prefix_failed_fast: true
+      always:
+        - ansible.builtin.assert:
+            that:
+              - overlong_prefix_failed_fast | default(false)
+            fail_msg: "exit_nodes validation did NOT fail fast on an over-long hostname-prefix override"

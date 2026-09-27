@@ -1,0 +1,37 @@
+---
+# Exit locations (epic 23 #02): the single source of truth for "what exit-node pairs exist".
+# Adding a location is one entry here — no new secret, no new code (user story #3). Ticket #03
+# renders one gluetun+Tailscale+routing-sidecar pair per entry; ticket #04 proves the scaling with
+# a three-entry fixture. Initial locations per the epic 23 spec: London (United Kingdom) and
+# Warsaw (Poland) — the operator's two requested locations (user story #2).
+# The var IS the role name (no further suffix) because the epic 23 spec names this list `exit_nodes`
+# throughout — every other ticket's own text refers to it by that exact name. Same deliberate
+# exception, same reason, as the secrets role's own `secrets` var (roles/secrets/tasks/main.yml).
+exit_nodes:  # noqa: var-naming[no-role-prefix]
+  - name: london
+    region: United Kingdom
+    city: London
+  - name: warsaw
+    region: Poland
+    city: Warsaw
+
+# Prefix half of each exit node's tailnet hostname (`<prefix>-ws-<name>`, ticket #03). Defaults to
+# the deploy target's first DNS label. The target is, in practice, inventory_hostname as set by the
+# deploy wrapper's single-host inventory (`-i "<TARGET_HOST>,"` — scripts/deploy) — a fully-qualified
+# name in the common case, but it could be a bare IP address, which is not a safe DNS label on its
+# own and must not silently become one via truncation (splitting "203.0.113.5" on "." would yield
+# the misleading label "203"). So an inventory_hostname that is itself a dotted-quad IPv4 address is
+# passed through UNCHANGED here rather than split, which makes it fail exit_nodes_label_pattern's
+# check in tasks/validate.yml loudly, naming the actual offending value, instead of silently
+# producing a truncated-but-valid-looking prefix. An IPv6 target already fails the same way with no
+# special-casing needed: it contains no "." to split on, so it also passes through unchanged and
+# then fails the pattern (colons aren't in the allowed character class).
+# Override explicitly if the derived label collides or is otherwise unsuitable.
+#
+# References the magic `inventory_hostname` directly (ansible-lint's var-naming[read-only] flags
+# reassigning it, not reading it) so a test playbook can override it per-scenario the same way
+# tests/test_gateway_render.yml already overrides other role defaults; this file isn't part of
+# tests/lint.sh's ansible-lint file list, matching every other render-test playbook.
+exit_nodes_hostname_prefix: >-
+  {{ inventory_hostname if (inventory_hostname is match('^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$'))
+     else inventory_hostname.split('.')[0] }}

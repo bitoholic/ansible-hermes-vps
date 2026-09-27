@@ -1,0 +1,45 @@
+---
+# Epic 23 #02: fail-fast validation of `exit_nodes` and `exit_nodes_hostname_prefix` — same shape
+# as roles/gateway/tasks/validate.yml. Runs ahead of anything that would render per-location
+# config (ticket #03) so a malformed entry can't produce a broken or silently-misnamed exit node.
+# Extracted the same way gateway's validate.yml is, so a test playbook can include_tasks just the
+# validation (see tests/test_exit_nodes_render.yml).
+- name: Assert exit_nodes is a non-empty list
+  ansible.builtin.assert:
+    that:
+      - exit_nodes is defined
+      - exit_nodes | length > 0
+    fail_msg: "exit_nodes must be defined and non-empty."
+
+- name: Validate each exit_nodes entry against the schema
+  ansible.builtin.include_tasks: validate_entry.yml
+  loop: "{{ exit_nodes }}"
+  loop_control:
+    loop_var: exit_node
+    label: "{{ exit_node.name | default('?') }}"
+
+# Relational rule (not a per-field schema constraint) — same reasoning as gateway's
+# basic_auth_user/basic_auth_hash mutual-presence check: two locations sharing a name would
+# collide on the same tailnet hostname, state directory and environment file.
+- name: Assert exit_nodes names are unique
+  ansible.builtin.assert:
+    that:
+      - (exit_nodes | map(attribute='name') | list | unique | length) == (exit_nodes | length)
+    fail_msg: >-
+      exit_nodes names must be unique; got: {{ exit_nodes | map(attribute='name') | list }}
+
+# exit_nodes_hostname_prefix is a single scalar, not a per-entry field, so it's validated with its
+# own assert rather than through exit_nodes_schema — but against the exact same character-class
+# rule (exit_nodes_label_pattern, vars/main.yml), since it fills the other half of the same composed
+# hostname "<prefix>-ws-<name>". See defaults/main.yml for why an IP-shaped target fails this
+# instead of silently producing a truncated label.
+- name: Assert exit_nodes_hostname_prefix is a valid DNS-label half
+  ansible.builtin.assert:
+    that:
+      - exit_nodes_hostname_prefix is string
+      - (exit_nodes_hostname_prefix | regex_search(exit_nodes_label_pattern)) is not none
+    fail_msg: >-
+      exit_nodes_hostname_prefix '{{ exit_nodes_hostname_prefix }}' must be lowercase letters, digits
+      and hyphens, starting and ending with a letter or digit, at most 20 characters (so
+      '<prefix>-ws-<name>' is a valid DNS label) — got a value derived from a target that is an IP
+      address, over-long, or otherwise unsuitable; override exit_nodes_hostname_prefix explicitly.
