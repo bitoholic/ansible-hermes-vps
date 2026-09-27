@@ -18,3 +18,58 @@
 ## Notes
 
 See epic 22 spec, "Implementation Decisions" (runbooks; ADR and repository standards). The two standards files are agent-facing, so leaving them unchanged would make every future agent session start from the wrong rule.
+
+## Implementation
+
+**README.md**: the "Local Secrets Workflow" section was rewritten end to end around `scripts/deploy` and
+`scripts/secrets` — the old `setup-env.sh`/plain-`.env`/`source .env`/`lookup('env', ...)` workflow it
+described no longer exists (`setup-env.sh` was removed in ticket #04). New sections: first-time
+workstation setup (with a link to the runbooks doc for per-OS tool install), store maintenance, running
+deploys (unchanged flag examples, just via the wrapper instead of `ansible-playbook` + `source .env`),
+and a short "Adding a new secret" procedure (manifest entry vs. declared extra, regenerate
+`.env.template`, fill the value). Two other stale `.env` references were checked: the Beszel pairing
+step (fixed — now points at `scripts/secrets edit`/`fill`) and the "delegated subagents share the
+container filesystem" limitation (left unchanged — verified this refers to a *different*, real `.env`
+the `hermes` role renders per-profile into the agent's own data directory, unrelated to this epic's
+secrets store).
+
+**Two agent-facing standards files** (criterion 2): `.github/copilot-instructions.md`'s blanket "MUST NOT
+contain any secrets" is now "MUST NOT contain any *plaintext* secret" with the encrypted store named as
+the deliberate exception, not an oversight. `.github/instructions/ansible.instructions.md`'s "Secret
+Management" section no longer describes Ansible Vault's `vars`/`vault` file convention or a third-party
+manager; it describes the manifest → store → wrapper flow and points at the resolver's single-seam rule
+and the suppression-at-source static check, so an agent reading it wouldn't add a new `lookup('env',
+...)` call or an unsuppressed secret-bearing task by following stale advice.
+
+**`docs/secrets-runbooks.md`** (new, criteria 3–4): four runbooks — onboarding (with a per-OS `age`/`sops`
+install table, and a note that `sops` ≥ v3.10.0 is preferred since older versions silently ignore
+`SOPS_AGE_KEY_CMD` rather than erroring, per epic 22 #08's own finding), retiring a workstation,
+responding to a suspected key leak (remove-recipient → rotate the data key → rotate the underlying
+credentials themselves, in that order, matching what `scripts/secrets remove-recipient` already prints),
+and using the break-glass key. A closing section states the git-history limit (removing a recipient
+doesn't retroactively revoke a committed version) and the plaintext-removal limits from ticket #09
+(SSD/copy-on-write overwrite unreliability; copies may exist in backups/sync tools/shell
+history/other machines; rotate when exposure can't be ruled out) verbatim as that ticket's own notes
+state them.
+
+**ADR-0007** (criterion 5): records the SOPS+age-vs-Ansible-Vault-vs-git-crypt comparison (including the
+git-crypt-with-GPG runner-up), the private-repo-with-possible-public-export considerations (the store is
+excluded from epic 24's export entirely, not merely relying on encryption; why a random key and visible
+names are still acceptable under that framing), Tier 1's honest limit including the network-namespace
+gap epic 22 #08 found and its `dangerouslyDisableSandbox` workaround, the redaction design and its
+documented limits (short-value non-redaction, encodings other than the three matched forms), and a
+dedicated "Deviation from the written standards" section naming exactly what the two standards files
+used to say and why this repository no longer follows that rule.
+
+**Consistency with the generated template and sync check** (criterion 6): `.env.template` is generated
+by `scripts/generate-env.py`, checked for drift by `tests/lint.sh` (`generate-env.py --check`) — verified
+this mechanism already exists and needed no code change; the README's "Adding a new secret" procedure and
+the ansible instructions file both point at it as the one names-only reference to regenerate, matching
+what the sync check actually enforces.
+
+**Verification**: `tests/lint.sh` re-run in full after all documentation changes — a pure documentation
+ticket touches no code path the test suite exercises directly, but re-running confirms nothing was
+broken and the sync check still passes.
+
+**Ticket #10 is closed.** This is also the last ticket in epic 22 — every ticket (01 through 10) is now
+implemented, reviewed, and closed, pending the operator's own full-epic review.

@@ -1,6 +1,6 @@
 # 🏠 Hermes VPS
 
-This repository provisions a personal "second brain" + agent stack on a bare Ubuntu/Debian VPS using modular Ansible roles and Docker Compose. Secrets are kept out of version control via a local `.env` file that is sourced into the shell before running Ansible.
+This repository provisions a personal "second brain" + agent stack on a bare Ubuntu/Debian VPS using modular Ansible roles and Docker Compose. Secrets live **encrypted, in this repository** (SOPS + age) and are decrypted only into the deploy wrapper's child process — never to disk, never sourced into a shell. See [Local Secrets Workflow](#-local-secrets-workflow) and [ADR-0007](docs/adr/0007-sops-age-encrypted-secrets.md).
 
 > ⚠️ **Status: pre-production.** This stack has known security and reliability gaps — see [Known Limitations](#-known-limitations--open-issues) before you put real credentials or sensitive wiki content on it.
 
@@ -43,67 +43,95 @@ The `docker` role owns the consolidated compose file and brings up the full stac
 
 ## 🔐 Local Secrets Workflow
 
-Never commit secrets. Populate a local `.env` and source it before running Ansible.
+Every credential this playbook needs lives **encrypted** in `secrets/secrets.enc.env` (SOPS, age
+recipients), committed alongside the code. There is no plaintext `.env` in this workflow — the deploy
+wrapper decrypts the store directly into its child process's environment and nothing else ever touches
+disk in plaintext. `setup-env.sh` (the old interactive prompt script) no longer exists; the tools below
+replace it. Full detail, including onboarding a new workstation and incident response, is in
+[`docs/secrets-runbooks.md`](docs/secrets-runbooks.md).
 
-### 1️⃣ Create your local environment file
+### 1️⃣ First-time setup on a workstation
 
-```bash
-./setup-env.sh
-```
-
-This prompts for the credentials it currently knows about (Authelia secrets, Signal account/allowlist, per-profile OpenRouter/Nous/Context7 keys, GitHub token) and saves them to a git-ignored `.env`.
-
-> ⚠️ `setup-env.sh` does **not** yet prompt for everything Ansible requires. Before your first run, also make sure these are set in `.env` (see `.env.template` for the full list):
->
-> ```bash
-> ADMIN_USERNAME=""
-> ADMIN_SSH_PUBLIC_KEY=""
-> SILVERBULLET_DOMAIN=""
-> AUTHELIA_ADMIN_EMAIL=""
-> AUTHELIA_ADMIN_USERNAME=""
-> GIT_USERNAME=""
-> GIT_EMAIL=""
-> ```
-
-### 2️⃣ Run Ansible against the VPS
-
-Because every secret in `group_vars/all/main.yml` is resolved via `lookup('env', ...)`, sourcing `.env` in the same shell is enough — no `--extra-vars` needed:
+Requires `sops` and `age` on `PATH` (per-OS install commands: [`docs/secrets-runbooks.md`](docs/secrets-runbooks.md#onboarding-a-workstation)).
 
 ```bash
-source .env
-ansible-playbook -i "${TARGET_HOST}," site.yml
+scripts/secrets init-key                    # creates ~/.config/sops/age/keys.txt, prints ONLY the public key
+scripts/secrets add-recipient <public-key>  # an existing workstation runs this to admit a new one
 ```
 
-### 3️⃣ Preview changes before applying
+The very first workstation additionally generates an offline **break-glass** key
+(`scripts/secrets init-key /path/on/removable/media`) and adds its public key as a second recipient, so
+losing every workstation doesn't lock the operator out. See the runbooks doc for the full onboarding and
+break-glass procedures.
+
+### 2️⃣ Maintain the store
 
 ```bash
-source .env
-ansible-playbook -i "${TARGET_HOST}," site.yml --check --diff
+scripts/secrets check     # names missing or undeclared, by name only — never a value
+scripts/secrets fill      # guided, hidden-input fill of missing required values
+scripts/secrets edit      # edit the store in $EDITOR (decrypted only in memory)
+scripts/secrets rotate    # generate a new data encryption key, same recipients
 ```
 
-### 4️⃣ Selective role skipping (fast redeploys)
+None of these ever print a decrypted value or write plaintext to disk (`edit`'s temporary file lives on
+a tmpfs and is removed whether the editor exits cleanly or not).
 
-You can skip specific roles during deployment using `--skip-tags`:
+### 3️⃣ Run Ansible against the VPS
+
+`scripts/deploy` is the **only** supported way to run this repository's playbook — it decrypts the
+store into the child process's environment only, runs `site.yml`, and streams the output live through a
+redactor that masks every decrypted value:
+
+```bash
+scripts/deploy
+```
+
+### 4️⃣ Preview changes before applying
+
+```bash
+scripts/deploy --check --diff
+```
+
+### 5️⃣ Selective role skipping (fast redeploys)
+
+The wrapper passes a fixed, vetted set of flags through to Ansible, including `--skip-tags`:
 
 ```bash
 # Skip slow roles when only updating hermes configuration
-ansible-playbook -i "${TARGET_HOST}," site.yml --skip-tags hermes,backup
+scripts/deploy --skip-tags hermes,backup
 
 # Minimal API deployment: skip everything except conduit and hermes
-ansible-playbook -i "${TARGET_HOST}," site.yml --skip-tags tailscale,docker,authelia,gateway,silverbullet,backup
+scripts/deploy --skip-tags tailscale,docker,authelia,gateway,silverbullet,backup
 
 # Full deploy (default, no skips)
-ansible-playbook -i "${TARGET_HOST}," site.yml
+scripts/deploy
 ```
 
 Protected roles that **cannot** be skipped: `secrets`, `users`, `ssh_hardening`, `common`.
 Skippable roles: `tailscale`, `docker`, `conduit`, `hermes`, `authelia`, `gateway`, `silverbullet`, `owntracks`, `backup`, `beszel`, `adguard`.
 
+`scripts/deploy` refuses anything outside this fixed flag set — extra variables, ad-hoc modules, other
+playbooks or inventories, and foreign connections — since it hands the decrypted store to whatever it
+runs; see [ADR-0007](docs/adr/0007-sops-age-encrypted-secrets.md) for why.
+
+### Adding a new secret (for a future epic)
+
+1. Add one entry to `secrets_manifest` in `group_vars/all/secrets.yml` (`env:`, `required:`, optional
+   `default:`) — or, if it's not a value the `secrets` resolver injects (rare), add it to the
+   `EXTRA` list in `scripts/generate-env.py` instead (the name-set rule's *declared extras*: every
+   name the store may hold is either a manifest name or a declared extra, and this is the one place
+   extras are listed).
+2. Regenerate the names-only reference: `python3 scripts/generate-env.py` (updates `.env.template`,
+   which lists every variable name Ansible reads — never a value — and is checked for drift by
+   `tests/lint.sh`).
+3. Add the actual value to the store: `scripts/secrets fill` (prompts for whatever's newly missing) or
+   `scripts/secrets edit`.
+
 ## 🧭 Manual Post-Deploy Steps
 
 A few services need a one-time step the operator completes by hand — either because the credential is generated by a system this playbook just deployed (so Ansible can't originate it ahead of time), or because it's a setting in another provider's own console outside this repo's reach.
 
-- **Beszel agent pairing** (epic 18): after the first deploy brings up the `beszel-hub` container, visit its dashboard (`monitor.<domain>` over Tailscale, or `<tailscale-ip>:8090` directly) and add the local VPS as a "system." That generates a key/token pair — put them in `.env` as `BESZEL_AGENT_KEY`/`BESZEL_AGENT_TOKEN`, then redeploy so the agent container picks them up. Until this is done, the agent container will fail to authenticate against the hub — a self-contained failure of that one container, not a block on anything else.
+- **Beszel agent pairing** (epic 18): after the first deploy brings up the `beszel-hub` container, visit its dashboard (`monitor.<domain>` over Tailscale, or `<tailscale-ip>:8090` directly) and add the local VPS as a "system." That generates a key/token pair — add them to the store with `scripts/secrets edit` (or `fill`) as `BESZEL_AGENT_KEY`/`BESZEL_AGENT_TOKEN`, then redeploy so the agent container picks them up. Until this is done, the agent container will fail to authenticate against the hub — a self-contained failure of that one container, not a block on anything else.
 - **AdGuard as the tailnet's DNS resolver** (epic 18): AdGuard Home is deployed and already serving DNS on port 53 (Tailscale-only) once the playbook finishes, but nothing points your devices at it yet. In the [Tailscale admin console](https://login.tailscale.com/admin/dns), under DNS settings, add the VPS's Tailscale IP as a **global override nameserver** — not split DNS, which solves a different problem (routing specific domains elsewhere) and won't give you network-wide ad-blocking. Once set, every tailnet device's DNS traffic routes through AdGuard.
 - **Matrix/OwnTracks DNS-01 cert verification, then client reconfiguration** (epic 19 #02): after this deploy, and *before* flipping either host's Cloudflare DNS record to proxied, confirm Caddy actually obtained a real DNS-01 cert on the new `:8443` listener:
   ```bash

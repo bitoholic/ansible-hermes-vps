@@ -33,17 +33,26 @@ applyTo: '**/*.yaml, **/*.yml'
 
 ## Secret Management
 
-- When using Ansible alone, store secrets using Ansible Vault
-  - Use the following process to make it easy to find where vaulted variables are defined
-    1. Create a `group_vars/` subdirectory named after the group
-    2. Inside this subdirectory, create two files named `vars` and `vault`
-    3. In the `vars` file, define all of the variables needed, including any sensitive ones
-    4. Copy all of the sensitive variables over to the `vault` file and prefix these variables with `vault_`
-    5. Adjust the variables in the `vars` file to point to the matching `vault_` variables using Jinja2 syntax: `db_password: "{{ vault_db_password }}"`
-    6. Encrypt the `vault` file to protect its contents
-    7. Use the variable name from the `vars` file in your playbooks
-- When using other tools with Ansible (e.g., Terraform), store secrets in a third-party secrets management tool (e.g., Hashicorp Vault, AWS Secrets Manager, etc.)
-  - This allows all tools to reference a single source of truth for secrets and prevents configurations from getting out of sync
+This repository does **not** use Ansible Vault or a third-party secrets manager — it uses a SOPS +
+age encrypted store, committed to the repository (see `docs/adr/0007-sops-age-encrypted-secrets.md` for
+why, and `README.md`'s "Local Secrets Workflow" for the day-to-day commands).
+
+- Every credential the `secrets` resolver role needs is one entry in the manifest,
+  `group_vars/all/secrets.yml`'s `secrets_manifest` (`env:`, `required:`, optional `default:`). The
+  resolver reads it from the environment at `lookup('env', ...)` time — **do not** add a new
+  `lookup('env', ...)` call anywhere else in the codebase; the resolver is the single seam, and a lint
+  check enforces this.
+- The actual value lives only in the encrypted store, `secrets/secrets.enc.env`, maintained with
+  `scripts/secrets` (`fill`, `edit`, `check`, `rotate`, `add-recipient`, `remove-recipient`,
+  `init-key`) — never hand-edited, never decrypted to a file.
+- Playbooks are run only through `scripts/deploy`, which decrypts the store into the child Ansible
+  process's environment (never to disk) and redacts every decrypted value from its own output as it
+  streams. Do not invoke `ansible-playbook` directly against `site.yml` with real secrets in scope, and
+  do not add a task that writes a secret-bearing file, log, or registered result without `no_log: true`
+  (`scripts/check_secret_suppression.py`, run by `tests/lint.sh`, checks for this statically).
+- A value that isn't a manifest credential at all (rare — currently just `TARGET_HOST` and
+  `AUDIT_EXTRA_TERMS`) is a *declared extra*, listed in exactly one place:
+  `scripts/generate-env.py`'s `EXTRA` list.
 
 ## Style
 
