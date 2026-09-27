@@ -326,4 +326,19 @@ expect_ok "no stray files left (round 2)"
 
 # --- the guard needs no key --------------------------------------------------------------------------------------
 [[ ! -e "$FIX_HOME/.config/sops" ]] || fail "test setup: a key file exists in the fixture HOME"
+
+# --- a compiled-bytecode file planted in scripts/__pycache__ (gitignored, so `git diff` stays clean) must not be
+# loaded in place of hermes_secrets.py's real source (epic 22 ticket #08's own review found this exact guard was
+# present in scripts/deploy but missing from scripts/secrets and scripts/check_secrets_store.py) ------------------
+mkdir -p "$FIX_REPO/scripts/__pycache__"
+printf 'open("%s/store-pyc-leak", "a").write("EVIL MODULE LOADED")\n' "$T" > "$T/evil_secrets.py"
+python3 - "$T/evil_secrets.py" "$FIX_REPO/scripts/hermes_secrets.py" <<'E'
+import importlib.util, py_compile, sys
+target = importlib.util.cache_from_source(sys.argv[2])
+py_compile.compile(sys.argv[1], cfile=target, invalidation_mode=py_compile.PycInvalidationMode.UNCHECKED_HASH)
+E
+expect_ok "planted bytecode in scripts/__pycache__ must not be loaded in place of hermes_secrets.py"
+[[ ! -e "$T/store-pyc-leak" ]] || fail "planted bytecode in scripts/__pycache__ was loaded in place of hermes_secrets.py"
+rm -rf "$FIX_REPO/scripts/__pycache__"
+
 echo "structural guard OK"

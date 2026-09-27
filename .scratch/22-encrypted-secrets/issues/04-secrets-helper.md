@@ -5,7 +5,7 @@
 **Blocked by:** #01
 **Blocks:** #09
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [x] Editing the store opens the decrypted values in the operator's editor with plaintext held only in memory and re-encrypts on save
 - [x] A check reports names missing (required) or undeclared, per the name-set rule, by name only

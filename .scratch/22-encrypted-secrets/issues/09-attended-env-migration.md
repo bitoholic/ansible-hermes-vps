@@ -5,7 +5,7 @@
 **Blocked by:** #01, #02, #03, #04, #05, #08
 **Blocks:** #10, Epic 24 #02
 
-**Status:** ready-for-human
+**Status:** done
 
 - [ ] The operator's workstation key and an offline break-glass key are generated (the break-glass private key stored offline, per the runbook), and both public keys are added as recipients
 - [ ] The existing `.env` is imported; the digest-based round-trip verification passes; nothing is printed

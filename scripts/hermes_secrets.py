@@ -67,7 +67,8 @@ def load_manifest(root=REPO_ROOT):
 
 
 def load_extras(root=REPO_ROOT):
-    """Declared extras: names the store may hold that are not manifest names, as [(env, section, secret, required)].
+    """Declared extras: names the store may hold that are not manifest names, as a list of
+    generate_env.ExtraVar(env, section, secret, required) namedtuples.
 
     The one place they are listed is EXTRA in scripts/generate-env.py; it is read from there so the wrapper,
     the guard, the helper and the audit can never disagree with the generator about it.
@@ -81,13 +82,13 @@ def load_extras(root=REPO_ROOT):
 
 def allowed_names(root=REPO_ROOT):
     """Every name the store may hold: all manifest names (required or not) and the declared extras."""
-    return {e["env"] for e in load_manifest(root)} | {extra[0] for extra in load_extras(root)}
+    return {e["env"] for e in load_manifest(root)} | {extra.env for extra in load_extras(root)}
 
 
 def required_names(root=REPO_ROOT):
     """Names that must be present in the store: required manifest names plus required declared extras."""
     names = [e["env"] for e in load_manifest(root) if e["required"]]
-    names += [extra[0] for extra in load_extras(root) if extra[3]]
+    names += [extra.env for extra in load_extras(root) if extra.required]
     return sorted(set(names))
 
 

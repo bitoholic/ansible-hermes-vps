@@ -12,7 +12,7 @@ make_secrets_fixture() {
   FIX_REPO="$repo"; FIX_HOME1="$dir/home1"; FIX_HOME2="$dir/home2"; FIX_BG_DIR="$dir/breakglass"
   mkdir -p "$repo/scripts" "$repo/group_vars/all" "$FIX_HOME1" "$FIX_HOME2" "$FIX_BG_DIR" "$dir/plain"
   local src="${FIX_SRC_ROOT:?}"
-  for f in secrets hermes_secrets.py check_secrets_store.py generate-env.py; do
+  for f in secrets hermes_secrets.py hermes_bootstrap.py check_secrets_store.py generate-env.py; do
     cp "$src/scripts/$f" "$repo/scripts/$f"
   done
   chmod +x "$repo/scripts/secrets"

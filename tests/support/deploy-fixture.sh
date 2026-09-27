@@ -35,7 +35,7 @@ make_fixture() {
   mkdir -p "$repo/scripts" "$repo/group_vars/all" "$repo/roles/secrets/tasks" "$repo/secrets" "$FIX_HOME" "$FIX_RUN" "$FIX_TMP" "$dir/keys" "$dir/plain"
   chmod 700 "$FIX_RUN"
   local src="${FIX_SRC_ROOT:?}"
-  for f in deploy hermes_secrets.py hermes_redact.py generate-env.py check_secrets_store.py; do cp "$src/scripts/$f" "$repo/scripts/$f"; done
+  for f in deploy hermes_secrets.py hermes_redact.py hermes_bootstrap.py generate-env.py check_secrets_store.py; do cp "$src/scripts/$f" "$repo/scripts/$f"; done
   chmod +x "$repo/scripts/deploy"
   cp "$src/roles/secrets/tasks/main.yml" "$repo/roles/secrets/tasks/main.yml"    # the REAL resolver
   cat > "$repo/group_vars/all/secrets.yml" <<'M'

@@ -393,4 +393,19 @@ set +e; OUT="$(echo | ./setup-env.sh 2>&1)"; RC=$?; set -e
 grep -q 'setup-env.sh' scripts/generate-env.py && ! grep -q '^SETUP = ' scripts/generate-env.py || fail "generate-env.py must no longer treat setup-env.sh as a generated file"
 echo "the .env.template stays in sync; setup-env.sh is a static, non-prompting pointer to the helper"
 
+# --- a compiled-bytecode file planted in scripts/__pycache__ (gitignored, so `git diff` stays clean) must not be
+# loaded in place of hermes_secrets.py's real source (epic 22 ticket #08's own review found this exact guard was
+# present in scripts/deploy but missing from scripts/secrets and scripts/check_secrets_store.py) ------------------
+mkdir -p "$FIX_REPO/scripts/__pycache__"
+printf 'open("%s/secrets-pyc-leak", "a").write("EVIL MODULE LOADED")\n' "$T" > "$T/evil_secrets.py"
+python3 - "$T/evil_secrets.py" "$FIX_REPO/scripts/hermes_secrets.py" <<'E'
+import importlib.util, py_compile, sys
+target = importlib.util.cache_from_source(sys.argv[2])
+py_compile.compile(sys.argv[1], cfile=target, invalidation_mode=py_compile.PycInvalidationMode.UNCHECKED_HASH)
+E
+run_secrets "$FIX_HOME1" -- check
+[[ $RC -eq 0 && ! -e "$T/secrets-pyc-leak" ]] && grep -q 'OK' <<<"$OUT" || fail "planted bytecode in scripts/__pycache__ was loaded in place of hermes_secrets.py (rc=$RC)"
+rm -rf "$FIX_REPO/scripts/__pycache__"
+echo "a compiled-bytecode file planted in scripts/__pycache__ is never loaded in place of the real source"
+
 echo "secrets helper guard OK"

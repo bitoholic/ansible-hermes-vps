@@ -64,17 +64,15 @@ if not python_supported(sys.version_info):
     sys.exit("deploy: Python 3.11 or newer is required")
 
 
-def _load(name):
-    """Load scripts/<name>.py from its explicit path (never through sys.path, so nothing else can take its place)."""
-    spec = importlib.util.spec_from_file_location(name, os.path.join(_HERE, name + ".py"))
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[name] = module
-    spec.loader.exec_module(module)
-    return module
+# hermes_bootstrap.py provides load_sibling() for every OTHER module (see its own docstring for why it can't also
+# protect this, its own, load) — loaded here the same explicit-path way it then provides for everything after it.
+_boot_spec = importlib.util.spec_from_file_location("hermes_bootstrap", os.path.join(_HERE, "hermes_bootstrap.py"))
+hermes_bootstrap = importlib.util.module_from_spec(_boot_spec)
+sys.modules["hermes_bootstrap"] = hermes_bootstrap
+_boot_spec.loader.exec_module(hermes_bootstrap)
 
-
-hermes_redact = _load("hermes_redact")
-hs = _load("hermes_secrets")
+hermes_redact = hermes_bootstrap.load_sibling("hermes_redact")
+hs = hermes_bootstrap.load_sibling("hermes_secrets")
 
 EX_REFUSED = 64
 EX_CONFIG = 78

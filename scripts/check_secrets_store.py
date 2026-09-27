@@ -30,29 +30,31 @@ What this CANNOT verify (no key here):
   * base64 of plaintext inside an encrypted-COMMENT line: SOPS only warns (the wrapper's preflight refuses that warning);
   * that a value is a strong secret, or anything in git history or the index (epic 24 scans history; this reads the tree).
 """
-import argparse
 import os
-import re
-import subprocess
 import sys
 
-import yaml
-
-sys.dont_write_bytecode = True
+# Python puts this script's directory FIRST on sys.path. This process can run alongside others that hold
+# decrypted values, so scripts/ must not be an import source at all before this point — see hermes_bootstrap.py's
+# own docstring for the full rationale and why its own load (just below) still needs this inline, repeated in
+# scripts/deploy and scripts/secrets too.
 _HERE = os.path.dirname(os.path.realpath(__file__))
+sys.dont_write_bytecode = True
+sys.pycache_prefix = "/nonexistent-hermes-pycache"
 sys.path[:] = [p for p in sys.path if os.path.realpath(p or os.getcwd()) != _HERE]
+
+import argparse  # noqa: E402
+import re  # noqa: E402
+import subprocess  # noqa: E402
 import importlib.util  # noqa: E402
 
+import yaml  # noqa: E402
 
-def _load(name):
-    spec = importlib.util.spec_from_file_location(name, os.path.join(_HERE, name + ".py"))
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[name] = module
-    spec.loader.exec_module(module)
-    return module
+_boot_spec = importlib.util.spec_from_file_location("hermes_bootstrap", os.path.join(_HERE, "hermes_bootstrap.py"))
+hermes_bootstrap = importlib.util.module_from_spec(_boot_spec)
+sys.modules["hermes_bootstrap"] = hermes_bootstrap
+_boot_spec.loader.exec_module(hermes_bootstrap)
 
-
-hs = _load("hermes_secrets")
+hs = hermes_bootstrap.load_sibling("hermes_secrets")
 
 # The real shape of a SOPS value (AES-256-GCM: a 32-byte IV = 44 base64 characters, a 16-byte tag = 24, data of the
 # value's length): it does not prove the ciphertext decrypts (no key here), but text such as `ENC[AES256_GCM,data:hunter2,

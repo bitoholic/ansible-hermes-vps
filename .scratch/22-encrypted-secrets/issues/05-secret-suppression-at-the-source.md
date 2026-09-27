@@ -5,7 +5,7 @@
 **Blocked by:** None (can start immediately)
 **Blocks:** #09
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [x] Every task that renders or writes a file containing secret values suppresses diff output (and log output where the module would echo the content)
 - [x] **The Tailscale login no longer puts the auth key in the process arguments** (Tailscale accepts a file reference for its auth key, so the value never appears in the command line, the task result or a process listing) and the task's output is suppressed

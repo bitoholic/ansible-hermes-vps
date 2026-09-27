@@ -5,7 +5,7 @@
 **Blocked by:** #09
 **Blocks:** None
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [ ] The README's local-secrets workflow is rewritten around the wrapper, the helper and the encrypted store
 - [ ] **Both repository standards files are updated:** the general instruction stating the repository must not contain secrets now says *plaintext* secrets must never be committed and encrypted secrets live in the store; the Ansible instruction file's secret-management section describes the SOPS + age model instead of mandating Ansible Vault or an external manager

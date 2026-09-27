@@ -5,7 +5,7 @@
 **Blocked by:** None (can start immediately)
 **Blocks:** None
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [x] An audit lists every rendered file that contains credentials, who actually reads it (an operator, the docker group, a specific container user), and the chosen owner and mode
 - [x] The compose file is readable by root and the docker group only, so the admin user's `docker compose` usage keeps working

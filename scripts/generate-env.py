@@ -12,12 +12,15 @@ Run with --check to compare against the committed file and exit non-zero on drif
 Historically this also regenerated setup-env.sh, an interactive prompt script. That script is superseded by
 scripts/secrets (epic 22 ticket #04) and is now a static pointer to it; nothing here writes to it any more.
 """
+import collections
 import os
 import re
 import sys
 import yaml
 
-REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+REPO = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+
+ExtraVar = collections.namedtuple("ExtraVar", ["env", "section", "secret", "required"])
 MANIFEST = os.path.join(REPO, "group_vars", "all", "secrets.yml")
 TEMPLATE = os.path.join(REPO, ".env.template")
 
@@ -25,13 +28,12 @@ TEMPLATE = os.path.join(REPO, ".env.template")
 # the ONE place they are listed. The encrypted store's structural guard, the secrets helper, the deploy wrapper's
 # preflight and epic 24's public-readiness audit all read this list (through scripts/hermes_secrets.py), so they can
 # never disagree about which names the store may hold.
-#   (name, section, secret?, required?)
 # TARGET_HOST drives the deployment target (read from the store by the deploy wrapper). AUDIT_EXTRA_TERMS is the
 # optional list of extra terms (hostnames, names, emails — comma-separated) that epic 24's audit also looks for; it
 # may be absent from the store.
 EXTRA = [
-    ("TARGET_HOST", "Operator / host", False, True),
-    ("AUDIT_EXTRA_TERMS", "Operator / host", False, False),
+    ExtraVar(env="TARGET_HOST", section="Operator / host", secret=False, required=True),
+    ExtraVar(env="AUDIT_EXTRA_TERMS", section="Operator / host", secret=False, required=False),
 ]
 
 SECTION_ORDER = [

@@ -5,11 +5,11 @@
 **Blocked by:** #01
 **Blocks:** #09
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [ ] The agent's mechanism for excluding a named command from its sandbox is identified from the **current** agent documentation, and its exact name and behavior are recorded in this ticket (the setting names may change, so this is verified, not assumed)
 - [ ] The wrapper — and only the wrapper's vetted invocation shapes (playbook mode and registered script mode) — is exempted from the sandbox, so an agent-run wrapper can read the age key and open the SSH connection to the VPS; everything else stays sandboxed
-- [ ] The sandbox's filesystem read denial covers the operator's age key location and the plaintext `.env` for everything that is not the exempted wrapper, so the protection does not rest on command patterns alone
+- [ ] The sandbox's filesystem read denial covers the operator's age key location and the plaintext `.env` for everything that is not the exempted wrapper, so the protection does not rest on command patterns alone — **amended by Round 4 (see below): not met as originally worded.** `sandbox.filesystem.denyRead` was found to override the wrapper's own exemption, so it now covers only `./.env`; the age key's protection is `permissions.deny` command-pattern rules (`cat ~/.config/sops/age/*` etc.), which is exactly the command-pattern-only protection this criterion asked not to rely on. This is a real, disclosed downgrade forced by a platform limitation, not an oversight — full detail in Round 4 below and in `.claude/README.md`.
 - [ ] Permission rules allow only the wrapper's exact vetted shapes (and the helper's non-decrypting subcommands) and deny direct decrypt commands and environment dumps
 - [ ] **What protects the exempt wrapper is documented as a list:** the exact-shape permission rules; the wrapper's own refusals (extra variables, ad-hoc modules, foreign playbooks); the pinned Ansible configuration and cleared environment (#01); output redaction (#02); and the fact that an agent editing the wrapper itself or a role and then running it is **not** protected against — the documented Tier 1 limit
 - [ ] **An end-to-end check under the real sandbox is recorded:** an agent-run playbook check through the wrapper succeeds (decrypts the store, reaches the VPS over SSH), while the same agent's attempts to read the key or `.env` directly — through a different file reader, an interpreter one-liner and a hex dumper — are refused

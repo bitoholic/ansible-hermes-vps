@@ -5,7 +5,7 @@
 **Blocked by:** None (can start immediately)
 **Blocks:** Epic 24 #02
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [x] The Authelia forward-auth URL in the gateway template derives from the stack domain secret instead of a literal hostname
 - [x] The legacy Caddyfile fixture uses a placeholder domain and the byte-equivalence test is updated correspondingly
