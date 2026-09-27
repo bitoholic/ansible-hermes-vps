@@ -46,8 +46,8 @@ The `docker` role owns the consolidated compose file and brings up the full stac
 Every credential this playbook needs lives **encrypted** in `secrets/secrets.enc.env` (SOPS, age
 recipients), committed alongside the code. There is no plaintext `.env` in this workflow — the deploy
 wrapper decrypts the store directly into its child process's environment and nothing else ever touches
-disk in plaintext. `setup-env.sh` (the old interactive prompt script) no longer exists; the tools below
-replace it. Full detail, including onboarding a new workstation and incident response, is in
+disk in plaintext. `setup-env.sh` (the old interactive prompt script) now only redirects to the tools
+below, which replace its behavior entirely. Full detail, including onboarding a new workstation and incident response, is in
 [`docs/secrets-runbooks.md`](docs/secrets-runbooks.md).
 
 ### 1️⃣ First-time setup on a workstation

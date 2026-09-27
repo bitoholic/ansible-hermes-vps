@@ -18,8 +18,10 @@ terminal. If a step below seems to require that, stop — it's wrong, not necess
 | Fedora | `sudo dnf install age` | No official package — [download the binary](https://github.com/getsops/sops/releases) |
 | macOS | `brew install age` | `brew install sops` |
 
-For `sops`, prefer a release at or above **v3.10.0**: earlier versions silently ignore
-`SOPS_AGE_KEY_CMD` (the Tier 2 hardware-key hook — see ADR-0007) rather than erroring, which is
+For `sops`, prefer a release at or above **v3.10.0**: earlier versions don't recognize
+`SOPS_AGE_KEY_CMD` (the Tier 2 hardware-key hook — see ADR-0007) at all and fall back to the default
+key-file path instead, failing with a misleading "your key is not a recipient of this store" rather
+than an error naming the actual problem, which is
 confusing to debug. Verify with `sops --version`.
 
 **2. Generate this workstation's key**, on the new workstation:

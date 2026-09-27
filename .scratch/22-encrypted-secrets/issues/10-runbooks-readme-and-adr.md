@@ -71,5 +71,26 @@ what the sync check actually enforces.
 ticket touches no code path the test suite exercises directly, but re-running confirms nothing was
 broken and the sync check still passes.
 
+## Review round 1 (independent fresh-context subagent): PASS, two cosmetic wording fixes applied
+
+All 6 acceptance criteria verified PASS against the actual source (not just the new docs' own claims):
+every command shown in README matched `scripts/secrets`/`scripts/deploy`'s real subcommands and flags;
+both standards files' new claims (the single-seam lint check, the `EXTRA` list) verified against the
+actual code; the runbooks' incident-response ordering verified to match `scripts/secrets
+remove-recipient`'s own printed guidance verbatim; ADR-0007 cross-checked against `.claude/README.md`'s
+already-reviewed account of the Tier 1 network gap with no overclaiming; the "delegated subagents share
+the container filesystem" line confirmed to refer to a genuinely different, container-internal `.env`
+(`roles/hermes/tasks/main.yml`), not a stale reference; no secret or operator-identifying value found in
+any new/changed doc; both new anchors resolve correctly.
+
+Two non-blocking wording nits: README claimed `setup-env.sh` "no longer exists" — it actually still
+exists as a small redirect stub (prints a pointer to `scripts/secrets`, exits 1), so the literal
+sentence was inaccurate even though the intended meaning (its old *behavior* is gone) was clear from
+context. Fixed to say it "now only redirects to the tools below." Separately, the runbooks doc
+described a pre-3.10.0 `sops` as "silently ignoring" `SOPS_AGE_KEY_CMD` — per ticket #08's own findings,
+it actually fails with a misleading "not a recipient" error, not a silent no-op. Fixed to describe this
+precisely. Both are wording-only; no factual claim about mechanism, command behavior, or file structure
+was found wrong. Re-verified: full `tests/lint.sh` clean after both fixes.
+
 **Ticket #10 is closed.** This is also the last ticket in epic 22 — every ticket (01 through 10) is now
 implemented, reviewed, and closed, pending the operator's own full-epic review.
