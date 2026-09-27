@@ -4,23 +4,55 @@
 workstation — gets the same guardrails automatically. This file records the design decisions, what
 was actually verified, and the honest limit of what this protects against.
 
-## The mechanism (verified against the current Claude Code documentation, not assumed)
+## The mechanism (verified against the current Claude Code documentation *and* empirically — the docs alone overstate what it delivers)
 
 Claude Code's Bash sandbox (`sandbox.enabled: true`) applies OS-level filesystem and network
 isolation to every Bash/Monitor command it runs, enforced by the kernel (Linux: bubblewrap/seccomp;
-macOS: Seatbelt) — a command cannot read a denied path by switching to a different reader, since the
-denial happens below the tool layer entirely.
+macOS: Seatbelt).
 
-`sandbox.excludedCommands` is the documented mechanism for letting one specific, named command run
-completely outside the sandbox (full filesystem and network access) while every other command stays
-sandboxed. Verified directly against `https://code.claude.com/docs/en/sandboxing` (fetched during
-this ticket's implementation, 2026-09): *"Add `excludedCommands` for any organization-approved tools
-that must run without isolation"*; entries are matched as literal command names (the docs' own
-examples: `"excludedCommands": ["docker", "kubectl"]`). This is the only mechanism that lets a
-command reach an outbound SSH connection at all — the sandbox's network layer is a domain-based HTTP
-allowlist/proxy, not something an arbitrary SSH target can be added to. This exact tradeoff — and the
-requirement to identify and record the mechanism from *current* documentation rather than assume it,
-since setting names can change — is why this file exists rather than a one-line settings change.
+`sandbox.excludedCommands` is documented as letting one named command run "completely outside the
+sandbox" (`https://code.claude.com/docs/en/sandboxing`: *"Add `excludedCommands` for any
+organization-approved tools that must run without isolation"*; entries matched as literal command
+names, e.g. `["docker", "kubectl"]`). **In practice, on Claude Code 2.1.283, this claim does not hold
+without extra configuration, and one part of it does not hold at all.** Ticket #08 originally closed
+on the documented claim alone, verified only against an *absent* key/store (see "End-to-end check"
+below for why that test didn't catch this). Once a real key and store existed (ticket #09), four real
+gaps surfaced, three fixable and one not:
+
+1. **`sandbox.filesystem.denyRead` overrides the exemption.** A path listed in `denyRead` stayed
+   unreadable to `scripts/deploy` even though it's the excluded command — confirmed with a synthetic
+   throwaway key and deny rule (never the real one), reproduced identically after a full session
+   restart and after moving the exclusion to trusted (user-level) settings, ruling out caching or the
+   trusted-tier restriction as the cause. **Fix**: the age key and SSH key paths were removed from
+   `denyRead` entirely (see "What's denied" below for what this costs).
+2. **`permissions.deny` `Read(...)` rules *also* override the exemption**, despite being documented
+   (and originally recorded in this file) as scoped only to Claude's own `Read` tool, not Bash. Removing
+   `Read(~/.config/sops/age/**)` and `Read(~/.ssh/**)` from `permissions.deny` was necessary before the
+   wrapper could see either file — confirmed by testing with them present (blocked) and absent (worked).
+3. **Unix-domain-socket creation is blocked by a separate seccomp filter, independent of exclusion.**
+   SSH's own connection-multiplexing feature (`ControlMaster`) failed with
+   `muxclient: socket(): Operation not permitted` even after fixes 1–2. **Fix**:
+   `sandbox.network.allowAllUnixSockets: true` (found via the CLI binary's own settings schema strings,
+   since the fetched docs didn't surface this cleanly) — `allowUnixSockets` alone is macOS-only and
+   silently ignored on Linux.
+4. **Raw network reachability is NOT lifted by exclusion, and there is no fix for this in settings.**
+   After fixes 1–3, the wrapper could decrypt the store and reach the point of opening an SSH
+   connection, but failed with `ssh: connect to host ... port 22: Network is unreachable` — confirmed
+   against the VPS's real public IP (not a private/overlay address, ruling out a routing-only
+   explanation). Traced into the CLI binary's own sandboxing code: Linux network confinement
+   (`--unshare-net`, bubblewrap's network-namespace flag) is gated by a `needsNetworkRestriction`
+   computation derived purely from `sandbox.network.allowedDomains`/`denyAllNetwork` — **nothing in that
+   computation references `excludedCommands` at all**. Adding the VPS's own domain/IP to
+   `sandbox.network.allowedDomains` did not help, consistent with this finding: that setting governs
+   the HTTP/SOCKS proxy layer, which plain SSH (not HTTP traffic) never uses. There is no setting that
+   lifts network-namespace isolation for an excluded command specifically. This is a genuine platform
+   gap, not a configuration mistake, and feedback describing it has been filed with Anthropic.
+
+**What this means in practice**: an agent can run `scripts/deploy` and have it correctly decrypt the
+store and prepare everything (fixes 1–3 are real, working, permanent fixes) — but the final network
+hop to the real VPS cannot complete through the exemption alone. The only way an agent can complete a
+real deployment is the documented `dangerouslyDisableSandbox` escape hatch (see "Reaching the VPS as
+an agent" below), which is deliberately *not* a standing, low-friction capability.
 
 `scripts/deploy` is the only entry in `excludedCommands`. Both of the wrapper's own invocation shapes
 (`scripts/deploy [FLAGS]` and `scripts/deploy --script NAME [ARGS]`, epic 22 #01) are covered by the
@@ -29,21 +61,35 @@ same entry — the exemption is by command name, not by argument shape; argument
 
 ## What's denied, for everything except the exempted wrapper
 
-`sandbox.filesystem.denyRead`:
-- `~/.config/sops/age/**` — the conventional age identity location (`hermes_secrets.py`'s
-  `DEFAULT_KEY_FILE`). An operator using `HERMES_SECRETS_KEY_FILE` to point elsewhere isn't covered by
-  this — criterion #18 asks for conventional locations only, not every possible override, and no
-  setting here can predict an override that doesn't exist yet.
-- `~/.ssh/**` — the conventional SSH key location the wrapper's own SSH connection to the VPS uses.
-- `./.env` — the plaintext leftover from before the encrypted store existed (epic 22 #03's structural
-  guard keeps it git-ignored; this keeps it unreadable to a sandboxed agent too).
+**`sandbox.filesystem.denyRead` now covers only `./.env`** — the plaintext leftover from before the
+encrypted store existed (epic 22 #03's structural guard keeps it git-ignored; this keeps it unreadable
+to a sandboxed agent too, at the OS level, unconditionally). The wrapper only ever checks whether this
+file *exists* (a warning, never a content read — confirmed by reading every reference to `.env` in
+`scripts/deploy`), so denying it costs the wrapper nothing.
 
-`permissions.deny` (Bash command-shape rules — defense in depth *alongside* the filesystem denial
-above, not instead of it, precisely because a command-pattern rule can be sidestepped by an
-equivalent command the pattern didn't anticipate):
+**`~/.config/sops/age/**` and `~/.ssh/**` are deliberately *not* in `denyRead` any more** — the
+opposite of the original design. As documented above, `denyRead` overrides the exemption entirely, so
+keeping these paths there would make `scripts/deploy` unable to decrypt the store or open its own SSH
+connection — defeating this ticket's whole purpose. Their protection is now the weaker
+`permissions.deny` layer below, plus the `Read()` tool-deny for `.env` only (the two `Read()` entries
+for the key paths were also removed, since — surprisingly — they *also* overrode the exemption; see
+above). **This is a real, accepted downgrade**: an OS-level, reader-independent wall over these two
+paths is not achievable while also letting the exempted wrapper use them, on this Claude Code version.
+Command-pattern rules can be sidestepped by an equivalent command the pattern didn't anticipate (a text
+editor, an uncommon utility, a one-off script) — this was exactly the risk the original filesystem-level
+design was chosen to avoid, and it no longer can be, for these two specific paths.
+
+`permissions.deny` (Bash command-shape rules — the primary defense now for the age key and SSH key,
+not merely defense-in-depth alongside an OS-level wall):
 - `sops decrypt`/`sops exec`, `env`, `printenv` — direct decrypt/environment-dump attempts.
 - `scripts/secrets fill|edit|rotate|add-recipient|remove-recipient|import` — every subcommand of the
   secrets helper (epic 22 #04) that needs to read the age key to decrypt or re-encrypt the store.
+- `cat` against `~/.config/sops/age/*`, `~/.ssh/*`, `.env` and `./.env` — the single most likely
+  "quick look" command for each of the three sensitive paths. Cheap, reasonable defense-in-depth for
+  the most common accidental read; **explicitly not exhaustive** — `head`, `tail`, `less`, `xxd`, a
+  Python one-liner, or any other reader not in this list is not blocked. Tier 1 has always been framed
+  as accident prevention, not a security boundary (see the Tier 1 limit below); for these two paths
+  that framing is now load-bearing rather than a backstop.
 
 `permissions.allow` — the wrapper's own invocation, and the secrets helper's two subcommands that
 never touch the key at all: `check` (reads only the store's ciphertext structure) and `init-key`
@@ -127,6 +173,11 @@ line, vs. patching the wrapper's own argument-parsing/refusal logic), and is cal
 because it would be easy to read the "wrapper's own refusals" protection as covering both invocation
 shapes equally — it does not.
 
+**A separate, unrelated limit**: even where nothing above is at issue, an *agent*-run real deployment
+cannot complete the network hop to the VPS through the exemption alone — see "The mechanism" above
+(gap 4) and "Reaching the VPS as an agent" below. This is a platform gap, not a trust question about
+the wrapper's own code.
+
 ## Tier 2 upgrade path (documented, not built — out of scope for this epic)
 
 A hardware-backed or passphrase-gated age key (a token requiring a physical touch, or a passphrase
@@ -139,31 +190,52 @@ is honoured for a hardware-backed key (Tier 2) with no change here."* Adopting T
 provisioning the hardware/passphrase-gated key and setting that one environment variable — not a code
 change to the wrapper or these settings.
 
-## End-to-end check under the real sandbox (recorded, not just claimed)
+## End-to-end check under the real sandbox (recorded, not just claimed — twice, before and after a real key/store existed)
 
-Verified live, in this session, with these exact settings active (not a simulation):
+**Ticket #08's original verification** (no real key or store existed yet): `cat`/`python3`/`xxd`
+against `.env` were all refused with a genuine OS-level `PermissionError`, and `scripts/deploy --check`
+reached a clean preflight reporting no key/store/tools present — proof the exemption ran without
+friction *when there was nothing sensitive to actually read yet*. This was a real but incomplete test:
+it could not have caught gaps 1–2 above, since a `denyRead`/`Read()` rule that blocks a file which
+doesn't exist yet is indistinguishable, from this test's perspective, from one that would also block a
+file that does.
 
-- `cat ~/.config/sops/age/keys.txt`, `python3 -c "print(open('.../.env').read())"` (a different
-  reader — an interpreter one-liner), and `xxd .env` (a hex dumper) were all refused. The Python and
-  `xxd` attempts against the real, existing `.env` file returned a genuine OS-level
-  `PermissionError`/`Permission denied` — not a "file not found" or a tool-level message — proving
-  the denial is enforced below the command layer, and survives switching readers, exactly as the
-  acceptance criterion asks.
-- `scripts/deploy --check` ran to completion with no sandbox friction at all, reaching its own
-  preflight checks (which reported the real, expected state of this workstation: `sops`/`age` not on
-  `PATH`, no store yet, no key yet at the conventional location) — the same clean preflight output it
-  would produce unsandboxed. This is the sharpest proof available that the exemption works: the
-  wrapper could freely check for `.env`'s existence and the age key's location, the exact two things
-  every other command was just denied.
-- `scripts/secrets check` (non-decrypting) ran without a permission prompt; `scripts/secrets fill`
-  (decrypting) and a bare `env` were both refused at the permission layer before ever reaching the
-  sandbox.
-- **Not verified here, by design**: an agent-run playbook actually reaching a real VPS over SSH. This
-  epic's own hard rule (enforced throughout every review round) is that no automated step in this
-  repository's own tooling work ever connects to a real host. That specific check — an agent-run
-  `scripts/deploy --check` genuinely opening an SSH connection to the real VPS while unsandboxed — is
-  operator-validated at the next real deploy, the same treatment this epic already gives every other
-  real-VPS-touching concern (the migration, the reboot drill, the live verification script).
+**Ticket #09's real migration** (a real key and store now exist) is what actually exercised the
+exemption fully, and is what surfaced gaps 1–4 above. After fixes 1–3:
+- `scripts/deploy --check`, run by the agent, correctly decrypted the real store and resolved every
+  secret (`secrets: Resolve secrets from the manifest into a single secrets dict` — every item
+  `(censored due to no_log)`, confirming redaction held under real content, not just canaries).
+- The identical command still failed to reach the VPS at all (`Network is unreachable`) purely from the
+  sandbox's network-namespace isolation, confirming gap 4 is real and not an artifact of the filesystem
+  fixes.
+- `cat`/`head`/`tail`-style direct reads of the age key and SSH key by a *non-exempted* command remain
+  refused via the `permissions.deny` `cat` patterns above (verified with a synthetic key at a synthetic
+  path, never the real one) — narrower than the original OS-level wall, but still real.
+- `scripts/secrets check` (non-decrypting) still runs without a prompt; `scripts/secrets fill`
+  (decrypting) and a bare `env` are still refused at the permission layer.
+
+## Reaching the VPS as an agent (the escape hatch, not a standing capability)
+
+Gap 4 has no settings-based fix. The only way an agent-run `scripts/deploy` can complete a real
+deployment — actually opening the SSH connection — is Claude Code's own documented
+`dangerouslyDisableSandbox` retry mechanism: when a sandboxed command fails from a sandbox restriction,
+the harness may retry it fully unsandboxed, subject to the normal permission flow (a prompt, or the
+auto-mode classifier). **Verified working**: an agent-run `scripts/deploy --check`, retried with
+`dangerouslyDisableSandbox: true`, successfully decrypted the store, connected to the real VPS, and
+completed a full check-mode play (exit 0) — the first genuine agent-run deployment in this epic.
+
+This is **deliberately not a smooth or standing capability**, and should not be treated as one:
+- The flag's own guidance is explicit that each use is evaluated individually — *"Treat each command
+  you execute with `dangerouslyDisableSandbox: true` individually... default to running future commands
+  within the sandbox"* — there is no settings rule that pre-approves it as routine.
+- In this same session, the auto-mode classifier allowed the deploy run itself but then separately
+  blocked a follow-up attempt to re-read that run's own saved output, reasoning it was "pursuing the
+  same [flagged] outcome." The two decisions were inconsistent in a way that isn't fully predictable in
+  advance.
+- Practically: an agent can still attempt a real deployment when explicitly asked, and it can work (it
+  did), but every attempt carries this same case-by-case uncertainty rather than a guaranteed outcome.
+  The operator remains the reliable way to run a real deployment; the agent path is a supervised,
+  best-effort option on top of that, not a replacement for it.
 
 ## No secrets, no operator-specific paths (criterion #18)
 

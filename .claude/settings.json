@@ -4,10 +4,11 @@
     "excludedCommands": [
       "scripts/deploy"
     ],
+    "network": {
+      "allowAllUnixSockets": true
+    },
     "filesystem": {
       "denyRead": [
-        "~/.config/sops/age/**",
-        "~/.ssh/**",
         "./.env"
       ],
       "allowWrite": [
@@ -37,7 +38,10 @@
       "Bash(scripts/secrets add-recipient:*)",
       "Bash(scripts/secrets remove-recipient:*)",
       "Bash(scripts/secrets import:*)",
-      "Read(~/.config/sops/age/**)",
+      "Bash(cat ~/.config/sops/age/*)",
+      "Bash(cat ~/.ssh/*)",
+      "Bash(cat .env)",
+      "Bash(cat ./.env)",
       "Read(.env)"
     ]
   }

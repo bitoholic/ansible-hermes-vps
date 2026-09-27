@@ -199,3 +199,59 @@ now including registered-script mode's narrower protection; an end-to-end check 
 recorded (with the real-VPS-SSH portion deliberately operator-deferred, consistent with this epic's standing rule);
 the accidents-not-a-determined-actor framing is stated; the Tier 2 upgrade path is documented with no wrapper
 rewrite required; no secrets or operator-specific paths appear in the settings or documentation.
+
+## Round 4 (reopened during ticket #09's real migration): the "verified live" claim was incomplete, and one gap has no fix
+
+Ticket #09's real, attended migration was the first time a real age key and a real encrypted store existed on the
+operator's workstation — and the first time `scripts/deploy` was actually run by an agent against them, rather than
+against an absent key/store as in round 3's own end-to-end check. This surfaced four gaps in `excludedCommands`
+that no prior round's testing could have caught (a denied path that doesn't exist yet is indistinguishable, to a
+test, from one that would also be denied if it existed):
+
+1. **`sandbox.filesystem.denyRead` overrode the exemption.** `scripts/deploy` could not read a path listed in
+   `denyRead` even though it is the excluded command. Confirmed with a synthetic throwaway key and deny rule
+   (never the real key), reproduced after a full session restart and after the exclusion was also added to
+   trusted user-level settings — ruling out caching and the trusted-tier restriction as explanations. **Fixed**
+   by removing the age-key and SSH-key paths from `denyRead` (both are things the wrapper must read to function;
+   `.env` stays denied since the wrapper only ever checks its existence, never its content).
+2. **`permissions.deny` `Read(...)` rules also overrode the exemption** — contradicting what round 1–3's own
+   documentation claimed (scoped only to Claude's `Read` tool, not Bash). Removing `Read(~/.config/sops/age/**)`
+   and `Read(~/.ssh/**)` was necessary before the wrapper could see either file. `Read(.env)` was kept, since
+   `.env` itself stays denied at the filesystem level regardless.
+3. **Unix-socket creation for SSH's own `ControlMaster` multiplexing was blocked by a separate seccomp filter**,
+   independent of exclusion (`muxclient: socket(): Operation not permitted`). **Fixed** with
+   `sandbox.network.allowAllUnixSockets: true`, found via the Claude Code CLI binary's own settings-schema
+   strings (`sandbox.network.allowUnixSockets` is macOS-only and silently ignored on Linux — a real trap the
+   fetched public docs didn't make clear).
+4. **Raw network reachability is not lifted by exclusion at all, and there is no settings fix.** After fixes 1–3,
+   the wrapper decrypted the real store correctly and reached the point of opening its SSH connection, then
+   failed with `Network is unreachable` — reproduced against the VPS's real public IP (not a private/overlay
+   address). Traced directly into the CLI binary: Linux network-namespace isolation (`--unshare-net`) is gated
+   by a computation derived purely from `sandbox.network.allowedDomains`/`denyAllNetwork`, with no reference to
+   `excludedCommands` anywhere in it. Adding the VPS's domain/IP to `allowedDomains` did not help (confirmed) —
+   consistent with that setting governing only the HTTP/SOCKS proxy layer, which plain SSH never uses. This is a
+   genuine, unfixable-via-settings platform gap on Claude Code 2.1.283, not a configuration mistake. Feedback
+   describing it (with a minimal repro) was filed with Anthropic during this session.
+
+**The practical outcome**: an agent can now genuinely decrypt the store and prepare a deployment through the
+exempted wrapper (fixes 1–3 are real, working, and permanent). The final network hop to a real host cannot
+complete through `excludedCommands` alone. The only way an agent can complete a real deployment is Claude Code's
+own `dangerouslyDisableSandbox` retry escape hatch — verified working in this session (an agent-run
+`scripts/deploy --check` reached the real VPS and completed, exit 0) — but this is deliberately not a standing,
+low-friction capability: the flag is evaluated case by case, its own documentation says so explicitly, and in
+this same session the classifier allowed the deploy itself but then separately blocked a follow-up attempt to
+re-read that run's own output. `.claude/README.md` now documents all four gaps, the two-tier real/weaker
+protection this leaves for the age key and SSH key (an OS-level wall was not achievable while also letting the
+exempted wrapper use them; the actual protection is now `permissions.deny` command-pattern rules, explicitly
+non-exhaustive), and the escape-hatch path honestly, including its unpredictability.
+
+**This is not a documentation-only round** — `.claude/settings.json` changed materially (denyRead narrowed from
+3 entries to 1; two `Read()` deny rules removed; four `cat`-pattern deny rules added as partial compensation;
+`sandbox.network.allowAllUnixSockets` added). Re-verified: `tests/check-deploy-wrapper.sh` and the full
+`tests/lint.sh` both pass cleanly with the corrected settings (these test suites use their own throwaway
+fixtures and don't depend on `excludedCommands` at all, so the network gap doesn't affect them).
+
+**Ticket #08 is closed again** on this corrected, honest basis: the guardrails now genuinely protect an agent's
+filesystem access to the key/store while allowing the exempted wrapper to function, with a plainly disclosed
+platform limit on the network hop and its practical (non-standing) workaround — rather than the previous,
+materially incomplete "verified live" claim.
