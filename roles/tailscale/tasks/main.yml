@@ -59,6 +59,12 @@
 
 - name: Require a Tailscale version that supports the file-reference auth-key form
   tags: [tailscale]
+  # Same limit already documented below for the tailscale-ip queries: `command` tasks don't support check mode,
+  # so under --check on a host where Tailscale is already installed, "Query the installed Tailscale version"
+  # above is itself skipped, leaving stdout_lines empty — indexing [0] into it then fails while resolving this
+  # task's own args (fail_msg), before the assert even runs. A --check preview should still render the rest of
+  # the play rather than crash on a version string that genuinely can't be known yet.
+  ignore_errors: "{{ ansible_check_mode }}"
   ansible.builtin.assert:
     that:
       - (tailscale_version_result.stdout_lines[0] | trim | regex_replace('^([0-9]+\.[0-9]+\.[0-9]+).*$', '\\1'))
