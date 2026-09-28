@@ -6,11 +6,18 @@ docker_project_name: hermes-vps
 # (e.g. OTR_HTTPHOST). 0.0.0.0 = all interfaces (default).
 docker_bind_address: "0.0.0.0"
 
-# Standard networks
+# Standard networks. exit_nodes_net (epic 23 #03) is the exit-node pairs' own dedicated network —
+# never gateway or internal — so a compromised pair has no Docker-network path to Authelia or
+# Hermes (container-bridge traffic returns early in the DOCKER-USER firewall chain regardless, but
+# this keeps it from reaching those services' own Docker-network listeners at all). Every pair
+# shares this one network (not one per location): the isolation requirement is pair-from-the-rest-
+# of-the-stack, not pair-from-pair.
 docker_networks:
   - name: gateway
     driver: bridge
   - name: internal
+    driver: bridge
+  - name: exit_nodes_net
     driver: bridge
 
 # Named volumes declared at the top level of the consolidated compose file.
@@ -19,6 +26,18 @@ docker_volumes:
   - caddy_data
   - caddy_config
   - syncplay_data
+
+# Epic 23 #03: generic list-driven fragment support, for a fragment that declares SEVERAL
+# services from one list (one enabled_services entry above is always exactly one service). Each
+# entry is {template: 'services/<name>.yml.j2', entries: <list>}; the template is rendered once per
+# list entry with that entry available as `item` (docker-compose.yml.j2's own loop, via the
+# 'template' lookup's template_vars). Deliberately NOT named `items` (a dict's own built-in `.items()`
+# method shadows a same-named key on Jinja attribute access — `fragment.items` silently returns a
+# bound method instead of the list, found empirically). Not exit-node-specific — a future list-driven
+# service reuses this by adding its own entry, nothing here names exit_nodes. See group_vars/all/
+# main.yml for the real entry (kept there, not here, since a role default can't reference another
+# role's list var).
+docker_list_fragments: []
 
 # Services to enable. Each service must have a corresponding fragment in
 # roles/docker/templates/services/<name>.yml.j2

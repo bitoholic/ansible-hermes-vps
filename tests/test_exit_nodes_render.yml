@@ -292,3 +292,59 @@
             that:
               - overlong_prefix_failed_fast | default(false)
             fail_msg: "exit_nodes validation did NOT fail fast on an over-long hostname-prefix override"
+
+    # Epic 23 #03: the deployment-mechanics half (write_credentials.yml / ensure_state_dirs.yml),
+    # run separately from write_credentials.yml's directory/file tasks (see that file's own
+    # comment — they set group: docker, which this test host does not have).
+    - name: Render the shared exit-node credentials file directly (no ownership tasks)
+      ansible.builtin.template:
+        src: "{{ playbook_dir }}/../roles/exit_nodes/templates/credentials.env.j2"
+        dest: "{{ exit_nodes_credentials_test_file }}"
+      vars:
+        exit_nodes_credentials_test_file: "{{ (lookup('ansible.builtin.env', 'TMPDIR') | default('/tmp', true)) }}/exit_nodes_credentials_test.env"
+        secrets:
+          exit_node_windscribe_private_key: fake-private-key
+          exit_node_windscribe_address: <secret-windscribe-address>
+          exit_node_windscribe_preshared_key: fake-preshared-key
+          exit_node_tailscale_authkey: tskey-auth-fake
+
+    - name: Assert the rendered credentials file has exactly the four expected lines
+      ansible.builtin.assert:
+        that:
+          - rendered_lines | length == 4
+          - "'WIREGUARD_PRIVATE_KEY=fake-private-key' in rendered_lines"
+          - "'WIREGUARD_ADDRESSES=<secret-windscribe-address>' in rendered_lines"
+          - "'WIREGUARD_PRESHARED_KEY=fake-preshared-key' in rendered_lines"
+          - "'TS_AUTHKEY=tskey-auth-fake' in rendered_lines"
+        fail_msg: "credentials.env.j2 did not render the expected shape: {{ rendered_lines }}"
+      vars:
+        exit_nodes_credentials_test_file: "{{ (lookup('ansible.builtin.env', 'TMPDIR') | default('/tmp', true)) }}/exit_nodes_credentials_test.env"
+        rendered_lines: "{{ lookup('ansible.builtin.file', exit_nodes_credentials_test_file) | trim | split('\n') }}"
+
+    # Root-owned (no "docker" group needed), so this one runs for real against a three-entry list.
+    - name: Ensure per-location Tailscale state directories exist, for a three-entry list
+      ansible.builtin.include_tasks:
+        file: "{{ playbook_dir }}/../roles/exit_nodes/tasks/ensure_state_dirs.yml"
+      vars:
+        exit_nodes_state_dir: "{{ (lookup('ansible.builtin.env', 'TMPDIR') | default('/tmp', true)) }}/exit_nodes_state_test"
+        # Chowning to root needs privilege a test host may not have (see defaults/main.yml's own
+        # comment); the test-runner's own username proves the same file-creation logic without it.
+        exit_nodes_state_owner: "{{ lookup('ansible.builtin.env', 'USER') }}"
+        exit_nodes_state_group: "{{ lookup('ansible.builtin.env', 'USER') }}"
+        exit_nodes:
+          - name: london
+            region: United Kingdom
+            city: London
+          - name: warsaw
+            region: Poland
+            city: Warsaw
+          - name: newyork
+            region: United States
+            city: New York
+
+    - name: Assert one state directory per location was created
+      ansible.builtin.stat:
+        path: "{{ (lookup('ansible.builtin.env', 'TMPDIR') | default('/tmp', true)) }}/exit_nodes_state_test/{{ item }}"
+      loop: [london, warsaw, newyork]
+      register: exit_nodes_state_dir_stats
+      failed_when: not exit_nodes_state_dir_stats.stat.exists or not exit_nodes_state_dir_stats.stat.isdir

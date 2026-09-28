@@ -1,0 +1,18 @@
+---
+# Split out of tasks/main.yml for the same reason as write_credentials.yml: a test playbook can
+# exercise this alone (no "docker" group needed — these are root:root) without also needing a
+# real docker group on the test host.
+#
+# One bind-mounted state directory per location, root-owned (the official tailscale/tailscale
+# image runs as root) — see defaults/main.yml for why this is a per-item bind mount, not a
+# dynamic top-level named volume.
+- name: Ensure per-location Tailscale state directories exist
+  ansible.builtin.file:
+    path: "{{ exit_nodes_state_dir }}/{{ item.name }}"
+    state: directory
+    owner: "{{ exit_nodes_state_owner }}"
+    group: "{{ exit_nodes_state_group }}"
+    mode: '0700'
+  loop: "{{ exit_nodes }}"
+  loop_control:
+    label: "{{ item.name }}"

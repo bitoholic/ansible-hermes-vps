@@ -152,6 +152,16 @@ docker_published_restricted_ports:
 docker_published_restricted_udp_ports:
   - 53
 
+# Epic 23 #03: wires the exit_nodes list (roles/exit_nodes/defaults/main.yml) into the docker
+# role's generic list-driven fragment mechanism (roles/docker/defaults/main.yml's own comment).
+# Lives here, not in either role's own defaults, because a role default cannot reference another
+# role's list variable, and this file is already the established single composition point for
+# cross-role, non-secret config (see docker_published_*_ports above). Renders one tunnel+exit-
+# node+routing-sidecar trio per exit_nodes entry.
+docker_list_fragments:
+  - template: services/exit_node_pair.yml.j2
+    entries: "{{ exit_nodes }}"
+
 # The single Hermes agent, expressed as a data entry and consumed by the render loop in
 # the hermes role. The `default` entry is the main "second brain" agent, deployed to
 # hermes_home directly. (Sub-profiles were removed in epic 09; the loop still supports

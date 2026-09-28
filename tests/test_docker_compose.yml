@@ -28,10 +28,39 @@
         driver: bridge
       - name: internal
         driver: bridge
+      - name: exit_nodes_net
+        driver: bridge
     docker_volumes:
       - caddy_data
       - caddy_config
       - syncplay_data
+    # Epic 23 #03: a THREE-entry fixture (not the real default two-entry list) to prove the
+    # list-driven fragment mechanism actually scales, per the epic's own Testing Decisions.
+    exit_nodes:
+      - name: london
+        region: United Kingdom
+        city: London
+      - name: warsaw
+        region: Poland
+        city: Warsaw
+      - name: zurich
+        region: Switzerland
+        city: Zurich
+    exit_nodes_hostname_prefix: vps
+    exit_nodes_service_prefix: exit-node
+    exit_nodes_credentials_file: "{{ docker_compose_dir }}/exit-nodes/credentials.env"
+    exit_nodes_state_dir: "{{ docker_compose_dir }}/exit-nodes/state"
+    exit_nodes_gluetun_image: "qmcgaw/gluetun@sha256:2733bb22b27e3efa7a9f2cef9057ec12791b8b225793fcd3dbfd0508404dfc25"
+    exit_nodes_tailscale_image: "tailscale/tailscale@sha256:c507f3a2a6ab1cabd8d809b98edeb41edbd5c3fb6ad9632ffd098b4c7d0b4065"
+    exit_nodes_updater_period: 24h
+    exit_nodes_updater_vpn_service_providers: windscribe
+    exit_nodes_return_route_table: 52
+    exit_nodes_return_route_priority: 50
+    exit_nodes_tailnet_subnet_v4: "100.64.0.0/10"
+    exit_nodes_tailnet_subnet_v6: "fd7a:115c:a1e0::/48"
+    docker_list_fragments:
+      - template: services/exit_node_pair.yml.j2
+        entries: "{{ exit_nodes }}"
     owntracks_data_dir: "{{ docker_compose_dir }}/owntracks/store"
     silverbullet_compose_dir: /opt/silverbullet
     silverbullet_data_dir: /opt/hermes/wiki
@@ -94,6 +123,17 @@
         mode: '0755'
 
   tasks:
+    # Epic 23 #03, clean-host deploy AC: prove the render environment genuinely has no exit-node
+    # credentials file yet — this playbook never runs the exit_nodes role (which is what writes it
+    # on a real deploy, ahead of this role via roles/docker/meta/main.yml) — before rendering and
+    # validating the compose file below, so "renders and passes validation with the file absent" is
+    # an observed fact here, not an assumption.
+    - name: Assert the exit-node credentials file does not exist (clean-host precondition)
+      ansible.builtin.stat:
+        path: "{{ exit_nodes_credentials_file }}"
+      register: exit_nodes_credentials_stat
+      failed_when: exit_nodes_credentials_stat.stat.exists
+
     # Epic 22 #07: mode matches the real role task (roles/docker/tasks/main.yml) — root:docker in a real
     # deploy; this local render can't set group ownership without root/a "docker" group existing on the test
     # host, so only mode is asserted below (the same value regardless of who owns the file).
@@ -346,6 +386,74 @@
           {{ compose.services['adguard'] | default('MISSING') }}
       vars:
         compose: "{{ rendered_compose.content | b64decode | from_yaml }}"
+
+    # Epic 23 #03: the exit-node pairs. A 3-entry fixture (london/warsaw/zurich, not the real
+    # 2-entry default) so this proves the list-driven fragment mechanism actually scales, not just
+    # that it works for one entry — per the epic's own Testing Decisions.
+    - name: Assert exit-node pairs render generically, isolated, unpublished, and image-pinned
+      ansible.builtin.assert:
+        that:
+          # List-driven scaling: one tunnel+node+sidecar triad per fixture entry, nothing missing.
+          - compose.services.keys() | list | select('match', '^exit-node-') | list | length == 9
+          - "'exit-node-london-tunnel' in compose.services"
+          - "'exit-node-london-node' in compose.services"
+          - "'exit-node-london-sidecar' in compose.services"
+          - "'exit-node-warsaw-tunnel' in compose.services"
+          - "'exit-node-warsaw-node' in compose.services"
+          - "'exit-node-warsaw-sidecar' in compose.services"
+          - "'exit-node-zurich-tunnel' in compose.services"
+          - "'exit-node-zurich-node' in compose.services"
+          - "'exit-node-zurich-sidecar' in compose.services"
+          # No host networking and no published ports anywhere across all 9 services.
+          - pair_services | selectattr('network_mode', 'defined') | selectattr('network_mode', 'equalto', 'host') | list | length == 0
+          - pair_services | selectattr('ports', 'defined') | list | length == 0
+          # Isolation (trust boundary point 2): tunnels attach ONLY to exit_nodes_net, never
+          # gateway or internal; node/sidecar share the tunnel's own namespace and declare no
+          # networks of their own (network_mode: service: and networks: are mutually exclusive).
+          - compose.services['exit-node-london-tunnel'].networks == ['exit_nodes_net']
+          - compose.services['exit-node-warsaw-tunnel'].networks == ['exit_nodes_net']
+          - compose.services['exit-node-zurich-tunnel'].networks == ['exit_nodes_net']
+          - pair_nodes_and_sidecars | selectattr('networks', 'defined') | list | length == 0
+          - compose.services['exit-node-london-node'].network_mode == 'service:exit-node-london-tunnel'
+          - compose.services['exit-node-london-sidecar'].network_mode == 'service:exit-node-london-tunnel'
+          # Images pinned by digest (user story #23), not a floating tag.
+          - pair_services | map(attribute='image') | select('search', '@sha256:') | list | length == 9
+          # Secrets reach the containers only through the shared restricted env_file, never
+          # inline in the compose file (user story #22) — never appear in `environment:` at all,
+          # and the file is declared optional (clean-host deploy: the local render never runs the
+          # exit_nodes role that writes it, and a real first deploy has it written first anyway —
+          # see roles/exit_nodes/tasks/main.yml and roles/docker/meta/main.yml).
+          - "compose.services['exit-node-london-tunnel'].env_file == [{'path': exit_nodes_credentials_file, 'required': false}]"
+          - "compose.services['exit-node-london-node'].env_file == [{'path': exit_nodes_credentials_file, 'required': false}]"
+          - "'WIREGUARD_PRIVATE_KEY' not in (rendered_compose.content | b64decode)"
+          - "'exit_node_windscribe_private_key' not in (rendered_compose.content | b64decode)"
+          # Tailnet hostnames: unique, <prefix>-ws-<name>, and the exit-node role advertises them.
+          - "'--hostname=vps-ws-london' in compose.services['exit-node-london-node'].environment.TS_EXTRA_ARGS"
+          - "'--hostname=vps-ws-warsaw' in compose.services['exit-node-warsaw-node'].environment.TS_EXTRA_ARGS"
+          - "'--hostname=vps-ws-zurich' in compose.services['exit-node-zurich-node'].environment.TS_EXTRA_ARGS"
+          - "'--advertise-exit-node' in compose.services['exit-node-london-node'].environment.TS_EXTRA_ARGS"
+          # Fix #1 (firewall backend) and the fourth fix ticket #01 found (kernel, not userspace,
+          # networking) — both required or exit-node function is silently impossible.
+          - compose.services['exit-node-london-node'].environment.TS_USERSPACE == "false"
+          - compose.services['exit-node-london-node'].environment.TS_DEBUG_FIREWALL_MODE == 'nftables'
+          # Fix #3 (return-path routing): the sidecar reapplies the rule, for both address
+          # families, on every one of its own starts — the only manual fix ticket #01 found still
+          # needed (fix #2 is unnecessary; Tailscale's own nftables chains handle forwarding).
+          - "'ip rule add to 100.64.0.0/10 lookup 52 priority 50' in (compose.services['exit-node-london-sidecar'].command | join(' '))"
+          - "'ip -6 rule add to fd7a:115c:a1e0::/48 lookup 52 priority 50' in (compose.services['exit-node-london-sidecar'].command | join(' '))"
+          # Server-list update policy ticket #01 decided (real evidence: a standalone timed test).
+          - compose.services['exit-node-london-tunnel'].environment.UPDATER_PERIOD == '24h'
+          - compose.services['exit-node-london-tunnel'].environment.UPDATER_VPN_SERVICE_PROVIDERS == 'windscribe'
+          # No iptables/nft FORWARD or MASQUERADE rules added manually anywhere (fix #2 is
+          # unnecessary with current Tailscale — ticket #01's own confirmed simplification).
+          - "'MASQUERADE' not in (rendered_compose.content | b64decode)"
+        fail_msg: >-
+          exit-node pairs do not match the expected shape. Rendered exit-node services:
+          {{ compose.services.keys() | list | select('match', '^exit-node-') | list }}
+      vars:
+        compose: "{{ rendered_compose.content | b64decode | from_yaml }}"
+        pair_services: "{{ compose.services.keys() | list | select('match', '^exit-node-') | map('extract', compose.services) | list }}"
+        pair_nodes_and_sidecars: "{{ compose.services.keys() | list | select('match', '^exit-node-.*-(node|sidecar)$') | map('extract', compose.services) | list }}"
 
     - name: Assert all enabled services are present in rendered docker-compose.yml
       ansible.builtin.assert:

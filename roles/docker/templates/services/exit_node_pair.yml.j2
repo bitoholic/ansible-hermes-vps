@@ -1,0 +1,86 @@
+{# Epic 23 #03: one exit-node pair (tunnel + exit node + routing sidecar) from one exit_nodes entry
+   (rendered per item — see docker-compose.yml.j2's docker_list_fragments loop, `item` is that entry:
+   item.name / item.region / item.city). Dedicated network (exit_nodes_net, declared alongside the
+   standard gateway/internal networks in docker-compose.yml.j2) — never gateway or internal — so a
+   compromised container has no Docker-network path to Authelia or Hermes (epic 23 spec, trust
+   boundary point 2). No host networking, no published ports anywhere in this fragment.
+
+   Fixes ticket #01's live spike validated, applied here:
+     1. Firewall backend: TS_DEBUG_FIREWALL_MODE=nftables + TS_USERSPACE=false (the fourth fix
+        ticket #01 found — the stock image defaults to userspace networking, which has no kernel
+        tailscale0 interface at all and makes exit-node function silently impossible).
+     2. Forwarding: no manual iptables/nft rules — with the above two set, Tailscale installs its
+        own ts-forward/ts-postrouting nftables chains automatically (ticket #01, confirmed live);
+        gluetun's own default firewall needed no FIREWALL_* tuning either, matching the exact
+        working spike config.
+     3. Return path: the sidecar below reapplies the higher-priority ip rule on every one of ITS
+        OWN starts, since it does not survive tunnel restart or recreation. -#}
+{{ exit_nodes_service_prefix }}-{{ item.name }}-tunnel:
+  image: "{{ exit_nodes_gluetun_image }}"
+  container_name: "{{ exit_nodes_service_prefix }}-{{ item.name }}-tunnel"
+  cap_add:
+    - NET_ADMIN
+  devices:
+    - /dev/net/tun:/dev/net/tun
+  networks:
+    - exit_nodes_net
+  env_file:
+    - path: "{{ exit_nodes_credentials_file }}"
+      required: false
+  environment:
+    VPN_SERVICE_PROVIDER: windscribe
+    VPN_TYPE: wireguard
+    SERVER_REGIONS: "{{ item.region }}"
+    SERVER_CITIES: "{{ item.city }}"
+    TZ: UTC
+    UPDATER_PERIOD: "{{ exit_nodes_updater_period }}"
+    UPDATER_VPN_SERVICE_PROVIDERS: "{{ exit_nodes_updater_vpn_service_providers }}"
+  restart: unless-stopped
+
+{{ exit_nodes_service_prefix }}-{{ item.name }}-node:
+  image: "{{ exit_nodes_tailscale_image }}"
+  container_name: "{{ exit_nodes_service_prefix }}-{{ item.name }}-node"
+  network_mode: "service:{{ exit_nodes_service_prefix }}-{{ item.name }}-tunnel"
+  cap_add:
+    - NET_ADMIN
+    - NET_RAW
+  devices:
+    - /dev/net/tun:/dev/net/tun
+  env_file:
+    - path: "{{ exit_nodes_credentials_file }}"
+      required: false
+  environment:
+    TS_EXTRA_ARGS: "--advertise-exit-node --hostname={{ exit_nodes_hostname_prefix }}-ws-{{ item.name }} --reset"
+    TS_STATE_DIR: /var/lib/tailscale
+    TS_USERSPACE: "false"
+    TS_DEBUG_FIREWALL_MODE: nftables
+  volumes:
+    - "{{ exit_nodes_state_dir }}/{{ item.name }}:/var/lib/tailscale"
+  depends_on:
+    - "{{ exit_nodes_service_prefix }}-{{ item.name }}-tunnel"
+  restart: unless-stopped
+
+{# The routing sidecar (ticket #03's own contribution — ticket #01 applied this rule by hand during
+   the spike, this fragment is what makes it self-healing for real). Reuses the already-pinned
+   Tailscale image (it ships iproute2) instead of introducing a new image dependency purely for one
+   shell command. `|| true` on each ip rule: idempotent-safe against a restart where the tunnel's
+   netns (and therefore the rule) never actually changed, so re-adding would otherwise error on an
+   already-present rule; `sleep infinity` keeps the container in the running state `restart:
+   unless-stopped` expects, matching the multi-service restart-policy guard (epic 21 #03). #}
+{{ exit_nodes_service_prefix }}-{{ item.name }}-sidecar:
+  image: "{{ exit_nodes_tailscale_image }}"
+  container_name: "{{ exit_nodes_service_prefix }}-{{ item.name }}-sidecar"
+  network_mode: "service:{{ exit_nodes_service_prefix }}-{{ item.name }}-tunnel"
+  cap_add:
+    - NET_ADMIN
+  entrypoint: ["/bin/sh", "-c"]
+  command:
+    - >-
+      ip rule add to {{ exit_nodes_tailnet_subnet_v4 }} lookup {{ exit_nodes_return_route_table }}
+      priority {{ exit_nodes_return_route_priority }} || true;
+      ip -6 rule add to {{ exit_nodes_tailnet_subnet_v6 }} lookup {{ exit_nodes_return_route_table }}
+      priority {{ exit_nodes_return_route_priority }} || true;
+      exec sleep infinity
+  depends_on:
+    - "{{ exit_nodes_service_prefix }}-{{ item.name }}-tunnel"
+  restart: unless-stopped

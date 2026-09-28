@@ -8,3 +8,11 @@ galaxy_info:
 
 dependencies:
   - role: wiki_volume
+  # Epic 23 #03: exit_nodes must run ahead of this role's own compose render/validate/pull steps
+  # (tasks/main.yml) — it validates the exit_nodes list and writes the per-location state
+  # directories and the shared credentials file the rendered exit-node-pair fragment needs
+  # (env_file entries reference exit_nodes_credentials_file). Same mechanism, same reason, as
+  # gateway's own dependency on owntracks (roles/gateway/meta/main.yml): a real Ansible
+  # dependency, not just site.yml list position, so a future reorder can't silently break it.
+  - role: exit_nodes
+    tags: [exit_nodes]

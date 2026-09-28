@@ -35,3 +35,57 @@ exit_nodes:  # noqa: var-naming[no-role-prefix]
 exit_nodes_hostname_prefix: >-
   {{ inventory_hostname if (inventory_hostname is match('^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$'))
      else inventory_hostname.split('.')[0] }}
+
+# --- Ticket #03: rendering and deployment mechanics -------------------------------------------
+#
+# One shared, restricted credentials file for every pair (epic 23 spec: "one credential set serves
+# every location" — verified in ticket #01, the same Windscribe key connected two servers at once).
+# "Per-node restricted environment file" (ticket #03 AC) is satisfied by every pair's own services
+# referencing this file via `env_file:` — never inlined into docker-compose.yml — not by giving each
+# location a byte-identical copy of the same four values; duplicating identical secret material per
+# location would add files to keep in sync for no isolation benefit (they're the same credentials).
+# `root:docker 0640`, matching docker-compose.yml's own permission model (roles/docker/tasks/main.yml,
+# epic 22 #07): `docker compose` itself parses env_file content client-side as the invoking
+# (docker-group) user, so group-read is what keeps that working, not root alone.
+exit_nodes_credentials_dir: "{{ docker_compose_dir }}/exit-nodes"
+exit_nodes_credentials_file: "{{ exit_nodes_credentials_dir }}/credentials.env"
+
+# Per-location Tailscale state (bind-mounted host directory per entry, not a named top-level compose
+# volume): keeps the generic list-fragment mechanism in roles/docker from also needing a dynamic
+# top-level `volumes:` list, and matches this repo's dominant pattern for per-service persistent state
+# (owntracks_data_dir, beszel_*_dir, adguard_*_dir) rather than the minority named-volume pattern
+# (caddy_data/caddy_config/syncplay_data). Root-owned by default: the official tailscale/tailscale
+# image runs as root (it needs raw netlink/netns access), so no wiki_volume-style uid/gid lookup is
+# needed for a real deploy — owner/group are still their own variables (not literals in
+# ensure_state_dirs.yml), matching the wiki_volume role's own ensure_directory interface, so a local
+# test can override them to the test-runner's own uid/gid (root chown needs privilege a test host may
+# not have; the docker-compose render test documents the same constraint for its own template task).
+exit_nodes_state_dir: "{{ docker_compose_dir }}/exit-nodes/state"
+exit_nodes_state_owner: root
+exit_nodes_state_group: root
+
+# Versions validated by ticket #01's live resilience spike — pin by digest, not a floating tag
+# (user story #23), so an upstream release can't silently change exit-node behavior.
+exit_nodes_gluetun_image: "qmcgaw/gluetun@sha256:2733bb22b27e3efa7a9f2cef9057ec12791b8b225793fcd3dbfd0508404dfc25"
+exit_nodes_tailscale_image: "tailscale/tailscale@sha256:c507f3a2a6ab1cabd8d809b98edeb41edbd5c3fb6ad9632ffd098b4c7d0b4065"
+
+# Gluetun's server-list update policy, decided by ticket #01 (real evidence: a standalone timed test
+# confirmed the updater fires on schedule) — the built-in periodic updater, not a manual bump cadence.
+exit_nodes_updater_period: 24h
+exit_nodes_updater_vpn_service_providers: windscribe
+
+# The return-path routing fix (ticket #01, fix #3): gluetun's own catch-all policy route otherwise wins
+# the lookup for tailnet-destined traffic before Tailscale's own table is ever consulted. Table 52 is
+# the table ticket #01 observed and validated live against the exact gluetun version pinned above;
+# re-verify this value if exit_nodes_gluetun_image is ever bumped to a version gluetun's own routing
+# setup could change. Applied for both address families defensively (ticket #01: this gluetun config
+# had no IPv6 catch-all rule at all, since the Windscribe endpoint tested was IPv4-only, but nothing
+# guarantees every location/provider combination stays that way).
+exit_nodes_return_route_table: 52
+exit_nodes_return_route_priority: 50
+exit_nodes_tailnet_subnet_v4: "{{ tailscale_subnet }}"
+exit_nodes_tailnet_subnet_v6: "{{ tailscale_subnet_v6 }}"
+
+# Compose service/container naming: "<this>-<location-name>-{tunnel,node,sidecar}" — distinct from the
+# TAILNET hostname (`<exit_nodes_hostname_prefix>-ws-<name>`, a completely different namespace/purpose).
+exit_nodes_service_prefix: exit-node

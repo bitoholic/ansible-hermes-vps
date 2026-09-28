@@ -2,6 +2,11 @@ services:
 {% for service_name in docker_enabled_services %}
   {{ lookup('template', 'services/' + service_name + '.yml.j2') | indent(4) }}
 {% endfor %}
+{% for fragment in docker_list_fragments %}
+{% for list_item in fragment.entries %}
+{{ lookup('template', fragment.template, template_vars={'item': list_item}) | indent(2, first=True) }}
+{% endfor %}
+{% endfor %}
 
 networks:
 {% for network in docker_networks %}

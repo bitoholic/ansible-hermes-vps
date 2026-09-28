@@ -1,0 +1,22 @@
+---
+# Epic 23 #03: validate the exit_nodes list, then get everything the rendered compose fragment
+# needs onto disk BEFORE the compose role ever runs. Wired as a meta/main.yml dependency of the
+# docker role (roles/docker/meta/main.yml), the same mechanism gateway uses for owntracks/beszel/
+# adguard — Ansible runs a role's meta dependencies before its own tasks, so this always executes
+# ahead of docker's own compose render/validate/pull steps in the same play, satisfying the "clean
+# host" requirement without needing docker-compose.yml's env_file entries to tolerate a missing file
+# for a REAL deploy (they still do, defensively — see the exit-node-pair fragment template's own
+# comment — because the local render test renders docker-compose.yml.j2 directly, without ever
+# running this role).
+
+- name: Validate exit_nodes and exit_nodes_hostname_prefix
+  ansible.builtin.include_tasks: validate.yml
+  tags: [exit_nodes]
+
+- name: Write the shared exit-node credentials file
+  ansible.builtin.include_tasks: write_credentials.yml
+  tags: [exit_nodes]
+
+- name: Ensure per-location Tailscale state directories exist
+  ansible.builtin.include_tasks: ensure_state_dirs.yml
+  tags: [exit_nodes]

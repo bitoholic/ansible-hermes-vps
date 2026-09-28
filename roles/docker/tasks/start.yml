@@ -23,6 +23,14 @@
 # layer-cache-backed rebuild — cheap (a no-op re-verify) when the Dockerfile
 # hasn't actually changed, so this doesn't meaningfully slow down the common
 # case of a redeploy where nothing built changed.
+# Epic 23 #03: no `services:` filter — omitting it (module default: null) starts every service
+# actually present in the rendered docker-compose.yml, the same as a plain `docker compose up -d`
+# with no service arguments. Previously restricted to docker_enabled_services, which was already
+# redundant (the file only ever contained exactly those services) and would have silently excluded
+# any service a list-driven fragment renders (epic 23's exit-node pairs — one fragment renders
+# several services whose names aren't in that single-service-per-entry list at all). This is the
+# generic fix the spec asks for: the start step addresses the *rendered* service set, whatever
+# produced it, with no bookkeeping list to keep in sync.
 - name: Start consolidated docker compose stack
   tags: [docker]
   community.docker.docker_compose_v2:
@@ -30,7 +38,6 @@
     project_name: "{{ docker_project_name }}"
     files:
       - docker-compose.yml
-    services: "{{ docker_enabled_services }}"
     state: present
     pull: missing
     build: always
