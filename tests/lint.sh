@@ -225,3 +225,11 @@ echo "role skip-tags guard OK"
 # or over-long explicit override) all fail fast naming the offending value. No compose rendering yet (ticket #03).
 ./tests/check-exit-nodes-render.sh
 
+# Exit-node location scaling guard (epic 23 ticket #04): re-runs the two checks above (schema +
+# consolidated-compose rendering, the latter already proving a 3-entry fixture scales), then pins
+# assertions directly against the real default list (exactly London + Warsaw), the real fragment
+# template (generic, not hardcoded per location; distinct name/hostname/state-dir; one shared
+# credentials file) and the real group_vars/docker-role wiring. Static only — live per-location
+# behavior is ticket #01's spike and the epic's attended validation (ticket #07).
+./tests/check-exit-node-locations.sh
+
