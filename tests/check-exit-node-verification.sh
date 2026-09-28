@@ -78,13 +78,27 @@ case "$2" in
   "docker inspect --format '{{.State.Pid}}' exit-node-"*"-tunnel")
     loc="${2#*exit-node-}"; loc="${loc%-tunnel*}"
     echo "1000$( [[ "$loc" == london ]] && echo 1 || echo 2 )" ;;
-  "docker inspect --format '{{json .NetworkSettings.Networks}}' exit-node-"*)
+  "docker inspect --format '{{json .NetworkSettings.Networks}}' exit-node-"*"-tunnel")
     loc="${2#*exit-node-}"; loc="${loc%%-*}"
     if [[ "$S" == extra-network && "$loc" == "$locbroken" ]]; then
       echo '{"exit_nodes_net":{},"internal":{}}'
     else
       echo '{"exit_nodes_net":{}}'
     fi ;;
+  "docker inspect --format '{{json .NetworkSettings.Networks}}' exit-node-"*"-node" | \
+  "docker inspect --format '{{json .NetworkSettings.Networks}}' exit-node-"*"-sidecar")
+    # A container using network_mode: service:tunnel shares that netns entirely and genuinely
+    # reports NO networks of its own — real Docker behavior, confirmed live against the deploy.
+    loc="${2#*exit-node-}"; loc="${loc%%-*}"
+    if [[ "$S" == extra-network && "$loc" == "$locbroken" ]]; then
+      echo '{"exit_nodes_net":{}}'   # the fault: it wrongly has its own network attachment
+    else
+      echo '{}'
+    fi ;;
+  "docker inspect --format '{{.HostConfig.NetworkMode}}' exit-node-"*"-node" | \
+  "docker inspect --format '{{.HostConfig.NetworkMode}}' exit-node-"*"-sidecar")
+    loc="${2#*exit-node-}"; loc="${loc%%-*}"
+    echo "container:tunnel-id-for-$loc" ;;
   "docker inspect --format '{{json .NetworkSettings.Ports}}' exit-node-"*)
     loc="${2#*exit-node-}"; loc="${loc%%-*}"
     if [[ "$S" == published-port && "$loc" == "$locbroken" ]]; then
@@ -98,7 +112,7 @@ case "$2" in
     [[ "$S" == not-online && "$loc" == "$locbroken" ]] && online=false
     [[ "$S" == not-advertising && "$loc" == "$locbroken" ]] && exitopt=false
     printf '{"Self":{"Online":%s,"ExitNodeOption":%s}}' "$online" "$exitopt" ;;
-  "docker exec exit-node-"*"-tunnel curl -s --max-time "*" https://ifconfig.co/json")
+  "docker exec exit-node-"*"-tunnel wget -q -T "*" -O - https://ifconfig.co/json")
     loc="${2#*exit-node-}"; loc="${loc%%-*}"
     ip=203.0.113.50; country="United Kingdom"; [[ "$loc" == warsaw ]] && country="Poland"
     if [[ "$loc" == "$locbroken" ]]; then
@@ -157,6 +171,9 @@ grep -q '0 FAILED' <<<"$OUT" || fail "healthy summary must say 0 FAILED"
 for loc in london warsaw; do
   grep -q "PASS         exit-node-$loc-tunnel: running, restart=unless-stopped" <<<"$OUT" || fail "healthy: $loc tunnel was not verified"
   grep -q "PASS         exit-node-$loc-tunnel: no published host port" <<<"$OUT" || fail "healthy: $loc tunnel published-port check missing (or a plain image EXPOSE was wrongly treated as published)"
+  grep -q "PASS         exit-node-$loc-tunnel: attached only to its own dedicated network" <<<"$OUT" || fail "healthy: $loc tunnel isolation check missing"
+  grep -q "PASS         exit-node-$loc-node: no network of its own" <<<"$OUT" || fail "healthy: $loc node isolation check missing (must not false-FAIL on the real network_mode: service: shape)"
+  grep -q "PASS         exit-node-$loc-sidecar: no network of its own" <<<"$OUT" || fail "healthy: $loc sidecar isolation check missing"
   grep -q "PASS         $loc: Tailscale node is online" <<<"$OUT" || fail "healthy: $loc online check missing"
   grep -q "PASS         $loc: exit IP differs from the VPS's own public IP" <<<"$OUT" || fail "healthy: $loc exit-IP check missing"
   grep -q "PASS         $loc: exit country (.*) matches the configured region" <<<"$OUT" || fail "healthy: $loc country check missing"
@@ -170,7 +187,7 @@ echo "healthy 2-location fleet passes; every check present per location"
 
 expect_fail container-stopped              'exit-node-london-tunnel: state=exited'                london
 expect_fail wrong-policy                   'exit-node-london-tunnel: state=running restart=no'    london
-expect_fail extra-network                  'attached to 2 network(s), expected exactly 1'         london
+expect_fail extra-network                  'expected zero independent networks'                   london
 expect_fail published-port                 'has 1 published host port(s)'                          london
 expect_fail not-online                     'london: Tailscale node is not online'                 london
 expect_fail not-advertising                'london: node does not advertise exit-node capability' london

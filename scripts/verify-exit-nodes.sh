@@ -53,7 +53,9 @@ trap cleanup EXIT
 # ---------------------------------------------------------------------------------------------------
 # The remote-command allowlist: the ONLY things this script may run on the VPS. All read-only —
 # including every docker exec, which only ever runs a read-only diagnostic inside the container
-# (nc -z, curl -s GET, tailscale status, sysctl -n, ip/nft listing) never a mutation.
+# (nc -z, wget -O- GET, tailscale status, sysctl -n, ip/nft listing) never a mutation. wget, not
+# curl: gluetun's image is Alpine-based and has no curl (confirmed live — a first version of this
+# script used curl and every exit-IP/country check silently came back INCONCLUSIVE as a result).
 # ---------------------------------------------------------------------------------------------------
 ALLOWED_REMOTE=(
   "^docker ps -a --format '\{\{\.Names\}\} \{\{\.State\}\}'$"
@@ -61,8 +63,9 @@ ALLOWED_REMOTE=(
   "^docker inspect --format '\{\{\.State\.Pid\}\}' exit-node-[a-z0-9-]+-tunnel$"
   "^docker inspect --format '\{\{json \.NetworkSettings\.Networks\}\}' exit-node-[a-z0-9-]+-(tunnel|node|sidecar)$"
   "^docker inspect --format '\{\{json \.NetworkSettings\.Ports\}\}' exit-node-[a-z0-9-]+-(tunnel|node|sidecar)$"
+  "^docker inspect --format '\{\{\.HostConfig\.NetworkMode\}\}' exit-node-[a-z0-9-]+-(node|sidecar)$"
   '^docker exec exit-node-[a-z0-9-]+-node tailscale status --self --json$'
-  '^docker exec exit-node-[a-z0-9-]+-tunnel curl -s --max-time [0-9]+ https://ifconfig\.co/json$'
+  '^docker exec exit-node-[a-z0-9-]+-tunnel wget -q -T [0-9]+ -O - https://ifconfig\.co/json$'
   '^docker exec exit-node-[a-z0-9-]+-(node|sidecar) nc -zv -w[0-9]+ [0-9a-fA-F:.]+ [0-9]+$'
   '^sudo nsenter -t [0-9]+ -n sysctl -n net\.ipv6\.conf\.all\.forwarding$'
   '^sudo nsenter -t [0-9]+ -n nft list ruleset$'
@@ -161,8 +164,9 @@ self_test() {
   t allows "docker inspect --format '{{.State.Pid}}' exit-node-london-tunnel"
   t allows "docker inspect --format '{{json .NetworkSettings.Networks}}' exit-node-london-tunnel"
   t allows "docker inspect --format '{{json .NetworkSettings.Ports}}' exit-node-london-tunnel"
+  t allows "docker inspect --format '{{.HostConfig.NetworkMode}}' exit-node-london-node"
   t allows 'docker exec exit-node-london-node tailscale status --self --json'
-  t allows 'docker exec exit-node-london-tunnel curl -s --max-time 10 https://ifconfig.co/json'
+  t allows 'docker exec exit-node-london-tunnel wget -q -T 10 -O - https://ifconfig.co/json'
   t allows 'docker exec exit-node-london-sidecar nc -zv -w5 100.64.0.1 22'
   t allows 'sudo nsenter -t 12345 -n sysctl -n net.ipv6.conf.all.forwarding'
   t allows 'sudo nsenter -t 12345 -n nft list ruleset'
@@ -177,7 +181,7 @@ self_test() {
   t allows 'tailscale ip -4'
   # the allowlist must not have been widened beyond the exact shapes above
   for c in 'docker exec exit-node-london-tunnel sh' 'docker exec exit-node-london-node tailscale up' \
-           'docker exec exit-node-london-node tailscale status' 'docker exec exit-node-london-tunnel curl -s https://ifconfig.co/json' \
+           'docker exec exit-node-london-node tailscale status' 'docker exec exit-node-london-tunnel wget -O - https://ifconfig.co/json' \
            'docker exec exit-node-london-sidecar nc -l 22' 'sudo nsenter -t 12345 -n ip route add default via 1.2.3.4' \
            'sudo nsenter -t 12345 -n nft flush ruleset' 'sudo iptables -S' 'sudo iptables -L' 'ip route' 'ip rule' \
            'docker exec exit-node-london-tunnel cat /etc/shadow' 'docker inspect exit-node-london-tunnel' \
@@ -232,7 +236,21 @@ if ! LOCATIONS="$(configured_locations 2>&1)" || [[ -z "$LOCATIONS" ]]; then
   LOCATIONS=""
 fi
 
-while IFS='|' read -r name region city; do
+LOCATION_LINES=()
+if [[ -n "$LOCATIONS" ]]; then
+  # Read every location line into an array FIRST, then loop over the array with a plain `for` —
+  # not `while read <<<"$LOCATIONS"`. Each loop iteration below calls remote() (ssh), and ssh reads
+  # from whatever stdin it inherits; inside a `while read <<<heredoc` loop, the loop body shares the
+  # SAME stdin fd as the `read` builtin driving the loop — ssh, even though the remote command needs
+  # no input, still drains from that shared fd, so the *next* iteration's `read` sees EOF and the
+  # loop silently stops after one location. Found live: a real 2-location deploy only ever checked
+  # the first location, with no error. Reading into an array first (this script's other single-shot
+  # `<<<` reads are fine — they're one read each, never inside a loop body that also calls remote())
+  # removes the shared-stdin dependency entirely, matching verify-live.sh's own SERVICES-array idiom.
+  readarray -t LOCATION_LINES <<<"$LOCATIONS"
+fi
+for location_line in "${LOCATION_LINES[@]}"; do
+  IFS='|' read -r name region city <<<"$location_line"
   [[ -z "$name" ]] && continue
   section "location: $name ($region, $city)"
   TUNNEL="exit-node-$name-tunnel"; NODE="exit-node-$name-node"; SIDECAR="exit-node-$name-sidecar"
@@ -252,13 +270,30 @@ while IFS='|' read -r name region city; do
     continue
   fi
 
-  # -- isolation: attached to exit_nodes_net and nothing else --------------------------------------
-  for svc in "$TUNNEL" "$NODE" "$SIDECAR"; do
+  # -- isolation: the tunnel is attached to exit_nodes_net and nothing else; node/sidecar share its
+  #    netns entirely (network_mode: service:tunnel) and so correctly report ZERO networks of their
+  #    own via docker inspect — Docker never populates .NetworkSettings.Networks for a container
+  #    riding another container's network namespace, confirmed live against the real deploy (a
+  #    healthy pair reported "{}" for node/sidecar, which a first version of this check wrongly
+  #    treated as a FAIL). Isolation for those two is proven instead via HostConfig.NetworkMode,
+  #    which Docker sets to "container:<id>" for a service: network_mode — never "bridge"/"host"/
+  #    a network name — combined with the empty Networks map (no independent attachment at all).
+  nets=$(remote "docker inspect --format '{{json .NetworkSettings.Networks}}' $TUNNEL" 2>/dev/null) || { bad "$TUNNEL: cannot read attached networks"; nets=""; }
+  if [[ -n "$nets" ]]; then
+    n_count=$(python3 -c "import json,sys; print(len(json.load(sys.stdin)))" <<<"$nets" 2>/dev/null || echo -1)
+    if [[ "$n_count" != "1" ]]; then bad "$TUNNEL: attached to $n_count network(s), expected exactly 1"
+    elif grep -q 'exit_nodes_net' <<<"$nets"; then ok "$TUNNEL: attached only to its own dedicated network"
+    else bad "$TUNNEL: its one attached network is not exit_nodes_net"; fi
+  fi
+  for svc in "$NODE" "$SIDECAR"; do
     nets=$(remote "docker inspect --format '{{json .NetworkSettings.Networks}}' $svc" 2>/dev/null) || { bad "$svc: cannot read attached networks"; continue; }
     n_count=$(python3 -c "import json,sys; print(len(json.load(sys.stdin)))" <<<"$nets" 2>/dev/null || echo -1)
-    if [[ "$n_count" != "1" ]]; then bad "$svc: attached to $n_count network(s), expected exactly 1"; continue; fi
-    if grep -q 'exit_nodes_net' <<<"$nets"; then ok "$svc: attached only to its own dedicated network"
-    else bad "$svc: its one attached network is not exit_nodes_net"; fi
+    mode=$(remote "docker inspect --format '{{.HostConfig.NetworkMode}}' $svc" 2>/dev/null) || mode=""
+    if [[ "$n_count" == "0" && "$mode" == container:* ]]; then
+      ok "$svc: no network of its own — shares the tunnel's netns (network_mode: $mode)"
+    else
+      bad "$svc: expected zero independent networks and network_mode: container:<tunnel>, got $n_count network(s) and mode '$mode'"
+    fi
   done
 
   # -- no published host port anywhere in the pair ---------------------------------------------------
@@ -283,7 +318,7 @@ while IFS='|' read -r name region city; do
   fi
 
   # -- exit IP: differs from the VPS's own public IP, and matches the configured country -----------
-  exit_json=$(remote "docker exec $TUNNEL curl -s --max-time 10 https://ifconfig.co/json" 2>/dev/null) || exit_json=""
+  exit_json=$(remote "docker exec $TUNNEL wget -q -T 10 -O - https://ifconfig.co/json" 2>/dev/null) || exit_json=""
   if [[ -z "$exit_json" ]]; then
     inc "$name: could not reach ifconfig.co from inside the tunnel to determine the exit IP/country"
   else
@@ -343,7 +378,7 @@ while IFS='|' read -r name region city; do
   else
     skip "$name: no other tailnet device to probe (set HERMES_VERIFY_OTHER_TAILNET_IP to check)"
   fi
-done <<<"$LOCATIONS"
+done
 
 # ---------------------------------------------------------------------------------------------------
 section "firewall interplay: no per-pair DOCKER-USER entries, tunnels reach the internet by the container-bridge early return alone"
