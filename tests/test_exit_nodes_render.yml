@@ -190,6 +190,33 @@
               exit_nodes validation did NOT fail fast with a region-specific message;
               got: {{ empty_region_error_msg | default('nothing') }}
 
+    - name: Malformed exit_nodes (region containing the "|" delimiter) must fail fast naming the entry
+      block:
+        - ansible.builtin.include_tasks:
+            file: "{{ playbook_dir }}/../roles/exit_nodes/tasks/validate.yml"
+          vars:
+            inventory_hostname: vps.test.example.com
+            exit_nodes:
+              - name: london
+                region: "United|Kingdom"
+                city: London
+      rescue:
+        - ansible.builtin.set_fact:
+            piped_region_failed_fast: true
+            piped_region_error_msg: >-
+              {{ ansible_failed_result.results | default([ansible_failed_result])
+                 | selectattr('failed', 'defined') | selectattr('failed')
+                 | map(attribute='msg') | list | join('; ') }}
+      always:
+        - ansible.builtin.assert:
+            that:
+              - piped_region_failed_fast | default(false)
+              - "'region' in piped_region_error_msg"
+            fail_msg: >-
+              exit_nodes validation did NOT fail fast on a region containing "|" (epic 23 #06's
+              live-verification script parses this list "|"-delimited);
+              got: {{ piped_region_error_msg | default('nothing') }}
+
     - name: Malformed exit_nodes (missing city) must fail fast
       block:
         - ansible.builtin.include_tasks:

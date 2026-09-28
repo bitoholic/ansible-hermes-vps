@@ -29,7 +29,13 @@ exit_nodes_schema:
     required: true
     type: string
     non_empty: true
+    # Epic 23 #06's live-verification script parses the exit_nodes list with a `|`-delimited format
+    # (region/city can contain spaces, e.g. "United Kingdom", so a plain space-split would misparse
+    # them) — excluding the literal delimiter here closes that parsing hazard at the schema level,
+    # not just by convention. No real region name needs "|".
+    pattern: "^[^|]+$"
   - field: city
     required: true
     type: string
     non_empty: true
+    pattern: "^[^|]+$"

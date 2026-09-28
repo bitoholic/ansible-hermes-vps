@@ -192,6 +192,16 @@ echo "role skip-tags guard OK"
 # check is operator-run (scripts/verify-live.sh, drill in #06).
 ./tests/check-live-verification.sh
 
+# Exit-node fleet live verification script (epic 23 ticket #06): read-only over its own documented
+# allowlist (docker inspect/exec diagnostics and nsenter'd netns listings only, never a mutation),
+# one multiplexed SSH connection, registered with the deploy wrapper's script mode. Verifies per
+# location: container health, isolation, no published port, Tailscale online/advertising (admin
+# approval is honestly INCONCLUSIVE — no Tailscale API key is provisioned), exit IP/country, IPv6
+# forwarding denied, both return-path rules, and the trust boundary; plus the DOCKER-USER/host-
+# routing checks fleet-wide. Exercised against a fake ssh; the real VPS check and the phone/tunnel-
+# down tests are operator-run (scripts/verify-exit-nodes.sh, attended validation in #07).
+./tests/check-exit-node-verification.sh
+
 # Deploy wrapper (epic 22 ticket #01): decrypts the SOPS + age store into the child's environment only, runs only
 # vetted invocation shapes, pins Ansible's own file writes off, streams live and returns the child's status. Run as
 # a black box against a fixture tree with a throwaway key (no real key or secret is ever needed).
