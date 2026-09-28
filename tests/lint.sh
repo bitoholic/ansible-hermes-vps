@@ -233,3 +233,9 @@ echo "role skip-tags guard OK"
 # behavior is ticket #01's spike and the epic's attended validation (ticket #07).
 ./tests/check-exit-node-locations.sh
 
+# Exit-node role-wiring guard (epic 23 ticket #05): re-runs the ordering/duplication proof (ticket
+# #03), confirms the role is tagged, in the skip-tags guard list and the README's skippable-roles
+# list, and a live --list-tasks proof that --skip-tags exit_nodes removes only exit_nodes's own
+# tasks with every other role's compiled task list byte-identical.
+./tests/check-exit-nodes-wiring.sh
+

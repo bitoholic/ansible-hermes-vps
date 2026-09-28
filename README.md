@@ -108,7 +108,7 @@ scripts/deploy
 ```
 
 Protected roles that **cannot** be skipped: `secrets`, `users`, `ssh_hardening`, `common`.
-Skippable roles: `tailscale`, `docker`, `conduit`, `hermes`, `authelia`, `gateway`, `silverbullet`, `owntracks`, `backup`, `beszel`, `adguard`.
+Skippable roles: `tailscale`, `docker`, `conduit`, `hermes`, `authelia`, `gateway`, `silverbullet`, `owntracks`, `backup`, `beszel`, `adguard`, `exit_nodes`.
 
 `scripts/deploy` refuses anything outside this fixed flag set — extra variables, ad-hoc modules, other
 playbooks or inventories, and foreign connections — since it hands the decrypted store to whatever it
