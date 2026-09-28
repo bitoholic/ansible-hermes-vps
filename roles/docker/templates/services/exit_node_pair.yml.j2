@@ -66,7 +66,13 @@
    shell command. `|| true` on each ip rule: idempotent-safe against a restart where the tunnel's
    netns (and therefore the rule) never actually changed, so re-adding would otherwise error on an
    already-present rule; `sleep infinity` keeps the container in the running state `restart:
-   unless-stopped` expects, matching the multi-service restart-policy guard (epic 21 #03). #}
+   unless-stopped` expects, matching the multi-service restart-policy guard (epic 21 #03).
+   Accepted, known tradeoff: `|| true` also swallows a genuine failure (a bad table, a missing
+   capability, a future image losing iproute2) with the same silence as "rule already present" —
+   the sidecar still reaches sleep infinity and looks healthy either way. No operator-visible
+   signal distinguishes the two today; a real gap could go unnoticed until a client actually
+   traces on the wrong route. Not fixed here since ticket #01 live-validated this exact command;
+   revisit if a future gluetun/Tailscale bump ever changes iproute2's exit codes or availability. #}
 {{ exit_nodes_service_prefix }}-{{ item.name }}-sidecar:
   image: "{{ exit_nodes_tailscale_image }}"
   container_name: "{{ exit_nodes_service_prefix }}-{{ item.name }}-sidecar"
