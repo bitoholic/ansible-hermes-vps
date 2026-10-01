@@ -55,6 +55,14 @@ S="${FAKE_SCENARIO:-healthy}"
 locbroken="${FAKE_BROKEN_LOCATION:-}"
 case "$2" in
   "tailscale ip -4") echo 100.64.0.1 ;;
+  "tailscale status --self --json")
+    exitopt=true
+    [[ "$S" == plain-exit-node-not-advertised ]] && exitopt=false
+    printf '{"Self":{"ExitNodeOption":%s}}' "$exitopt" ;;
+  "sudo sysctl -n net.ipv4.ip_forward")
+    if [[ "$S" == plain-exit-node-forwarding-disabled-v4 ]]; then echo 0; else echo 1; fi ;;
+  "sudo sysctl -n net.ipv6.conf.all.forwarding")
+    if [[ "$S" == plain-exit-node-forwarding-disabled-v6 ]]; then echo 0; else echo 1; fi ;;
   "ip -4 route show") echo "default via 198.51.100.1 dev eth0"; echo "198.51.100.0/24 dev eth0 src 198.51.100.7" ;;
   "ip -4 rule show") echo "0: from all lookup local"; echo "32766: from all lookup main"; echo "32767: from all lookup default" ;;
   "ip -6 route show") echo "default via 2001:db8::1 dev eth0" ;;
@@ -183,6 +191,9 @@ for loc in london warsaw; do
   grep -q "PASS         $loc: the VPS's own tailnet address is unreachable from inside the pair" <<<"$OUT" || fail "healthy: $loc trust-boundary check missing"
   grep -q "INCONCLUSIVE $loc: admin-console approval cannot be confirmed" <<<"$OUT" || fail "healthy: $loc must report approval as INCONCLUSIVE, never a pass"
 done
+grep -q "PASS         plain exit node: this host advertises itself as an exit node" <<<"$OUT" || fail "healthy: plain exit node advertised check missing"
+grep -q "PASS         v4 forwarding enabled" <<<"$OUT" || fail "healthy: plain exit node v4 forwarding check missing"
+grep -q "PASS         v6 forwarding enabled" <<<"$OUT" || fail "healthy: plain exit node v6 forwarding check missing"
 echo "healthy 2-location fleet passes; every check present per location"
 
 expect_fail container-stopped              'exit-node-london-tunnel: state=exited'                london
@@ -199,7 +210,17 @@ expect_fail missing-return-rule-v4         'IPv4 return-path rule is missing'   
 expect_fail missing-return-rule-v6         'IPv6 return-path rule is missing'                     london
 expect_fail trust-boundary-broken          'trust boundary is broken'                             london
 expect_fail docker-user-has-exit-node-entry 'contains an entry naming the exit-node feature'
+expect_fail plain-exit-node-forwarding-disabled-v4 'v4 forwarding is NOT enabled'
+expect_fail plain-exit-node-forwarding-disabled-v6 'v6 forwarding is NOT enabled'
 echo "each fault the ticket exists to catch is reported and fails the run"
+
+# Ticket #09 (optional, droppable): "not advertised" is the EXPECTED state on a host where it was
+# never enabled — INCONCLUSIVE, never a FAIL, since this check alone can't tell intent from a real
+# regression (the same honesty discipline as the admin-console-approval check above).
+run plain-exit-node-not-advertised
+[[ $RC -eq 0 ]] || { echo "$OUT" >&2; fail "plain exit node not advertised must not fail the whole run (droppable/optional)"; }
+grep -q 'INCONCLUSIVE plain exit node: not advertised' <<<"$OUT" || { echo "$OUT" >&2; fail "plain exit node not-advertised must be reported INCONCLUSIVE"; }
+echo "the plain exit node (ticket #09, optional) reports its own state honestly without failing a fleet that never enabled it"
 
 # a GeoIP fetch failure is INCONCLUSIVE, never a fail or a pass
 run geoip-unreachable london
@@ -241,6 +262,7 @@ run healthy
 grep -qE '[0-9]+ passed, 0 FAILED, [0-9]+ inconclusive, [1-9][0-9]* skipped' <<<"$OUT" || fail "summary must count skipped/inconclusive separately from passes"
 grep -q 'NOT passes' <<<"$OUT" || fail "summary must say skipped/inconclusive are not passes"
 grep -q "NOT verified here (attended, ticket #07)" <<<"$OUT" || fail "the summary must plainly state the phone test / tunnel-down test / admin approval are not verified here"
+grep -q "NOT verified here (attended, ticket #09)" <<<"$OUT" || fail "the summary must plainly state the plain-exit-node live traffic test is not verified here"
 echo "skipped/inconclusive checks are counted separately, never as passes; attended-only items are stated plainly"
 
 # Audit: everything the script sent to ssh (across the last healthy run) is on its own allowlist.

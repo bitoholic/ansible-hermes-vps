@@ -78,6 +78,9 @@ ALLOWED_REMOTE=(
   '^ip -6 route show$'
   '^ip -6 rule show$'
   '^tailscale ip -4$'
+  '^tailscale status --self --json$'
+  '^sudo sysctl -n net\.ipv4\.ip_forward$'
+  '^sudo sysctl -n net\.ipv6\.conf\.all\.forwarding$'
 )
 METACHARS_RE='[;&|<>`$
 ]'
@@ -179,19 +182,24 @@ self_test() {
   t allows 'ip -6 route show'
   t allows 'ip -6 rule show'
   t allows 'tailscale ip -4'
+  t allows 'tailscale status --self --json'
+  t allows 'sudo sysctl -n net.ipv4.ip_forward'
+  t allows 'sudo sysctl -n net.ipv6.conf.all.forwarding'
   # the allowlist must not have been widened beyond the exact shapes above
   for c in 'docker exec exit-node-london-tunnel sh' 'docker exec exit-node-london-node tailscale up' \
            'docker exec exit-node-london-node tailscale status' 'docker exec exit-node-london-tunnel wget -O - https://ifconfig.co/json' \
            'docker exec exit-node-london-sidecar nc -l 22' 'sudo nsenter -t 12345 -n ip route add default via 1.2.3.4' \
            'sudo nsenter -t 12345 -n nft flush ruleset' 'sudo iptables -S' 'sudo iptables -L' 'ip route' 'ip rule' \
            'docker exec exit-node-london-tunnel cat /etc/shadow' 'docker inspect exit-node-london-tunnel' \
-           'docker logs exit-node-london-tunnel' 'tailscale status'; do
+           'docker logs exit-node-london-tunnel' 'tailscale status' 'sudo sysctl -w net.ipv4.ip_forward=1' \
+           'sudo sysctl -n net.ipv4.ip_forward; reboot'; do
     t refuses "$c"
   done
   # the mutating / dangerous things it must never send
   for c in 'docker rm -f exit-node-london-tunnel' 'docker stop exit-node-london-tunnel' 'docker restart exit-node-london-tunnel' \
            'docker compose up -d' 'docker exec exit-node-london-node tailscale down' 'docker exec exit-node-london-node tailscale set --exit-node=' \
-           'sudo nsenter -t 12345 -n ip rule del' 'sudo nsenter -t 12345 -n iptables -F' 'sudo reboot' 'sudo systemctl restart docker'; do
+           'sudo nsenter -t 12345 -n ip rule del' 'sudo nsenter -t 12345 -n iptables -F' 'sudo reboot' 'sudo systemctl restart docker' \
+           'tailscale set --advertise-exit-node' 'tailscale up'; do
     t refuses "$c"
   done
   # chaining / substitution / redirection is refused even when the leading command is allowed
@@ -405,7 +413,32 @@ else
 fi
 
 # ---------------------------------------------------------------------------------------------------
+section "optional: the VPS's own plain exit node (ticket #09 — egress from the VPS's own public IP, droppable)"
+self_json=$(remote 'tailscale status --self --json' 2>/dev/null)
+if [[ -z "$self_json" ]]; then
+  inc "plain exit node: could not read this host's own Tailscale status"
+else
+  advertised=$(python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('Self',{}).get('ExitNodeOption', False))" <<<"$self_json" 2>/dev/null)
+  if [[ "$advertised" == "True" ]]; then
+    ok "plain exit node: this host advertises itself as an exit node"
+  else
+    inc "plain exit node: not advertised — expected if ticket #09 was never enabled on this host; a real regression otherwise"
+  fi
+fi
+for fam in 4 6; do
+  if [[ $fam == 4 ]]; then key='net.ipv4.ip_forward'; else key='net.ipv6.conf.all.forwarding'; fi
+  val=$(remote "sudo sysctl -n $key" 2>/dev/null)
+  if [[ "$val" == "1" ]]; then
+    ok "v$fam forwarding enabled ($key=1) — persisted by the Tailscale installer in /etc/sysctl.d/99-tailscale.conf (epic 21's runtime-state audit); survives a reboot"
+  else
+    bad "v$fam forwarding is NOT enabled ($key=${val:-unknown}) — the plain exit node cannot forward traffic"
+  fi
+done
+info "NOT verified here: a real tailnet device actually selecting this plain exit node and confirming traffic is forwarded, not silently dropped, by the DOCKER-USER port-class rules — a runtime chain-ordering question no self-only check can prove either way; see .scratch/23-windscribe-exit-nodes/issues/09-plain-vps-exit-node.md for the one-time attended result."
+
+# ---------------------------------------------------------------------------------------------------
 printf '\n== summary ==\n  %d passed, %d FAILED, %d inconclusive, %d skipped\n' "$PASS" "$FAIL" "$INCONCLUSIVE" "$SKIP"
 (( INCONCLUSIVE + SKIP > 0 )) && echo "  (inconclusive and skipped checks are NOT passes — see above)"
 echo "  NOT verified here (attended, ticket #07): a real client's exit-node picker, an active tunnel-down/recovery test, and Tailscale admin-console exit-node approval."
+echo "  NOT verified here (attended, ticket #09): a real tailnet device routing live traffic through the VPS's own plain exit node."
 (( FAIL == 0 ))

@@ -399,3 +399,42 @@
   tags: [tailscale]
   community.general.ufw:
     state: enabled
+
+# Epic 23 #09 (optional, droppable): "no Windscribe" as one more choice in the Tailscale app — the
+# VPS's own node advertises itself as an exit node too, egressing from the VPS's own public IP.
+# `tailscale set` (not `tailscale up`) deliberately: `up` only runs earlier in this file when the
+# node isn't already in the Running state (re-running it on an already-logged-in node needs every
+# non-default flag restated or it refuses — epic 21's runtime-state audit found this the hard way),
+# so a preference change on an ALREADY-running node needs its own idempotent step that doesn't
+# re-authenticate or touch any other setting. `tailscale set --advertise-exit-node` does exactly
+# that. Checked first so a second run is a true no-op (`changed: false`), not just a safe-to-repeat
+# command — ExitNodeOption is the same field scripts/verify-exit-nodes.sh already reads for the
+# containerized pairs' own "advertised" check.
+#
+# Placed LAST in this role, deliberately — an independent review of this ticket found that placing
+# it earlier (between the Tailscale bring-up and the firewall section) risked an edge case
+# (`tailscale status --self --json` returning valid-but-unparseable output, or `tailscale set`
+# itself failing) aborting the play before UFW, the SSH rate-limit rule and the DOCKER-USER chain
+# were applied — a droppable, optional feature should never be able to block the role's own
+# security-critical work. Here, any failure in this block leaves the host no worse off than before
+# this ticket existed: the firewall and SSH are already fully configured by the time this runs.
+- name: Check whether this host already advertises itself as an exit node
+  tags: [tailscale]
+  ansible.builtin.command:
+    cmd: tailscale status --self --json
+  register: tailscale_self_status
+  changed_when: false
+  failed_when: false
+
+- name: Advertise this host's own Tailscale node as a plain exit node
+  tags: [tailscale]
+  ansible.builtin.command:
+    cmd: tailscale set --advertise-exit-node
+  when: >-
+    tailscale_self_status is not defined or
+    tailscale_self_status.rc != 0 or
+    (tailscale_self_status.stdout | string | length == 0) or
+    not ((tailscale_self_status.stdout | from_json).Self.ExitNodeOption | default(false) | bool)
+  changed_when: true
+  failed_when: false
+  ignore_errors: "{{ ansible_check_mode }}"

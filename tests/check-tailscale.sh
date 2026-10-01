@@ -62,6 +62,19 @@ check '^[[:space:]]*- 443$' 'HTTPS (443) allow'
 check 'state: enabled' 'ufw enabled'
 echo "tailscale ufw rules OK"
 
+# 4. Epic 23 #09: the VPS's own node advertises as a plain exit node via an idempotent
+#    `tailscale set`, never a re-run of `tailscale up` (which would need every non-default flag
+#    restated and would re-authenticate) — checked first so a second run is a true no-op.
+check_ts09() { grep -qE "$1" "$TS" || { echo "FAIL: tailscale role missing (epic 23 #09): $2"; exit 1; }; }
+check_ts09 'tailscale set --advertise-exit-node' 'the idempotent advertise-exit-node step'
+check_ts09 'tailscale status --self --json' 'a check-before-set guard (ExitNodeOption)'
+check_ts09 'ExitNodeOption' 'the advertised-state field the guard reads'
+if grep -A3 -E '^- name: Advertise this host.?s own Tailscale node as a plain exit node' "$TS" | grep -q 'tailscale up'; then
+  echo "FAIL: the plain-exit-node step re-runs 'tailscale up' — must use 'tailscale set' only (no re-auth, no disturbing other settings)"
+  exit 1
+fi
+echo "plain exit node (epic 23 #09) OK"
+
 echo "tailscale access guard OK"
 
 # Live idempotency run — operator-validated on the VPS only.
