@@ -116,7 +116,19 @@ for line in sys.stdin:
     if not line.startswith("-A DOCKER-USER"): continue
     line=line.replace("\"","")                              # iptables -S only quotes when it must
     line=re.sub(r"(-s [0-9a-fA-F:.]+)/(32|128)\b",r"\1",line)   # a /32 (/128) host is printed with its mask
-    print(re.sub(r"\s+"," ",line))'
+    line=re.sub(r"\s+"," ",line).strip()
+    # the kernel always prints -p <proto> right after the leading -A DOCKER-USER [-s <addr>],
+    # regardless of where it was written in the rule (epic 23 #09: a conntrack --ctorigdst match
+    # written before -p in the rendered file still gets printed by iptables -S with -p moved ahead
+    # of it — same matches, same rule, different text). Canonicalize both sides to that position so
+    # this comparison is not fooled by a kernel-only reordering that changes nothing it allows.
+    m=re.search(r" -p (\S+)\b",line)
+    if m:
+        clause=m.group(0); rest=(line[:m.start()]+line[m.end():])
+        rest=re.sub(r"\s+"," ",rest)
+        head=re.match(r"^(-A DOCKER-USER(?: -s \S+)?)(.*)$",rest)
+        line=head.group(1)+clause+head.group(2)
+    print(line)'
 }
 
 route_is_plain_internet() {  # <dev> <sysfs-type> <link-detail> -> 0 if a normal internet-facing NIC
@@ -220,6 +232,14 @@ self_test() {
   rendered=$(printf '%s\n' '# c' '*filter' ':DOCKER-USER - [0:0]' '-A DOCKER-USER -s 203.0.113.7 -p tcp -m tcp --dport 8999 -m comment --comment "syncplay friend access" -j ACCEPT' 'COMMIT' | normalize_rules)
   t [ "$live" = "$rendered" ]
   t [ "$(printf '%s\n' '-N DOCKER-USER' | normalize_rules | wc -l)" = 0 ]        # an emptied chain has no rules
+  # epic 23 #09: a rendered rule with -m conntrack before -p (needed so the match survives Docker's
+  # own DNAT) is printed by the kernel with -p moved ahead of it — must still compare equal
+  live=$(printf '%s\n' '-A DOCKER-USER -p tcp -m conntrack --ctorigdst 198.51.100.50 -m tcp --dport 80 -j ACCEPT' | normalize_rules)
+  rendered=$(printf '%s\n' '-A DOCKER-USER -m conntrack --ctorigdst 198.51.100.50 -p tcp -m tcp --dport 80 -j ACCEPT' | normalize_rules)
+  t [ "$live" = "$rendered" ]
+  live=$(printf '%s\n' '-A DOCKER-USER -s 100.64.0.0/10 -p tcp -m conntrack --ctorigdst 100.64.0.1 -m tcp --dport 3000 -j ACCEPT' | normalize_rules)
+  rendered=$(printf '%s\n' '-A DOCKER-USER -s 100.64.0.0/10 -m conntrack --ctorigdst 100.64.0.1 -p tcp -m tcp --dport 3000 -j ACCEPT' | normalize_rules)
+  t [ "$live" = "$rendered" ]
   # route classification: a VPN/tunnel path is never a valid outside-in vantage
   t route_is_plain_internet enp1s0 1 'link/ether'
   t route_is_plain_internet wlp1s0 1 'link/ether'
