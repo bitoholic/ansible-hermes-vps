@@ -89,3 +89,23 @@ exit_nodes_tailnet_subnet_v6: "{{ tailscale_subnet_v6 }}"
 # Compose service/container naming: "<this>-<location-name>-{tunnel,node,sidecar}" — distinct from the
 # TAILNET hostname (`<exit_nodes_hostname_prefix>-ws-<name>`, a completely different namespace/purpose).
 exit_nodes_service_prefix: exit-node
+
+# Self-healing recovery check for node/sidecar (ticket #07's live attended validation found the real
+# gap this closes): both use `network_mode: service:tunnel`, so they share the tunnel's network
+# namespace only as of THEIR OWN last (re)start — confirmed live that when only the tunnel container
+# restarts (a crash under its own restart policy, or an operator's plain `docker restart`) while
+# node/sidecar stay running and never crash themselves, nothing re-attaches them to the tunnel's new
+# namespace; they're left in the old, orphaned one indefinitely (no leak — gluetun's kill switch still
+# holds even there — but no traffic either, silently, until someone notices and restarts them by
+# hand). `docker compose up -d` does not detect or fix this case (the container ID never changed, so
+# compose sees nothing to recreate — that mechanism only helps ticket #01's OTHER case, where the
+# tunnel's own ID changes). Each container's HEALTHCHECK below runs a real TCP probe (not "is the
+# process alive") and self-terminates (kill -TERM its own PID 1) after this many CONSECUTIVE failures
+# — never on one blip, so gluetun's own internal reconnect (ticket #01: seconds-long, no container
+# restart, self-resolving) doesn't cause a needless restart — which `restart: unless-stopped` then
+# picks up, and a normal restart correctly re-resolves `network_mode: service:tunnel` to the tunnel's
+# CURRENT namespace (ticket #01's own confirmed behavior for a dependent's own restart). No
+# docker.sock or custom watcher needed, matching ticket #03's explicit decision against either.
+exit_nodes_recovery_check_host: "1.1.1.1"
+exit_nodes_recovery_check_port: 443
+exit_nodes_recovery_check_fail_threshold: 3

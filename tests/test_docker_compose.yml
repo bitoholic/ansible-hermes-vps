@@ -58,6 +58,9 @@
     exit_nodes_return_route_priority: 50
     exit_nodes_tailnet_subnet_v4: "100.64.0.0/10"
     exit_nodes_tailnet_subnet_v6: "fd7a:115c:a1e0::/48"
+    exit_nodes_recovery_check_host: "1.1.1.1"
+    exit_nodes_recovery_check_port: 443
+    exit_nodes_recovery_check_fail_threshold: 3
     docker_list_fragments:
       - template: services/exit_node_pair.yml.j2
         entries: "{{ exit_nodes }}"
@@ -447,6 +450,32 @@
           # No iptables/nft FORWARD or MASQUERADE rules added manually anywhere (fix #2 is
           # unnecessary with current Tailscale — ticket #01's own confirmed simplification).
           - "'MASQUERADE' not in (rendered_compose.content | b64decode)"
+          # Ticket #07's live attended validation found that node/sidecar don't automatically
+          # recover when only the tunnel container restarts (they stay attached to its old,
+          # orphaned network namespace indefinitely — see roles/exit_nodes/defaults/main.yml's
+          # exit_nodes_recovery_check_host comment for the full reasoning). Every node/sidecar
+          # carries a self-healing HEALTHCHECK that forces its own restart on sustained failure;
+          # the tunnel (gluetun) needs no such override — it has no stale-namespace problem of its
+          # own (it's node/sidecar's namespace *provider*, via network_mode: service:tunnel).
+          - pair_nodes_and_sidecars | selectattr('healthcheck', 'defined') | list | length == 6
+          - compose.services['exit-node-london-tunnel'].healthcheck is not defined
+          # $$ (not $) is intentional and load-bearing: Compose's own variable interpolation runs
+          # on compose-file content before a container ever sees it, so a bare `$n`/`$(cmd)` here
+          # would be silently resolved against Compose's (unset) variable namespace and vanish — a
+          # real bug caught via `docker inspect` on the live deployed container. See the macro's own
+          # comment in exit_node_pair.yml.j2 for the full incident.
+          - compose.services['exit-node-london-node'].healthcheck.test == ['CMD-SHELL', 'nc -z -w3 1.1.1.1 443 2>/dev/null && { rm -f /tmp/hermes_recovery_fails; exit 0; }; n=$$(( $$(cat /tmp/hermes_recovery_fails 2>/dev/null || echo 0) + 1 )); echo $$n > /tmp/hermes_recovery_fails; if [ $$n -ge 3 ]; then rm -f /tmp/hermes_recovery_fails; kill 1; fi; exit 1']
+          - compose.services['exit-node-london-sidecar'].healthcheck.test == compose.services['exit-node-london-node'].healthcheck.test
+          - compose.services['exit-node-london-node'].healthcheck.interval == '30s'
+          # retries matches the fail_threshold (3), not a smaller value, purely so Docker's own
+          # health status flips in step with this script's own restart trigger — an independent
+          # review of this fix flagged the cosmetic mismatch a hardcoded retries: 1 would leave.
+          - compose.services['exit-node-london-node'].healthcheck.retries == 3
+          # Cold-start race (same review): node/sidecar wait for the tunnel's own healthcheck
+          # before starting at all, so a fresh `docker compose up -d` or a host reboot doesn't
+          # start them racing a tunnel still negotiating its VPN handshake.
+          - "compose.services['exit-node-london-node'].depends_on == {'exit-node-london-tunnel': {'condition': 'service_healthy'}}"
+          - "compose.services['exit-node-london-sidecar'].depends_on == {'exit-node-london-tunnel': {'condition': 'service_healthy'}}"
         fail_msg: >-
           exit-node pairs do not match the expected shape. Rendered exit-node services:
           {{ compose.services.keys() | list | select('match', '^exit-node-') | list }}

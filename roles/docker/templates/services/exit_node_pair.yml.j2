@@ -15,6 +15,58 @@
         working spike config.
      3. Return path: the sidecar below reapplies the higher-priority ip rule on every one of ITS
         OWN starts, since it does not survive tunnel restart or recreation. -#}
+{% macro recovery_healthcheck() -%}
+{# Ticket #07's live attended validation found the real gap this closes: node and sidecar each
+   share the tunnel's network namespace only as of THEIR OWN last (re)start — restarting the tunnel
+   alone (a crash under its own restart policy, or a plain `docker restart`) leaves a still-running
+   node/sidecar attached to the OLD, now-orphaned namespace indefinitely; `docker compose up -d`
+   does not detect or fix this (the container ID never changed). See roles/exit_nodes/defaults/
+   main.yml's own comment on exit_nodes_recovery_check_host for the full reasoning. This probes real
+   TCP connectivity and self-terminates (kill -TERM its own PID 1) only after
+   exit_nodes_recovery_check_fail_threshold CONSECUTIVE failures — never on one blip, so gluetun's
+   own internal reconnect (seconds-long, self-resolving, no container restart) doesn't trigger a
+   needless one — which restart: unless-stopped then picks up; a normal restart correctly
+   re-resolves network_mode: service:tunnel to the tunnel's CURRENT namespace.
+
+   Every literal `$` below is doubled (`$$`) — a real bug found deploying this fix live: Docker
+   Compose does its OWN `$VAR`/`${VAR}` interpolation on compose-file content before the container
+   ever sees it, so an unescaped `$n` or `$(cmd)` gets silently resolved against compose's variable
+   namespace (where `n` is unset) and replaced with an empty string — `docker inspect` on the live
+   container confirmed `echo $n > ...` had become `echo  > ...`. `$$` is Compose's documented escape
+   for a literal `$`, restoring the shell semantics this script actually needs.
+
+   The counter file is removed before `kill 1`, not just on a successful probe: `restart:
+   unless-stopped` restarts the SAME container (its writable layer, and therefore /tmp, survives),
+   so an unreset counter already at the threshold would make the very next single failed probe
+   after a restart re-trigger `kill 1` immediately, rather than requiring fail_threshold fresh
+   consecutive failures again. `retries` matches exit_nodes_recovery_check_fail_threshold (not a
+   smaller hardcoded value) purely so Docker's own health status — visible via `docker ps`/`docker
+   inspect` — flips to unhealthy in step with this script's own restart trigger, instead of
+   mid-way through the debounce window; nothing here actually gates on that status.
+
+   Cold-start note (an independent review of this fix raised it; not yet exercised live — ticket
+   #07's own reboot test is still deferred): `start_period` only suppresses DOCKER's unhealthy-
+   status *accounting* during that window, it does not stop the test command itself from running
+   and incrementing the counter file from the very first probe. node/sidecar's `depends_on:
+   condition: service_healthy` on the tunnel (below) exists specifically so a fresh `docker compose
+   up -d` or a full host reboot doesn't start them racing a tunnel that's still negotiating its VPN
+   handshake — they wait for the tunnel's own (image-provided) healthcheck first, so by the time
+   their own debounce window starts, the tunnel is normally already reachable. #}
+  healthcheck:
+    test:
+      - CMD-SHELL
+      - >-
+        nc -z -w3 {{ exit_nodes_recovery_check_host }} {{ exit_nodes_recovery_check_port }} 2>/dev/null &&
+        { rm -f /tmp/hermes_recovery_fails; exit 0; };
+        n=$$(( $$(cat /tmp/hermes_recovery_fails 2>/dev/null || echo 0) + 1 ));
+        echo $$n > /tmp/hermes_recovery_fails;
+        if [ $$n -ge {{ exit_nodes_recovery_check_fail_threshold }} ]; then rm -f /tmp/hermes_recovery_fails; kill 1; fi;
+        exit 1
+    interval: 30s
+    timeout: 5s
+    retries: {{ exit_nodes_recovery_check_fail_threshold }}
+    start_period: 20s
+{%- endmacro %}
 {{ exit_nodes_service_prefix }}-{{ item.name }}-tunnel:
   image: "{{ exit_nodes_gluetun_image }}"
   container_name: "{{ exit_nodes_service_prefix }}-{{ item.name }}-tunnel"
@@ -57,22 +109,35 @@
   volumes:
     - "{{ exit_nodes_state_dir }}/{{ item.name }}:/var/lib/tailscale"
   depends_on:
-    - "{{ exit_nodes_service_prefix }}-{{ item.name }}-tunnel"
+    "{{ exit_nodes_service_prefix }}-{{ item.name }}-tunnel":
+      condition: service_healthy
   restart: unless-stopped
+{{ recovery_healthcheck() }}
 
 {# The routing sidecar (ticket #03's own contribution — ticket #01 applied this rule by hand during
    the spike, this fragment is what makes it self-healing for real). Reuses the already-pinned
    Tailscale image (it ships iproute2) instead of introducing a new image dependency purely for one
    shell command. `|| true` on each ip rule: idempotent-safe against a restart where the tunnel's
    netns (and therefore the rule) never actually changed, so re-adding would otherwise error on an
-   already-present rule; `sleep infinity` keeps the container in the running state `restart:
-   unless-stopped` expects, matching the multi-service restart-policy guard (epic 21 #03).
+   already-present rule.
    Accepted, known tradeoff: `|| true` also swallows a genuine failure (a bad table, a missing
    capability, a future image losing iproute2) with the same silence as "rule already present" —
-   the sidecar still reaches sleep infinity and looks healthy either way. No operator-visible
+   the sidecar still reaches the wait loop below and looks healthy either way. No operator-visible
    signal distinguishes the two today; a real gap could go unnoticed until a client actually
    traces on the wrong route. Not fixed here since ticket #01 live-validated this exact command;
-   revisit if a future gluetun/Tailscale bump ever changes iproute2's exit codes or availability. #}
+   revisit if a future gluetun/Tailscale bump ever changes iproute2's exit codes or availability.
+
+   No `exec sleep infinity` (ticket #07's live attended validation found why): a plain `sleep`
+   running AS PID 1 installs no signal handler of its own, and the kernel makes PID 1 of a PID
+   namespace immune to any UNHANDLED signal — including SIGKILL — sent by a process INSIDE that
+   same namespace (pid_namespaces(7); confirmed live: `docker exec ... kill -9 1` did nothing, only
+   an external `docker kill` from the host succeeded). The shared recovery_healthcheck() macro below
+   signals PID 1 from inside the container, so it needs PID 1 to have an explicit handler — `trap`
+   installs one, which makes the kernel treat the signal as handled rather than exempt, and
+   `wait $!` on a backgrounded sleep (rather than a blocking `sleep` builtin) wakes immediately when
+   that trap fires. Tailscale's own containerboot (the node service's PID 1) already traps SIGTERM
+   this way, which is why ticket #07 observed node recover on the first try while sidecar did not —
+   this is what brings sidecar to the same behavior. #}
 {{ exit_nodes_service_prefix }}-{{ item.name }}-sidecar:
   image: "{{ exit_nodes_tailscale_image }}"
   container_name: "{{ exit_nodes_service_prefix }}-{{ item.name }}-sidecar"
@@ -82,11 +147,14 @@
   entrypoint: ["/bin/sh", "-c"]
   command:
     - >-
+      trap 'exit 0' TERM;
       ip rule add to {{ exit_nodes_tailnet_subnet_v4 }} lookup {{ exit_nodes_return_route_table }}
       priority {{ exit_nodes_return_route_priority }} || true;
       ip -6 rule add to {{ exit_nodes_tailnet_subnet_v6 }} lookup {{ exit_nodes_return_route_table }}
       priority {{ exit_nodes_return_route_priority }} || true;
-      exec sleep infinity
+      while true; do sleep 3600 & wait $$!; done
   depends_on:
-    - "{{ exit_nodes_service_prefix }}-{{ item.name }}-tunnel"
+    "{{ exit_nodes_service_prefix }}-{{ item.name }}-tunnel":
+      condition: service_healthy
   restart: unless-stopped
+{{ recovery_healthcheck() }}
