@@ -15,6 +15,17 @@
     - ../group_vars/all/main.yml
   vars:
     tailscale_role_templates: "{{ playbook_dir }}/../roles/tailscale/templates"
+    # Fixture values for the facts the real deploy gathers/queries (gather_facts: false above, and
+    # `tailscale ip -4/-6` are real `command` tasks this harness never runs) — epic 23 #09's own
+    # live finding is why every per-port rule now needs these: see docker-user.rules.v4.j2's header
+    # comment for the full incident (pass-through exit-node traffic coincidentally matching one of
+    # these rules by port alone, accepted without ever reaching Tailscale's own forwarding chain).
+    ansible_default_ipv4:
+      address: 198.51.100.50
+    ansible_default_ipv6:
+      address: "2001:db8::50"
+    tailscale_ip_v4: 100.64.0.1
+    tailscale_ip_v6: "fd7a:115c:a1e0::1"
   tasks:
     - name: Ensure render directory exists
       ansible.builtin.file:

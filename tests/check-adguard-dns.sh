@@ -145,7 +145,7 @@ entry_has group_vars/all/main.yml '^docker_published_restricted_ports:' '  - 53'
 for tpl in roles/tailscale/templates/docker-user.rules.v4.j2 roles/tailscale/templates/docker-user.rules.v6.j2; do
   check_in "$tpl" 'docker_published_restricted_udp_ports' "UDP class rendered by $tpl"
   check_in "$tpl" 'p udp -m udp --dport' "a UDP rule in $tpl"
-  check_in "$tpl" 'tailscale-only service deny \(udp\)' "the UDP deny-everyone-else rule in $tpl"
+  check_in "$tpl" 'tailscale-only service deny \(udp' "the UDP deny-everyone-else rule in $tpl"
 done
 echo "UDP restricted-port firewall contract OK"
 

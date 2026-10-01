@@ -9,28 +9,78 @@
 #
 # Order matters: bridge and established traffic first, then Syncplay, restricted tailnet-only
 # classes (accept from the tailnet, then drop everyone else), and public ports last.
+#
+# Every per-port rule below is scoped to `-m conntrack --ctorigdst` (this host's OWN address the
+# port is actually published on), not just `--dport` (epic 23 #09's own live validation found why):
+# `DOCKER-USER` sits in the kernel's FORWARD chain, which carries ALL forwarded traffic, not just
+# traffic bound for one of this host's own published ports — including a tailnet client's own
+# traffic merely PASSING THROUGH this host via the Tailscale exit-node feature (ticket #09, and the
+# plain VPS exit node), to an arbitrary THIRD-PARTY destination that happens to share a port number
+# with one of these classes (DNS on 53, HTTPS on 443, etc. are extremely common coincidental
+# matches). Confirmed live: before this fix, such traffic matched one of these rules by port alone,
+# got ACCEPTed here, and consequently never reached Tailscale's own `ts-forward` chain — which is
+# what marks a packet for `ts-postrouting`'s MASQUERADE — so it left this host with its source
+# address still the client's own (unroutable) tailnet address, and simply timed out; packet counters
+# on the exact rules below (`tcp dpt:443`, `udp dpt:53`) confirmed this during the live exit-node test.
+#
+# Why `--ctorigdst`, not plain `-d`: a first attempt at this fix used `-d <this host's own address>`
+# directly and was caught by an independent pre-deployment review before it shipped. DOCKER-USER
+# runs in the filter table's FORWARD chain, but Docker's own port publishing DNATs in the nat
+# table's PREROUTING chain — BEFORE routing, BEFORE FORWARD is ever evaluated (see the "Docker
+# published ports" comment above this role's firewall section for why UFW is bypassed the same way).
+# By the time a packet genuinely destined for one of this host's own published services reaches
+# DOCKER-USER, its destination has ALREADY been rewritten to the target container's bridge IP — a
+# plain `-d <host's own address>` can therefore never match genuine local traffic, only ever a
+# pass-through packet that was never DNATed (since its destination was never this host to begin
+# with) — exactly backwards, and it would have silently turned every restricted/allowlisted rule
+# below into dead code, falling through to Docker's own unconditional per-container ACCEPT and
+# exposing every tailnet-only service and Syncplay to the entire internet. `-m conntrack
+# --ctorigdst` matches the connection's ORIGINAL (pre-DNAT) destination, which conntrack records in
+# nat PREROUTING before the rewrite — so it still correctly identifies "this was addressed to my own
+# public/tailnet IP" for genuine local traffic, while a pass-through packet's ctorigdst is the real
+# third-party address, so it still correctly fails to match. `-m conntrack --ctorigdst` on BOTH the
+# accept AND its matching deny keeps each pair meaning only "who may reach THIS host's OWN service
+# on this port" — never "what happens to any other forwarded traffic that happens to target this
+# port number" — so unrelated pass-through traffic now correctly falls through this chain untouched
+# and reaches Tailscale's own forwarding logic instead.
+#
+# Why each DENY below is scoped to BOTH of this host's addresses, not just the one its own ACCEPT
+# uses: a second independent review caught this before deployment too. Every restricted/Syncplay
+# service is published with a bare host port (`"3000:3000"`, `"53:53/udp"`, etc. — see
+# roles/docker/templates/services/*.yml.j2), which Docker binds to ALL of this host's addresses, not
+# just the one the service is "meant" to be reached on. So a non-tailnet source can reach a
+# tailnet-only service by connecting to this host's PUBLIC address instead of its tailnet one (same
+# DNAT, same port) — and a single-address `--ctorigdst` on the DENY only ever catches one of those
+# two paths, silently leaving the other wide open (dead ACCEPT-less fallthrough to Docker's own
+# unconditional per-container ACCEPT). The DENY must therefore repeat for every address the port is
+# actually reachable on so it keeps its original "deny anyone not already accepted, no matter which
+# of my addresses they used" meaning — only the ACCEPT stays scoped to the one address that
+# identifies genuine traffic for that specific ingress path.
 *filter
 :DOCKER-USER - [0:0]
 -A DOCKER-USER -i br+ -m comment --comment "docker bridge traffic is not host-ingress" -j RETURN
 -A DOCKER-USER -i docker+ -m comment --comment "docker bridge traffic is not host-ingress" -j RETURN
 -A DOCKER-USER -m conntrack --ctstate RELATED,ESTABLISHED -m comment --comment "accept established forwarded flows" -j ACCEPT
 {% for ip in syncplay_allowed_ips | default([]) %}
--A DOCKER-USER -s {{ ip }} -p tcp -m tcp --dport 8999 -m comment --comment "syncplay friend access" -j ACCEPT
+-A DOCKER-USER -s {{ ip }} -m conntrack --ctorigdst {{ ansible_default_ipv4.address }} -p tcp -m tcp --dport 8999 -m comment --comment "syncplay friend access" -j ACCEPT
 {% endfor %}
--A DOCKER-USER -p tcp -m tcp --dport 8999 -m comment --comment "syncplay IP allowlist (empty list = fully blocked)" -j DROP
+-A DOCKER-USER -m conntrack --ctorigdst {{ ansible_default_ipv4.address }} -p tcp -m tcp --dport 8999 -m comment --comment "syncplay IP allowlist (empty list = fully blocked; via public address)" -j DROP
+-A DOCKER-USER -m conntrack --ctorigdst {{ tailscale_ip_v4 }} -p tcp -m tcp --dport 8999 -m comment --comment "syncplay IP allowlist (empty list = fully blocked; via tailnet address)" -j DROP
 {% for port in docker_published_restricted_ports %}
--A DOCKER-USER -s {{ tailscale_subnet }} -p tcp -m tcp --dport {{ port }} -m comment --comment "tailscale-only service" -j ACCEPT
+-A DOCKER-USER -s {{ tailscale_subnet }} -m conntrack --ctorigdst {{ tailscale_ip_v4 }} -p tcp -m tcp --dport {{ port }} -m comment --comment "tailscale-only service" -j ACCEPT
 {% endfor %}
 {% for port in docker_published_restricted_ports %}
--A DOCKER-USER -p tcp -m tcp --dport {{ port }} -m comment --comment "tailscale-only service deny" -j DROP
+-A DOCKER-USER -m conntrack --ctorigdst {{ tailscale_ip_v4 }} -p tcp -m tcp --dport {{ port }} -m comment --comment "tailscale-only service deny (via tailnet address)" -j DROP
+-A DOCKER-USER -m conntrack --ctorigdst {{ ansible_default_ipv4.address }} -p tcp -m tcp --dport {{ port }} -m comment --comment "tailscale-only service deny (via public address)" -j DROP
 {% endfor %}
 {% for port in docker_published_restricted_udp_ports | default([]) %}
--A DOCKER-USER -s {{ tailscale_subnet }} -p udp -m udp --dport {{ port }} -m comment --comment "tailscale-only service (udp)" -j ACCEPT
+-A DOCKER-USER -s {{ tailscale_subnet }} -m conntrack --ctorigdst {{ tailscale_ip_v4 }} -p udp -m udp --dport {{ port }} -m comment --comment "tailscale-only service (udp)" -j ACCEPT
 {% endfor %}
 {% for port in docker_published_restricted_udp_ports | default([]) %}
--A DOCKER-USER -p udp -m udp --dport {{ port }} -m comment --comment "tailscale-only service deny (udp)" -j DROP
+-A DOCKER-USER -m conntrack --ctorigdst {{ tailscale_ip_v4 }} -p udp -m udp --dport {{ port }} -m comment --comment "tailscale-only service deny (udp, via tailnet address)" -j DROP
+-A DOCKER-USER -m conntrack --ctorigdst {{ ansible_default_ipv4.address }} -p udp -m udp --dport {{ port }} -m comment --comment "tailscale-only service deny (udp, via public address)" -j DROP
 {% endfor %}
 {% for port in docker_published_public_ports %}
--A DOCKER-USER -p tcp -m tcp --dport {{ port }} -m comment --comment "public ingress (Caddy)" -j ACCEPT
+-A DOCKER-USER -m conntrack --ctorigdst {{ ansible_default_ipv4.address }} -p tcp -m tcp --dport {{ port }} -m comment --comment "public ingress (Caddy)" -j ACCEPT
 {% endfor %}
 COMMIT

@@ -5,7 +5,7 @@
 **Blocked by:** #07
 **Blocks:** None
 
-**Status:** ready-for-human (code done; the live traffic test needs the operator — see Notes)
+**Status:** ready-for-human (code done; the live traffic test found a real, now-fixed firewall gap — see "Live traffic test: first attempt failed" below; the retest is what's left)
 
 - [x] The VPS's Tailscale node advertises itself as an exit node through an idempotent step that also works when the node is already running (the existing bring-up only runs when it is not), without re-authenticating and without disturbing the node's other settings
 - [x] Host routing is unchanged — advertising an exit node does not alter the default route (asserted — see Notes for why no new code path exists to assert over)
@@ -79,19 +79,104 @@ itself (verified live against real ansible-core: a missing `Self` key degrades g
 neighboring tasks; `tailscale set` cannot touch `--accept-dns` or any other preference). Full local
 suite (`tests/lint.sh`) re-run clean after the move.
 
-### Why the live traffic test is not run here
+### Live traffic test: first attempt failed, root cause found and fixed
 
-The AC is explicit that the `DOCKER-USER` interaction is a runtime chain-ordering question only a
-live check can answer — reasoning about `roles/tailscale/templates/docker-user.rules.v4.j2` alone
-confirms the chain has no rule specific to this traffic (it's host-level forwarding from
-`tailscale0` outward, matching none of the `--dport`-scoped port-class rules), but what actually
-happens when a non-matching, non-established packet falls off the end of `DOCKER-USER` depends on
-Docker's own `FORWARD` chain rules and the kernel's default policy — genuinely not something to
-assert from reading the render alone. Proving it needs: (1) the admin-console approval only the
-operator can grant (this node doesn't match the `tag:exit-node` auto-approver), and (2) a second
-tailnet device actually selecting this node as its exit node and generating real traffic through it
-— the same category of attended, real-device action as ticket #07's phone test, on the VPS's own
-primary Tailscale identity (the one SSH access itself depends on), rather than a disposable
-container. Code, static checks, and the live-verification script's own supporting checks
-(advertised state, forwarding sysctls) are all done and reviewed; the live traffic test itself is
-left for the operator to run together, the same way ticket #07's live validation was done.
+The reasoning in the original version of this section turned out to be wrong, and the live test is
+exactly why it's an AC item rather than something asserted from the render alone: it assumed the
+`--dport`-scoped port-class rules in `docker-user.rules.v4.j2`/`v6.j2` could not coincidentally
+match this traffic, because it isn't addressed to one of this host's own published ports. That
+assumption missed that `DOCKER-USER` sits in the kernel's `FORWARD` chain, which sees ALL forwarded
+traffic — including a tailnet client's own exit-node traffic merely *passing through* this host to
+some third-party destination. The operator approved the node in the admin console, selected it as
+the exit node from a second tailnet device, and reported: "It's selectable but traffic doesn't
+work / times out."
+
+Root-caused live on the VPS via packet counters (not guesswork): the client's DNS (port 53) and
+HTTPS (port 443) pass-through traffic coincidentally matched the existing port-only
+"tailscale-only service" / "public ingress" rules and was ACCEPTed by `DOCKER-USER` before ever
+reaching Tailscale's own `ts-forward` chain. `ts-forward` is what marks a packet for
+`ts-postrouting`'s `MASQUERADE`; without that mark, the packet left the host with the client's own
+(unroutable, from the wider internet's perspective) tailnet source address, and simply timed out.
+This is a pre-existing gap in epic 12/21's own `DOCKER-USER` rules, not a bug in this ticket's new
+code — it was latent until this ticket's new traffic pattern (a tailnet client's packets merely
+passing through the host) exposed it; the existing exit-node pairs (tickets #01-#08) don't trigger
+it the same way because their traffic enters through the dedicated netns/sidecar path, not through
+this host's own primary interface.
+
+Getting the fix right took three attempts, each caught by an independent pre-deployment review
+before it reached the VPS — logged in full because the mechanism is genuinely subtle and the
+history is exactly why each rule now looks the way it does.
+
+**Attempt 1 (rejected, never shipped): scope every per-port rule's ACCEPT and DROP by `-d <this
+host's own address>`.** Caught by round-1 review: DOCKER-USER lives in the kernel's `FORWARD`
+chain, but Docker's own port-publishing DNAT happens in the `nat` table's `PREROUTING` chain —
+*before* routing, *before* `FORWARD` is ever evaluated (this repo's own pre-existing comment at
+`roles/tailscale/tasks/main.yml:258-261` already documented this ordering, independently
+corroborating the finding). By the time a packet genuinely destined for one of this host's own
+published services reaches DOCKER-USER, its destination has already been rewritten to the target
+container's bridge IP — so `-d <host's own address>` can never match genuine local traffic, only a
+pass-through packet that was never DNATed in the first place. Backwards from the intent: it would
+have silently turned every restricted-service and Syncplay rule into dead code, falling through to
+Docker's own unconditional per-container ACCEPT and exposing those services to the entire internet.
+
+**Attempt 2 (rejected, never shipped): same idea, but `-m conntrack --ctorigdst <ip>` instead of
+`-d`.** `--ctorigdst` matches the connection's *original* (pre-DNAT) destination as recorded by
+conntrack in `nat PREROUTING`, which survives the later rewrite — correctly identifying genuine
+local traffic while still failing to match pass-through traffic to a third party. This got the
+ACCEPT side right, verified by round-2 review. But the DENY side was scoped to only *one* of this
+host's two addresses (e.g. `tailscale_ip_v4` for a restricted TCP port) — and every restricted or
+Syncplay service in this repo is published with a bare host port (`"3000:3000"`, `"53:53/udp"`,
+etc. — `roles/docker/templates/services/*.yml.j2`), which Docker binds to **all** of this host's
+addresses, not just the one the service is "meant" to be reached on. So a non-tailnet source could
+reach a tailnet-restricted service — or a non-allowlisted source reach Syncplay — simply by
+connecting via the host's *other* address (its public IP instead of its tailnet IP, or vice versa):
+same DNAT, same port, but the single-address DENY never matched, and the packet fell through to
+Docker's own unconditional ACCEPT. The same class of bug as attempt 1, just moved from the ACCEPT
+side to the DENY side.
+
+**Attempt 3 (shipped): `--ctorigdst` on the ACCEPT, scoped to the one address that identifies
+genuine traffic for that specific ingress path; `--ctorigdst` repeated as TWO separate DENY lines
+per restricted/Syncplay port, one per address this host has** (`tailscale_ip_v4`/`v6` and
+`ansible_default_ipv4`/`v6.address`), so the DENY keeps its original "deny anyone not already
+accepted, no matter which of my addresses they used" meaning. Public-ingress rules (no DENY
+counterpart, by original design — meant to be open to everyone) needed no change beyond the ACCEPT
+scoping. The IPv6 Syncplay DROP line is deliberately left fully unscoped — it blocks the port
+outright on v6 regardless of destination, since the allowlist itself is IPv4-only, so there's no
+"this host's own service" case to narrow it to.
+
+A secondary concern was raised and then verified NOT to be a real issue: `tailscale_ip_v4`/
+`tailscale_ip_v6` are set via `command: tailscale ip -4/-6` tasks, which Ansible always skips under
+`--check` mode, resolving to empty string via the existing `| default('')` fallback — which would
+make a `--check` run of the "Render the DOCKER-USER rules" task (an `ansible.builtin.template` task,
+which DOES run under `--check`) attempt to render a `--ctorigdst` clause with an empty value.
+Checked empirically against real ansible-core: `validate:` (the `iptables-restore --test` step that
+would catch malformed syntax) is never invoked under `--check` mode at all — confirmed by giving a
+template task an always-failing `validate:` command and observing it still reports `changed` success
+under `--check`. A `--check` run renders no real file and never validates one, so this never affects
+a live firewall and needed no code change. Also checked and confirmed fine: the VPS does gather a
+real `ansible_default_ipv6.address` (a genuine public IPv6 address), a new dependency this fix
+introduced for the v6 template that the role never had before.
+
+Tests updated across all three attempts: `tests/test_docker_user_rules.yml` gained fixture facts
+(`ansible_default_ipv4`/`ansible_default_ipv6`/`tailscale_ip_v4`/`tailscale_ip_v6`) the harness
+previously left undefined (`gather_facts: false`, no real host); `tests/check-docker-user-firewall.sh`
+had every `accept_before_drop()` call site and the default-render Python cross-check (section "1b",
+which renders against the *real* `group_vars/all/main.yml`) updated for `--ctorigdst`, plus a new
+`must_deny_both_addresses()` helper asserting BOTH per-port deny lines exist, for every
+restricted/Syncplay class, in both the explicit-fixture section and the default-render check;
+`tests/check-adguard-dns.sh` had one cosmetic regex loosened to match a renamed rule comment (no
+assertion logic changed there — that lives in check-docker-user-firewall.sh). Full local suite
+(`tests/lint.sh`) and `ansible-lint` both re-run clean after the final fix.
+
+Three independent pre-deployment reviews ran in sequence (same higher-bar framing as the
+block-placement review above, since this touches the rules gating every published service, not
+just exit nodes) — the first two each found the blocking bug described in attempts 1 and 2 above;
+the third, reviewing the final attempt 3 state from scratch, found no blocking issues (two
+pre-existing, out-of-scope observations noted only: no third address class exists on this
+single-NIC host, and an existing `check-docker-user-firewall.sh` gap — the public-port "no drop
+rule" assertion only checks the v4 file, not v6 — predates this diff and was left as-is).
+
+What's left: deploy to the live VPS (check mode first), immediately re-verify every currently-working
+access path (SSH, public HTTPS per service, every tailnet-only service, Syncplay), then have the
+operator retry the original failed traffic test to confirm the fix actually resolves it before this
+AC is checked off.

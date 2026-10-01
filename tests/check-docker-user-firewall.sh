@@ -51,44 +51,67 @@ render "$TMP/failclosed" "$FIX_FAILCLOSED"
 lineno() { grep -nE -e "$2" "$1" | head -1 | cut -d: -f1; }
 must() { local f=$1 pat=$2 what=$3; [[ -n "$(lineno "$f" "$pat")" ]] || fail "$(basename "$f"): missing $what"; }
 mustnot() { local f=$1 pat=$2 what=$3; [[ -z "$(lineno "$f" "$pat")" ]] || fail "$(basename "$f"): unexpected $what"; }
-# accept-before-drop: the ACCEPT for a port must appear on an earlier line than its DROP
-accept_before_drop() { # file proto port src-pattern what
-  local f=$1 proto=$2 port=$3 src=$4 what=$5 a d
-  a=$(lineno "$f" "^-A DOCKER-USER -s ${src} -p ${proto} -m ${proto} --dport ${port} .*-j ACCEPT")
-  d=$(lineno "$f" "^-A DOCKER-USER -p ${proto} -m ${proto} --dport ${port} .*-j DROP")
+# accept-before-drop: the ACCEPT for a port must appear on an earlier line than its matching DROP
+# (the one scoped to the SAME destination IP the accept uses). epic 23 #09's own live finding:
+# port-only matching let a tailnet client's own pass-through exit-node traffic coincidentally match
+# these rules before ever reaching Tailscale's forwarding/NAT chain — see docker-user.rules.v4.j2.
+accept_before_drop() { # file proto port src-pattern dst-pattern what
+  local f=$1 proto=$2 port=$3 src=$4 dst=$5 what=$6 a d
+  a=$(lineno "$f" "^-A DOCKER-USER -s ${src} -m conntrack --ctorigdst ${dst} -p ${proto} -m ${proto} --dport ${port} .*-j ACCEPT")
+  d=$(lineno "$f" "^-A DOCKER-USER -m conntrack --ctorigdst ${dst} -p ${proto} -m ${proto} --dport ${port} .*-j DROP")
   [[ -n "$a" && -n "$d" && "$a" -lt "$d" ]] || fail "$(basename "$f"): $what (accept line='${a}', drop line='${d}')"
 }
+# second-address deny: every restricted/syncplay port is published bare (0.0.0.0), so Docker's DNAT
+# fires on EITHER of this host's own addresses — a second pre-deployment review caught that a DENY
+# scoped to only one of them silently left the other wide open. Assert the OTHER address's deny
+# exists too, for every such port.
+must_deny_both_addresses() { # file proto port addr1 addr2 what
+  local f=$1 proto=$2 port=$3 a1=$4 a2=$5 what=$6
+  must "$f" "^-A DOCKER-USER -m conntrack --ctorigdst ${a1} -p ${proto} -m ${proto} --dport ${port} .*-j DROP" "$what (via first address)"
+  must "$f" "^-A DOCKER-USER -m conntrack --ctorigdst ${a2} -p ${proto} -m ${proto} --dport ${port} .*-j DROP" "$what (via second address)"
+}
+
+# the fixture's own facts (test_docker_user_rules.yml), used to build the -d <ip> expectations below
+TS_IP4='100\.64\.0\.1'; TS_IP6='fd7a:115c:a1e0::1'; PUB_IP4='198\.51\.100\.50'; PUB_IP6='2001:db8::50'
 
 # ---- 1. classification, custom fixture (explicit expectations) -------------------------------
 V4="$TMP/custom/docker-user.v4.rules"; V6="$TMP/custom/docker-user.v6.rules"
 for p in 3000 9119; do
-  accept_before_drop "$V4" tcp "$p" '100\.64\.0\.0/10' "v4 tcp $p must be tailnet-accept then drop-others"
-  accept_before_drop "$V6" tcp "$p" 'fd7a:115c:a1e0::/48' "v6 tcp $p must be tailnet-accept then drop-others"
+  accept_before_drop "$V4" tcp "$p" '100\.64\.0\.0/10' "$TS_IP4" "v4 tcp $p must be tailnet-accept then drop-others"
+  accept_before_drop "$V6" tcp "$p" 'fd7a:115c:a1e0::/48' "$TS_IP6" "v6 tcp $p must be tailnet-accept then drop-others"
+  must_deny_both_addresses "$V4" tcp "$p" "$TS_IP4" "$PUB_IP4" "v4 tcp $p must be dropped via BOTH this host's addresses (published bare, reachable via either)"
+  must_deny_both_addresses "$V6" tcp "$p" "$TS_IP6" "$PUB_IP6" "v6 tcp $p must be dropped via BOTH this host's addresses (published bare, reachable via either)"
 done
-accept_before_drop "$V4" udp 53 '100\.64\.0\.0/10' "v4 udp 53 must be tailnet-accept then drop-others"
-accept_before_drop "$V6" udp 53 'fd7a:115c:a1e0::/48' "v6 udp 53 must be tailnet-accept then drop-others"
+accept_before_drop "$V4" udp 53 '100\.64\.0\.0/10' "$TS_IP4" "v4 udp 53 must be tailnet-accept then drop-others"
+accept_before_drop "$V6" udp 53 'fd7a:115c:a1e0::/48' "$TS_IP6" "v6 udp 53 must be tailnet-accept then drop-others"
+must_deny_both_addresses "$V4" udp 53 "$TS_IP4" "$PUB_IP4" "v4 udp 53 must be dropped via BOTH this host's addresses"
+must_deny_both_addresses "$V6" udp 53 "$TS_IP6" "$PUB_IP6" "v6 udp 53 must be dropped via BOTH this host's addresses"
 for p in 80 443; do
-  must "$V4" "^-A DOCKER-USER -p tcp -m tcp --dport $p .*-j ACCEPT" "v4 public port $p accepted from anywhere"
-  must "$V6" "^-A DOCKER-USER -p tcp -m tcp --dport $p .*-j ACCEPT" "v6 public port $p accepted from anywhere"
+  must "$V4" "^-A DOCKER-USER -m conntrack --ctorigdst $PUB_IP4 -p tcp -m tcp --dport $p .*-j ACCEPT" "v4 public port $p accepted from anywhere"
+  must "$V6" "^-A DOCKER-USER -m conntrack --ctorigdst $PUB_IP6 -p tcp -m tcp --dport $p .*-j ACCEPT" "v6 public port $p accepted from anywhere"
   mustnot "$V4" "^-A DOCKER-USER .*--dport $p .*-j DROP" "drop rule for public port $p"
 done
 # a port that is in no class gets no rule at all (Docker's own forwarding decides)
 mustnot "$V4" "--dport 5432" "rule for an unclassified port"
-# Syncplay: allowlisted IPs accepted (v4), everyone else dropped; IPv6 blocked outright
-must "$V4" "^-A DOCKER-USER -s 203\.0\.113\.7(/32)? -p tcp -m tcp --dport 8999 .*-j ACCEPT" "syncplay allow for first allowlisted IP"
-must "$V4" "^-A DOCKER-USER -s 203\.0\.113\.8(/32)? -p tcp -m tcp --dport 8999 .*-j ACCEPT" "syncplay allow for second allowlisted IP"
-accept_before_drop "$V4" tcp 8999 '203\.0\.113\.7(/32)?' "syncplay allowlist accept must precede the catch-all drop"
+# Syncplay: allowlisted IPs accepted (v4), everyone else dropped; IPv6 blocked outright. The accept and
+# its deny are both scoped to this host's own public IP, same as every other per-port pair.
+must "$V4" "^-A DOCKER-USER -s 203\.0\.113\.7(/32)? -m conntrack --ctorigdst $PUB_IP4 -p tcp -m tcp --dport 8999 .*-j ACCEPT" "syncplay allow for first allowlisted IP"
+must "$V4" "^-A DOCKER-USER -s 203\.0\.113\.8(/32)? -m conntrack --ctorigdst $PUB_IP4 -p tcp -m tcp --dport 8999 .*-j ACCEPT" "syncplay allow for second allowlisted IP"
+accept_before_drop "$V4" tcp 8999 '203\.0\.113\.7(/32)?' "$PUB_IP4" "syncplay allowlist accept must precede the catch-all drop"
+# syncplay is also published bare, so a non-allowlisted tailnet member could otherwise reach it via
+# this host's tailnet address instead of its public one — the deny must cover both.
+must_deny_both_addresses "$V4" tcp 8999 "$PUB_IP4" "$TS_IP4" "syncplay must be dropped via BOTH this host's addresses"
 must "$V6" "^-A DOCKER-USER -p tcp -m tcp --dport 8999 .*-j DROP" "v6 syncplay dropped (allowlist is IPv4-only)"
 mustnot "$V6" "203\.0\.113" "an IPv4 allowlist address in the v6 ruleset"
 mustnot "$V6" "^-A DOCKER-USER -s .* --dport 8999 .*-j ACCEPT" "any v6 syncplay accept"
-# an empty allowlist means the port is fully blocked
+# an empty allowlist means the port is fully blocked, via either address
 NS="$TMP/nosync/docker-user.v4.rules"
-must "$NS" "^-A DOCKER-USER -p tcp -m tcp --dport 8999 .*-j DROP" "syncplay drop with an empty allowlist"
+must_deny_both_addresses "$NS" tcp 8999 "$PUB_IP4" "$TS_IP4" "syncplay drop with an empty allowlist must cover BOTH this host's addresses"
 mustnot "$NS" "--dport 8999 .*-j ACCEPT" "syncplay accept with an empty allowlist"
 # docker-bridge and established traffic return/accept before any port classification
 for f in "$V4" "$V6"; do
   br=$(lineno "$f" '^-A DOCKER-USER -i br\+ .*-j RETURN'); dk=$(lineno "$f" '^-A DOCKER-USER -i docker\+ .*-j RETURN')
-  est=$(lineno "$f" 'RELATED,ESTABLISHED .*-j ACCEPT'); first_port=$(lineno "$f" '--dport')
+  est=$(lineno "$f" 'RELATED,ESTABLISHED .*-j ACCEPT'); first_port=$(lineno "$f" '^-A DOCKER-USER .*--dport')
   [[ -n "$br" && -n "$dk" && -n "$est" && -n "$first_port" ]] || fail "$(basename "$f"): missing bridge-return / established accept"
   (( br < first_port && dk < first_port && est < first_port )) || fail "$(basename "$f"): bridge/established rules must precede port classification"
 done
@@ -107,6 +130,9 @@ pub=[val(p) for p in d["docker_published_public_ports"]]
 rt=[val(p) for p in d["docker_published_restricted_ports"]]
 ru=[val(p) for p in d.get("docker_published_restricted_udp_ports",[])]
 src={"v4":re.escape(d["tailscale_subnet"]),"v6":re.escape(d["tailscale_subnet_v6"])}
+# must match the fixture facts in tests/test_docker_user_rules.yml (gather_facts: false, no real host)
+dst={"v4":re.escape("100.64.0.1"),"v6":re.escape("fd7a:115c:a1e0::1")}
+pubdst={"v4":re.escape("198.51.100.50"),"v6":re.escape("2001:db8::50")}
 def idx(lines,pat):
     for i,l in enumerate(lines):
         if re.search(pat,l): return i
@@ -114,13 +140,17 @@ bad=[]
 for fam in ("v4","v6"):
     L=[l for l in open(f"{out}/docker-user.{fam}.rules").read().split("\n") if l.startswith("-A DOCKER-USER")]
     for p in pub:
-        if idx(L,rf"-p tcp -m tcp --dport {p} .*-j ACCEPT") is None: bad.append(f"{fam}: public {p} not accepted")
+        if idx(L,rf"^-A DOCKER-USER -m conntrack --ctorigdst {pubdst[fam]} -p tcp -m tcp --dport {p} .*-j ACCEPT") is None: bad.append(f"{fam}: public {p} not accepted")
         if idx(L,rf"^-A DOCKER-USER -p tcp -m tcp --dport {p} .*-j DROP") is not None: bad.append(f"{fam}: public {p} is dropped")
     for proto,ports in (("tcp",rt),("udp",ru)):
         for p in ports:
-            a=idx(L,rf"^-A DOCKER-USER -s {src[fam]} -p {proto} -m {proto} --dport {p} .*-j ACCEPT")
-            x=idx(L,rf"^-A DOCKER-USER -p {proto} -m {proto} --dport {p} .*-j DROP")
+            a=idx(L,rf"^-A DOCKER-USER -s {src[fam]} -m conntrack --ctorigdst {dst[fam]} -p {proto} -m {proto} --dport {p} .*-j ACCEPT")
+            x=idx(L,rf"^-A DOCKER-USER -m conntrack --ctorigdst {dst[fam]} -p {proto} -m {proto} --dport {p} .*-j DROP")
             if a is None or x is None or a>=x: bad.append(f"{fam}: restricted {proto}/{p} not accept-then-drop (accept={a}, drop={x})")
+            # published bare (0.0.0.0): Docker's DNAT fires on EITHER of this host's own addresses, so
+            # the deny must also cover the OTHER one, not just the one the accept uses (round-2 finding)
+            y=idx(L,rf"^-A DOCKER-USER -m conntrack --ctorigdst {pubdst[fam]} -p {proto} -m {proto} --dport {p} .*-j DROP")
+            if y is None: bad.append(f"{fam}: restricted {proto}/{p} not also dropped via this host's public/other address")
 if bad: print("\n".join(bad)); sys.exit(1)
 print(f"  default render: {len(pub)} public, {len(rt)} restricted tcp, {len(ru)} restricted udp ports verified on v4 and v6")
 PY
