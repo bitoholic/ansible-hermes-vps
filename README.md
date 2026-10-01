@@ -142,6 +142,7 @@ A few services need a one-time step the operator completes by hand — either be
   openssl s_client -connect <vps-ip>:8443 -servername matrix.<domain> </dev/null 2>/dev/null | openssl x509 -noout -issuer
   ```
   should print a Let's Encrypt issuer. Once both check out, update the Matrix client's homeserver URL and the OwnTracks app's recorder URL on each device from `:8448` to `:8443` — a one-time manual per-device change; Ansible cannot push client-side app settings.
+- **Windscribe exit nodes: one-time Tailscale/Windscribe setup, then the tailnet ACL change** (epic 23): before the first deploy with `exit_nodes` enabled, generate a dedicated Windscribe WireGuard config for the VPS, create a `tag:exit-node` Tailscale tag with an auto-approver (or plan to approve each node by hand), and mint a reusable tagged auth key — then add the required tailnet access-control rules (these are **required**, not optional: without them, a compromised exit-node container inherits the same tailnet-wide trust every other service here extends to any tailnet source) using the documented safe-rollout sequence (confirm an alternate path, save the current policy, preview, apply, re-verify, roll back on any failure). Full step-by-step commands, the exact ACL JSON, switching locations on Android, adding a location, auth-key rotation, version bumps and troubleshooting are all in [`docs/exit-nodes-runbook.md`](docs/exit-nodes-runbook.md); the design and its evidence are in [ADR-0008](docs/adr/0008-windscribe-exit-node-pairs.md).
 
 ## 🧪 Local Testing
 
@@ -161,6 +162,7 @@ Tracked from the last infrastructure audit. Don't consider this deploy-ready unt
 
 - [ ] **Delegated subagents share the container filesystem.** The single `hermes-agent` container mounts `hermes_home:/opt/data`; `delegate_task` children get isolated git worktrees (`worktree_isolation: true`) but otherwise share the same bind mount, so a child can read the wiki and the agent's `.env`. Filesystem sandboxing per child is out of scope.
 - [x] ~~The GitHub token was embedded directly in the wiki's git remote URL (persists in `.git/config` in plaintext).~~ Closed: the clone now uses a token-less URL and git authenticates via a credential helper / askpass that reads `GITHUB_TOKEN` from the environment (see `roles/backup/files/git-credential-env`). The token value is never written to `.git/config` or any remote URL.
+- [ ] **Exit nodes: host-reboot survival untested.** Everything else in epic 23's attended validation was confirmed live (kill switch, recovery from a tunnel-only restart, the phone test), but a full host reboot has not yet been attempted — it's a large, disruptive action deliberately deferred pending its own explicit scheduling (preferably alongside epic 21's own reboot drill). See [`docs/exit-nodes-runbook.md`](docs/exit-nodes-runbook.md) and [ADR-0008](docs/adr/0008-windscribe-exit-node-pairs.md).
 
 ## 🔒 Firewall persistence across reboots
 
