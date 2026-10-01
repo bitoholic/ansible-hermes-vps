@@ -5,12 +5,12 @@
 **Blocked by:** #07
 **Blocks:** None
 
-**Status:** ready-for-human (code done; the live traffic test found a real, now-fixed firewall gap — see "Live traffic test: first attempt failed" below; the retest is what's left)
+**Status:** done — live traffic through the plain exit node confirmed working, both found-live regressions (the DOCKER-USER firewall gap and the ACL/tagging gap below) fixed and verified
 
 - [x] The VPS's Tailscale node advertises itself as an exit node through an idempotent step that also works when the node is already running (the existing bring-up only runs when it is not), without re-authenticating and without disturbing the node's other settings
 - [x] Host routing is unchanged — advertising an exit node does not alter the default route (asserted — see Notes for why no new code path exists to assert over)
 - [x] The forwarding settings the exit node depends on are persistent for both address families (the finding of epic 21's runtime-state audit is reused; the check states where each setting is persisted)
-- [ ] **Live check, not a render assertion:** the interaction with the `DOCKER-USER` port-class rules — a runtime chain-ordering question — is proven on the real VPS by sending traffic through the plain exit node from a tailnet device and confirming it is forwarded and not dropped; the check is recorded here and added to the live verification script's optional section
+- [x] **Live check, not a render assertion:** the interaction with the `DOCKER-USER` port-class rules — a runtime chain-ordering question — is proven on the real VPS by sending traffic through the plain exit node from a tailnet device and confirming it is forwarded and not dropped; confirmed working after the firewall fix below (operator-confirmed: "access via the node works now, and it works over the ws nodes")
 - [x] The README notes that the route must be approved in the Tailscale admin console and how to select the node
 
 ## Notes
@@ -182,4 +182,56 @@ Deployed to the live VPS via `scripts/deploy --skip-tags docker,conduit,hermes,a
 
 Post-deploy, `scripts/verify-exit-nodes.sh` (41 passed, 0 FAILED, 3 inconclusive — all expected: admin-console approval and the plain exit node's own live traffic test can't be self-checked) and `scripts/verify-live.sh` both ran clean. The first `verify-live.sh` run reported a FAIL — "v4/v6 live chain differs from the rendering" — that turned out to be a test-tooling bug, not a deployment problem: fetching the raw `iptables -S`/`ip6tables -S` output from the VPS and comparing it directly against the deployed rules file showed every rule, IP, port and target matched exactly; only the *textual order* of match clauses within each rule differed, because the kernel always prints `-p <proto>` immediately after a rule's `-s`/leading clause regardless of where it was written, and these new rules write `-m conntrack --ctorigdst <ip>` *before* `-p` (so the match survives Docker's DNAT) for the first time. Fixed `scripts/verify-live.sh`'s `normalize_rules()` to canonicalize `-p`'s position before comparing (two new self-test cases added, `--self-test` passes at 79 assertions), re-ran against the live VPS: both families now report "live chain equals the rendering" (33 and 31 rules respectively). Public ingress (80/443/8443) answers from this workstation; all 13 containers report running with their declared restart policy; SSH/Tailscale/UFW/Docker all enabled and active at boot. The restricted-port outside-in probe and the tailnet-route checks are INCONCLUSIVE only because this workstation isn't on a plain internet path or the tailnet itself — not failures.
 
-What's left: have the operator retry the original failed traffic test — select the VPS's plain exit node from a second tailnet device and confirm real traffic (browsing, a DNS lookup) now works instead of timing out — to confirm the fix actually resolves the reported symptom before this AC is checked off.
+### Second real regression, found by the operator's own retest: direct tailnet access broke
+
+The operator retried the exit-node traffic test and confirmed it now works — both through the
+VPS's own plain exit node and through the Windscribe exit-node pairs — but reported a new,
+different symptom: "access to services on vps over tailnet stopped working, I can't connect to
+adguard or monitor - owntracks works though." This was NOT a DOCKER-USER/firewall regression (ruled
+out exhaustively: no UFW log entries, zero DOCKER-USER rule-counter hits, zero packets arriving on
+`tailscale0` even during live, timed, confirmed retries from two different client devices) — the
+actual cause was one layer up, in Tailscale's own daemon, confirmed via
+`journalctl -u tailscaled`: `Drop: TCP{<tailnet-ip>:54172 > <tailnet-ip>:53} 60 no rules matched`.
+`tailscaled` itself enforces the tailnet's ACL policy before a packet ever reaches the kernel's
+network stack — this is a separate layer from everything `scripts/verify-live.sh`/
+`check-docker-user-firewall.sh` can see, which is why static/render-level tests could never have
+caught it.
+
+Root cause: `tailscale status --self --json` on the VPS showed `"Tags": ["tag:exit-node"]` on its
+OWN primary node identity — picked up when it was approved as an exit node in the admin console.
+Epic 23 #01's own ACL policy (`docs/exit-nodes-runbook.md`) deliberately grants `tag:exit-node`
+*no* access to or from anything (so a compromised exit-node container can't reach the rest of the
+tailnet) — a side effect neither ticket #01 nor this ticket anticipated is that a **tagged** device
+is no longer part of `autogroup:member`, so the existing `autogroup:member → autogroup:member` rule
+silently stopped covering the VPS's own node once it carried this tag. This explains every
+observed symptom at once: direct access to AdGuard/Beszel/Silverbullet/DNS broke completely (not
+scoped to one port or service — the whole node fell out of the ACL's member-to-member rule);
+OwnTracks kept working because it's reached via the `autogroup:member → autogroup:internet` rule's
+unrelated public path, not direct node-to-node access; exit-node pass-through traffic kept working
+because that's governed by the `→ autogroup:internet` rule and routing-table selection, not by
+whether the exit node's own address is independently reachable; and `tailscale ping` kept
+succeeding throughout because it's Tailscale's own coordination-layer ping (answered directly by
+`tailscaled`, confirmed live going `via [publicIPv6]:41641`), never touching the ACL-governed data
+path at all — the single most misleading piece of evidence during diagnosis, and why a *real*
+`ping`/`nc` test (not `tailscale ping`) was needed to actually see the 100% packet loss.
+
+The Tailscale admin console would not allow removing the node's only tag entirely — converting a
+tagged node back to a plain user-owned one needs re-authentication, which risks a tailnet IP
+change (requiring a redeploy to propagate into the DOCKER-USER rules and `haproxy.cfg`, both keyed
+to this address). Given the choice between that and a scoped ACL fix, the operator chose the
+scoped fix: a third `acls` entry, `{ "action": "accept", "src": ["autogroup:member"], "dst":
+["<tailnet-ip>:*", "<tailnet-ip>:*"] }`, restoring direct access to the VPS's own
+services without reopening the actual exit-node containers to the tailnet (ticket #01's isolation
+is untouched — the new rule names only the VPS's own two addresses, never `tag:exit-node` as a
+class). Applied by the operator in the admin console; confirmed immediately: `scripts/verify-live.sh`
+re-run clean (32 passed, 0 FAILED — the three tailnet-route checks that were previously
+INCONCLUSIVE from this workstation now PASS: adguard/monitor/owntracks-ui all answer), and the
+operator independently confirmed AdGuard, monitor and OwnTracks all work again from their own
+devices. Documented in `docs/exit-nodes-runbook.md` ("A second real regression...") so a future
+re-approval of this node as an exit node that re-triggers the same tagging knows the fix immediately
+rather than re-diagnosing from scratch.
+
+Both regressions this ticket's live testing surfaced are now fixed, reviewed (the firewall fix
+three times over, by independent fresh-context reviewers) and confirmed working end-to-end by the
+operator on real devices. This closes out ticket #09, and with it epic 23 (#01-#09) — per the
+established protocol, the whole epic now goes to the operator for their own full-epic review.

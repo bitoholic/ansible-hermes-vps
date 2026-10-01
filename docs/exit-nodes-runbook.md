@@ -42,7 +42,12 @@ freshly-registered exit-node container doesn't need a manual per-node click in t
   "tagOwners": { "tag:exit-node": ["autogroup:member"] },
   "acls": [
     { "action": "accept", "src": ["autogroup:member"], "dst": ["autogroup:member:*"] },
-    { "action": "accept", "src": ["autogroup:member"], "dst": ["autogroup:internet:*"] }
+    { "action": "accept", "src": ["autogroup:member"], "dst": ["autogroup:internet:*"] },
+    // ticket #09's own node ended up tagged tag:exit-node (see "A second real regression"
+    // below) — this line restores direct access to the VPS's own services for normal
+    // devices without reopening the actual exit-node containers to the tailnet. Replace the
+    // addresses with the VPS's own current tailnet IPv4/IPv6 (`tailscale ip -4`/`-6` on it).
+    { "action": "accept", "src": ["autogroup:member"], "dst": ["<tailnet-ip>:*", "<tailnet-ip>:*"] }
   ],
   "autoApprovers": {
     "exitNode": ["tag:exit-node"]
@@ -114,6 +119,25 @@ sudo tailscale set --ssh=false
 on the VPS (OpenSSH was already handling tailnet SSH correctly on its own; "Tailscale SSH" was an
 unrelated, previously-dismissed-as-harmless feature — see `tailscale status`'s own health warnings
 for "Tailscale SSH enabled" before you ever touch the ACL, so this doesn't surprise you later).
+
+**A second real regression, found live during ticket #09** (the VPS's own node as a plain exit
+node): after approving the VPS's own node as an exit node in the admin console, every other
+tailnet device lost direct access to the VPS's own services — AdGuard, Beszel ("monitor"),
+Silverbullet, DNS, everything *except* exit-node pass-through traffic, which kept working. Root
+cause, confirmed via `tailscale status --self --json` on the VPS: the node had picked up
+`Tags: ["tag:exit-node"]` on its own primary identity (not just the exit-node containers this tag
+was meant for). A **tagged** device is not part of `autogroup:member` under Tailscale's ACL model,
+so the `autogroup:member → autogroup:member` rule above stopped covering it — exactly the isolation
+the policy deliberately gives `tag:exit-node`, now applied to the VPS's own node by accident. The
+Tailscale admin console would not let the tag be removed entirely (converting a tagged node back to
+a plain user-owned one requires re-authenticating it, which risks a tailnet IP change and would
+need a redeploy to propagate). Fixed without touching the node's identity at all: added the third
+`acls` line above, scoped to the VPS's own specific tailnet addresses — restores direct access to
+*this* node without reopening the actual exit-node containers (which must stay unreachable from the
+tailnet; that is ticket #01's own security boundary, untouched by this). If you ever re-approve this
+node as an exit node again (e.g. after a re-registration), check `tailscale status --self --json`
+for `Tags` afterward — if it comes back tagged again, this same ACL line is the fix, not an ACL
+edit that touches `tag:exit-node` more broadly.
 
 ## Everyday use
 
