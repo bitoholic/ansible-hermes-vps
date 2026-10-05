@@ -113,7 +113,7 @@ allowlist:
   - path: "*:.scratch/24-public-readiness/issues/04-publication-strategy-adr-and-export.md*"
     rule: "tailnet-cgnat-address"
     reason: "An early, since-fixed (2b9a4ce) version of this ticket's own redesign notes repeated the same mistake a fourth time, describing an audit-allowlist.yml fix by quoting the real-looking address literally instead of in words; same non-identifying fixture value, not the operator's real one."
-  - path: "commit:bf693536358b8ab4d8d941430301470e97f07ea2:message"
+  - path: "commit:76f647a3a6cdf6f770667686e2890592fd65c442:message"
     rule: "tailnet-cgnat-address"
     reason: >-
       The export's own rewritten form of the 4062e2b fix commit's message, which also quotes the
@@ -122,4 +122,7 @@ allowlist:
       long as this commit and everything before it in this repository's history is unchanged, which
       holds for ordinary, append-only development. Re-derive this hash (re-run the export and read the
       new finding) if it ever goes stale — a wrong hash just means this entry silently stops matching
-      and the audit reports the finding again, never a false suppression of something else.
+      and the audit reports the finding again, never a false suppression of something else. Re-pinned
+      once already (2026-10-05): merging epic 24's PR into main rewrote every commit's hash (GitHub
+      performed a rebase/squash-style merge, not a plain merge commit), which changed this commit's
+      hash even though its content didn't change — expect this to happen again after any future merge.
