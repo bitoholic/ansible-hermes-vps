@@ -110,7 +110,7 @@ allowlist:
   - path: "*:.scratch/24-public-readiness/issues/03-generic-lint-guard-and-content-policy.md*"
     rule: "tailnet-cgnat-address"
     reason: "An early, since-fixed (1dbf8e2) version of this ticket's own notes described the bug above by repeating the same real-looking address a third time; same non-identifying fixture value, not the operator's real one."
-  - path: "commit:a8e32ae6edd457c5c717ae89ce96fb41b30e242e:message"
+  - path: "commit:bf693536358b8ab4d8d941430301470e97f07ea2:message"
     rule: "tailnet-cgnat-address"
     reason: >-
       The export's own rewritten form of the 4062e2b fix commit's message, which also quotes the
