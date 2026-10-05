@@ -65,3 +65,10 @@ baseline, one Spec-conformance):**
   matches the *dominant* convention in `tests/lint.sh` (every `./tests/check-*.sh` entry is exactly
   this), and the script's own "FINDING ..." + "N finding(s)" output already names the failure as
   clearly as the inline guard does.
+
+**Round 2 (independent, fresh-context verification of the fix commit):** all four fixes confirmed
+working by direct reproduction (multi-line needle matching including an overlap case and a needle
+spanning the newline boundary; `parse_commit_object` against the real HEAD commit, a synthetic
+multi-line gpgsig, a malformed header-less object, and the zero-commit case; the direct-invocation
+guard's exit 2; the fixture no longer self-matching, with `check_secrets_store.py` still clean). No new
+issues introduced. Ticket closed.
