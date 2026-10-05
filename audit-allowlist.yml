@@ -22,10 +22,10 @@
 # ever ran to completion against a repository that actually matters): the file-scoped entries below use
 # "*:FILE*" rather than "tree:FILE:*" so ONE entry covers both the tree:FILE:LINE form AND the
 # history:FILE@SHA:LINE form — the full audit's history scan (every blob reachable from any ref) finds
-# the exact same content again, under a different location label, whenever that content is also present
-# at HEAD (true of every file here, and necessarily true of a single-snapshot export repository, where
-# "history" and "tree" cover the same one commit). Likewise the two admin-username entries use "*"
-# rather than "tree:*", for the same reason.
+# the exact same content again, under a different location label, whenever that content is present at
+# more than one point in history (true of every file here — the export (epic 24 #04) preserves full
+# history, so a fixture's value sitting unchanged across many commits is the normal case, not an
+# exception). Likewise the two admin-username and two git-identity entries use "*", for the same reason.
 allowlist:
   - path: "*"
     rule: "secret:ADGUARD_ADMIN_USERNAME"
@@ -95,3 +95,28 @@ allowlist:
   - path: "*:tests/test_exit_nodes_render.yml*"
     rule: "tailnet-cgnat-address"
     reason: "A synthetic fixture WireGuard tunnel address (an arbitrary address in Tailscale's CGNAT range) used as a functional test input. Chosen deliberately in ticket #02 to no longer collide with the real exit_node_windscribe_address secret, which this fixture value coincidentally equalled before (see ticket #02 notes)."
+  # The three entries below are a SEPARATE, narrower coincidence than the fixture-value entries above:
+  # the export's history-scrub (ticket #04/#05) exempts "the first address in Tailscale's CGNAT range"
+  # from its own CGNAT substitution, globally, specifically so it does not corrupt the fixture entries
+  # above — but that same global exemption also protects the three places below, which used that exact
+  # same address NOT as a fixture, but as a (mistaken) real-looking example while describing ticket #03's
+  # own self-matching bug. Both ticket #03 fix commits (4062e2b, 1dbf8e2) already rewrote their CURRENT
+  # content to describe the example in words instead — these three entries cover only what remains in
+  # OLD, already-superseded historical content the scrub cannot selectively unexempt without also
+  # breaking the legitimate fixture uses above, which share the identical byte value.
+  - path: "*:docs/agents/content-policy.md*"
+    rule: "tailnet-cgnat-address"
+    reason: "An early, since-fixed (4062e2b) version of this file's own CGNAT example used a real-looking address instead of describing it in words; the address is the same non-identifying fixture value used elsewhere in this codebase, not the operator's real one."
+  - path: "*:.scratch/24-public-readiness/issues/03-generic-lint-guard-and-content-policy.md*"
+    rule: "tailnet-cgnat-address"
+    reason: "An early, since-fixed (1dbf8e2) version of this ticket's own notes described the bug above by repeating the same real-looking address a third time; same non-identifying fixture value, not the operator's real one."
+  - path: "commit:caa2011168101c1ab2fdceffc399432ef041333b:message"
+    rule: "tailnet-cgnat-address"
+    reason: >-
+      The export's own rewritten form of the 4062e2b fix commit's message, which also quotes the
+      address above while describing the bug it fixed. Pinned by this export's current, deterministic
+      commit hash rather than a glob (a commit message has no file path to glob against): stable as
+      long as this commit and everything before it in this repository's history is unchanged, which
+      holds for ordinary, append-only development. Re-derive this hash (re-run the export and read the
+      new finding) if it ever goes stale — a wrong hash just means this entry silently stops matching
+      and the audit reports the finding again, never a false suppression of something else.
