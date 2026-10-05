@@ -19,3 +19,16 @@
 ## Notes
 
 Needs the operator: repository creation, their key for the audit, GitHub settings, the decision itself. See epic 24 spec, "Implementation Decisions" (go-live checklist).
+
+**2026-10-05 — export mechanism redesigned, dry run must be redone.** The operator rejected #04's
+original flattened-snapshot export after reviewing an earlier dry run (it collapsed the entire repo's
+development history into one commit) and asked for a history-preserving rewrite instead — see #04's
+"Redesign: history-preserving export" note and ADR-0009's revision note. `scripts/export-public.py`
+and `scripts/history_scrub.py` were rebuilt accordingly and re-verified against a fixture and the real
+repository's full `tests/lint.sh`. **Every box above was checked against the OLD snapshot mechanism and
+needs re-doing against the new one**, including a fresh real-repository dry run, before this ticket's
+own checklist can be considered current. The still-open, operator-only items from before the redesign
+remain open: GitHub secret-scanning/push-protection settings (a `gh api` call to enable them was denied
+by the permission classifier — needs the operator directly), the licence-file sign-off, and the actual
+visibility flip. `bitoholic/ansible-hermes-vps` currently still holds the OLD single-snapshot push and
+has not yet been updated with a history-preserving one.

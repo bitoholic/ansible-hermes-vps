@@ -86,3 +86,83 @@ it landed in the same commit as the fix and wasn't re-scanned afterward. Fixed i
 re-verified clean, before starting this ticket's own work.
 
 Full `tests/lint.sh` passes end to end.
+
+## Redesign: history-preserving export (2026-10-05)
+
+After this ticket's original build (the flattened-snapshot export above) and the real-repository dry
+run for #05, the operator rejected the snapshot design on review: the point of publishing was to show
+this project's actual development history, not collapse it into one commit. Decided (operator, via
+`AskUserQuestion`): rewrite a scrubbed **copy** of the full history instead (every commit, message and
+diff preserved, minus identifying content and the secrets-tooling files), using `git filter-repo`'s
+`--source`/`--target` split so the original repository is never touched; and open PR #111 for the
+epic's tooling (tickets #01–#03) into `main` regardless of how this question resolved.
+
+**Rebuilt:**
+- `scripts/export-public.py`: rewritten from the `git archive HEAD` single-snapshot version to a
+  `git filter-repo` pass over a clone of `--source`'s full history. `--author-name`/`--author-email`
+  CLI flags replaced by required `EXPORT_AUTHOR_NAME`/`EXPORT_AUTHOR_EMAIL` environment variables (a
+  real name contains a space, which the deploy wrapper's `SCRIPT_ARG_RE` injection defense rejects as a
+  script-mode CLI argument — the same pattern already used for `TARGET_HOST`/`AUDIT_EXTRA_TERMS`, not a
+  workaround). Removes `secrets/secrets.enc.env`, `.sops.yaml` and any `*-git-crypt.key` path from every
+  commit via `--invert-paths`; scrubs every decrypted secret value, `AUDIT_EXTRA_TERMS` entry, tailnet
+  CGNAT/ULA address and credential-shaped string from file content **and** commit/tag messages via
+  shared `--blob-callback`/`--message-callback` logic; rewrites every commit's and tag's author and
+  committer to the supplied identity unconditionally; re-audits the result in full before ever reporting
+  success. Must run through `scripts/deploy --script export-public`, exactly like `--script audit`.
+- `scripts/history_scrub.py` (new): the one shared `scrub_bytes(data, literal_pairs, generic_rules)`
+  function both callbacks call, so file content and commit messages are scrubbed by identical logic,
+  never two copies that could drift. Applies `literal_pairs` as **one single-pass combined regex**,
+  never sequential `.replace()` calls — multiple secrets left at the same un-rotated default value
+  (e.g. several `*_ADMIN_USERNAME` entries still saying "admin") would otherwise generate several
+  substitution pairs sharing an identical `old`, and applying them one after another lets a later pair
+  re-match text an earlier pair just wrote (every placeholder is itself English-ish and can contain a
+  substring a later rule is still searching for), producing nested garbage like
+  `<secret-a-<secret-b-admin>-admin>`. `export-public.py`'s `build_literal_pairs` groups the audit's own
+  `build_denylist_terms()` output **by value**, not by secret name, before generating pairs — skipping
+  the whole group if any sharing secret is `"*"`-allowlisted — mirroring the same dedup the audit's own
+  `build_needle_rules()` already does for findings.
+- `tests/support/export-fixture.sh` (new) / `tests/check-export-public.sh` (rewritten): a throwaway
+  fixture repository with real, multi-commit history (an init commit, a canary-content commit, an
+  encrypted-store-then-removed commit, a later real change carrying a commit-message canary) replaces
+  the old minimal single-tree fixture. Proves: history is preserved (real commits survive; the
+  now-empty secrets-only commit is correctly pruned by `git filter-repo` itself); every commit's
+  identity is rewritten; the store/`.sops.yaml`/dead git-crypt key are absent from **every** commit, not
+  just HEAD; a plain secret, a real tailnet address, a credential-shaped string and an
+  `AUDIT_EXTRA_TERMS`-carried commit-message canary are all scrubbed from tree content and commit
+  messages alike, while the functional CIDR constant and an allowlisted fixture address both survive;
+  two secrets sharing an identical, un-rotated value collapse to one consistent placeholder instead of
+  corrupting each other; `--source`'s refs/HEAD/working tree are unchanged; a fresh clone of the result
+  passes `check_secrets_store.py`.
+- `docs/adr/0009-public-export-strategy.md` / `docs/public-export.md`: rewritten to describe the
+  history-preserving mechanism, with the snapshot design kept as a documented, explicitly rejected
+  alternative (reason: lost real development history, the operator's stated objection) rather than
+  silently dropped.
+- Five rounds of `audit-allowlist.yml` fixes against the **real repository's** dry-run export (not the
+  fixture): widening two admin-username secret entries and the GIT_USERNAME/GIT_EMAIL entries from
+  `"commit:*"`/`"tree:*"` scope to `"*"`, since the full history-scan audit finds the same already-
+  allowlisted content again under `history:FILE@SHA:LINE` locations, which the narrower scopes didn't
+  cover; three further entries for a `100.64.0.1` fixture/mistake-coincidence collision, one of them a
+  sha-pinned `commit:<sha>:message` entry (re-pinned twice as code changes shifted rewritten hashes).
+
+**Debugging notes, fixture test (resolved):**
+- "the commit-message canary survived unscrubbed" despite the export itself reporting a clean audit —
+  root cause: the canary was arbitrary free text with no backing scrub rule at all (not a declared
+  secret, not a generic-rule shape) — nothing in the design was ever going to scrub unlisted free text
+  from a commit message. Fixed by routing the canary through `AUDIT_EXTRA_TERMS` (a real, existing
+  mechanism `build_denylist_terms()` already folds in), which also gives the fixture explicit coverage
+  of that pathway feeding into the history scrub, not just the audit.
+- A later "nested/corrupted placeholder text found" failure was the test's own false positive: its
+  blanket `grep` over the whole exported tree matched `scripts/history_scrub.py`'s own docstring (which
+  quotes the corruption bug's shape as a worked example) and a `<<` bitshift operator in
+  `scripts/hermes_secrets.py` — both are verbatim copies of this repository's real source, carried into
+  the export because they aren't secrets. Fixed by scoping that check to `$DEST/notes` (the fixture's
+  own planted canary content), not the whole tree.
+
+Re-verified clean: the fixture test end to end, and the full `tests/lint.sh` (ansible-lint, every check
+script, the rebuilt export-public guard) against the real repository.
+
+**Not yet done, carried into #05:** re-running the real-repository dry-run export one more time with
+this rebuilt mechanism (the real dry-run proofs above predate the `AUDIT_EXTRA_TERMS`/nested-placeholder
+fixes, though neither fix changes the real export's own behavior — both were fixture-test-only issues);
+independent review of this rework; redoing the push to `bitoholic/ansible-hermes-vps` (which currently
+still holds the OLD single-snapshot push) with the history-preserving result.
