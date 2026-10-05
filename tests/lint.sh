@@ -264,3 +264,12 @@ echo "role skip-tags guard OK"
 # scrubbed by epic 24 ticket #02's own work, or named in audit-allowlist.yml with a written reason.
 python3 scripts/public-readiness-audit.py --generic-only --tree-only
 
+# Public export mechanism (epic 24 ticket #04, ADR-0009): scripts/export-public.py, black-box tested
+# against a throwaway fixture repository — never the real one. Proves the required commit identity is
+# actually required (two negative cases), the encrypted store and .sops.yaml never reach the
+# destination (not even as an empty leftover directory), the source repository's own history/refs/
+# working tree are untouched, a fresh clone of the export passes check_secrets_store.py, a second run
+# extends the destination with one more commit rather than rewriting the first, and a destination
+# nested inside the source is refused outright.
+./tests/check-export-public.sh
+

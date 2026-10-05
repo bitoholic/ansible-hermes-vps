@@ -38,8 +38,11 @@ opacity, only friction.
 Epic 24 builds a public-readiness export of this repository with the operator's identifying values
 scrubbed. The encrypted store is **never part of that export** — it stays in the private repository
 permanently, and the export process excludes both `secrets/secrets.enc.env` and `.sops.yaml`
-entirely, rather than relying on the encryption alone to make a public copy safe. This matters for
-two choices above that would otherwise look inconsistent with "might go public someday":
+entirely, rather than relying on the encryption alone to make a public copy safe. ADR-0009 records the
+export strategy itself (a derived, separate public repository; the rejected alternatives; the
+operator-supplied commit identity; the threat model) in full — this section only covers what that
+strategy means for the two choices above, which would otherwise look inconsistent with "might go
+public someday":
 
 - **A random age key, not a human-chosen password**, specifically because Ansible Vault's rejection
   above (offline-crackable if public) doesn't apply to age's own key material — but the store isn't
