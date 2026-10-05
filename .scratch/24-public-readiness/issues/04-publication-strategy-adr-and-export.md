@@ -53,6 +53,32 @@ See epic 24 spec, "Implementation Decisions" (publication strategy; the encrypte
 - One-line cross-reference added to ADR-0007's existing public-export section, pointing at ADR-0009 for
   the full strategy, so the two documents don't restate the same reasoning independently.
 
+**Fixed after independent review (two parallel fresh-context agents — Standards, Spec-conformance)**:
+- Both independently caught the same real bug: every internal refusal (`sys.exit(f"...")` with a
+  string) actually exited **1**, not the **2** the docstring and `docs/public-export.md` both claimed
+  for "cannot run" — only argparse's own missing-required-argument path happened to exit 2. The test
+  only asserted `RC -ne 0`, so it never caught the mismatch. Fixed with a `fail()` helper that always
+  exits 2; every internal refusal now goes through it; the fixture test was tightened to assert the
+  exact code (`-eq 2`), not just non-zero, on every negative case.
+- Standards review additionally found and demonstrated a real gap: pointing `--dest` at a symlink
+  whose target held pre-existing, unrelated content caused `clear_destination()` to wipe that target's
+  content with no warning (`refuse_if_nested`'s realpath check correctly let it through, since the
+  target genuinely wasn't nested inside `--source` — the bug was that a symlinked `--dest` was never
+  refused at all). Fixed with a new `refuse_if_symlink()` check (exit 2) before anything is touched;
+  added a negative-test case that plants real content behind a symlinked `--dest` and asserts it
+  survives the refusal untouched.
+- Spec review additionally flagged that AC #7's literal wording ("the standard lint run passes in a
+  fresh clone") is tested more narrowly than written — the fixture test only runs
+  `check_secrets_store.py` against the clone, not the real `tests/lint.sh` (which can't run
+  meaningfully against the minimal fixture — it isn't a real Ansible repository). Addressed by actually
+  running `scripts/export-public.py` against **this real repository** into a scratch destination,
+  cloning that, and running the real `tests/lint.sh` there by hand: it passes end to end (exit 0,
+  including ansible-lint and every check script). The fixture test's header comment now explains this
+  split and points at this note rather than silently narrowing the AC.
+
+Re-verified clean (fixture test, generic tree-only audit, full `tests/lint.sh`, and the by-hand real-
+export-plus-full-lint-run above) after all three fixes.
+
 **Unplanned discovery, fixed separately (not part of this ticket's own commit):** the generic tree-only
 audit found one more leftover self-match predating this ticket — ticket #03's own fix commit (`4062e2b`)
 described the bug in its ticket notes by writing the literal CGNAT address a third time, missed because

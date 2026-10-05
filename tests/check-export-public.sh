@@ -2,6 +2,12 @@
 # Epic 24 ticket #04 guard: scripts/export-public.py, treated as a BLACK BOX over a throwaway source
 # repository (never the real one) — proves the mechanism ADR-0009 describes, not the real repository's
 # own content. See docs/public-readiness-audit.md's sibling doc, docs/public-export.md.
+#
+# The ticket's "standard lint run passes in a fresh clone" AC is specifically about the structural
+# guard's mandatory-store derivation (its own parenthetical); this test asserts that directly via
+# check_secrets_store.py. Running the real tests/lint.sh against this fixture would fail for reasons
+# that have nothing to do with the export mechanism (it isn't a real Ansible repository) — the actual
+# lint run against a real export of THIS repository was verified by hand instead; see the ticket notes.
 set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
@@ -46,18 +52,38 @@ SRC_SHA_1="$(git -C "$SRC" rev-parse HEAD)"
 SRC_REFS_BEFORE="$(git -C "$SRC" show-ref)"
 
 # --- negative test: missing identity refuses to run --------------------------------------------------
+# argparse's own missing-required-argument exit code is 2 (same bucket "cannot run" uses throughout).
 set +e
 OUT="$($EXPORT --dest "$DEST" --source "$SRC" 2>&1)"; RC=$?
 set -e
-[[ $RC -ne 0 ]] || fail "export ran with no --author-name/--author-email at all (must refuse)"
+[[ $RC -eq 2 ]] || fail "export with no --author-name/--author-email at all must refuse with exit 2 (got $RC)"
 [[ ! -e "$DEST" ]] || fail "a destination was created despite the missing-identity refusal"
 echo "missing identity entirely: refused (exit $RC), no destination created"
 
 set +e
 OUT="$($EXPORT --dest "$DEST" --source "$SRC" --author-name "Export Bot" 2>&1)"; RC=$?
 set -e
-[[ $RC -ne 0 ]] || fail "export ran with --author-name but no --author-email (must refuse)"
+[[ $RC -eq 2 ]] || fail "export with --author-name but no --author-email must refuse with exit 2 (got $RC)"
 echo "author name without email: refused (exit $RC)"
+
+# --- negative test: --source that isn't a git repository at all ---------------------------------------
+set +e
+OUT="$($EXPORT --dest "$DEST" --source "$T/not-a-repo" --author-name "Export Bot" --author-email "export-bot@example.invalid" 2>&1)"; RC=$?
+set -e
+[[ $RC -eq 2 ]] || fail "export with a non-git --source must refuse with exit 2 (got $RC)"
+[[ ! -e "$DEST" ]] || fail "a destination was created despite the non-git-source refusal"
+echo "--source is not a git repository: refused (exit $RC)"
+
+# --- negative test: --dest itself is a symlink (its target's content would be wiped, not this script's) ---
+mkdir -p "$T/elsewhere/important"
+echo "pre-existing, unrelated content" > "$T/elsewhere/important/keepme.txt"
+ln -s "$T/elsewhere" "$T/dest-symlink"
+set +e
+OUT="$($EXPORT --dest "$T/dest-symlink" --source "$SRC" --author-name "Export Bot" --author-email "export-bot@example.invalid" 2>&1)"; RC=$?
+set -e
+[[ $RC -eq 2 ]] || fail "export with a symlinked --dest must refuse with exit 2 (got $RC)"
+[[ -f "$T/elsewhere/important/keepme.txt" ]] || fail "a symlinked --dest's real target content was deleted despite the refusal"
+echo "--dest is a symlink: refused (exit $RC), its target's pre-existing content is untouched"
 
 # --- first real export -------------------------------------------------------------------------------
 $EXPORT --dest "$DEST" --source "$SRC" --author-name "Export Bot" --author-email "export-bot@example.invalid" >/dev/null
@@ -113,7 +139,7 @@ echo "second export: extends the same destination with one new commit on top, pi
 set +e
 OUT="$($EXPORT --dest "$SRC/nested-dest" --source "$SRC" --author-name "Export Bot" --author-email "export-bot@example.invalid" 2>&1)"; RC=$?
 set -e
-[[ $RC -ne 0 ]] || fail "export ran with --dest nested inside --source (must refuse)"
+[[ $RC -eq 2 ]] || fail "export with --dest nested inside --source must refuse with exit 2 (got $RC)"
 [[ ! -e "$SRC/nested-dest" ]] || fail "a nested destination was created despite the refusal"
 echo "destination nested inside source: refused (exit $RC)"
 

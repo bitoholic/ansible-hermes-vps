@@ -28,8 +28,10 @@ previous one, so the destination's own history is an honest, append-only log of 
 run, each independently inspectable before anything downstream (e.g. a push to a real public remote,
 epic 24 ticket #05) ever happens.
 
-Exit status: 0 the export committed; 2 cannot run (bad arguments, --source is not a git repository, or
---dest resolves inside --source — refused rather than risking wiping the source repository's own tree).
+Exit status: 0 the export committed; 2 cannot run — a missing required argument (argparse's own exit
+2), --source is not a git repository, --dest is itself a symlink, or --dest resolves inside --source
+(the last two refused because clear_destination(), below, would otherwise delete whatever the symlink
+or the nested path actually points at — the source repository's own tree, or anything else real).
 """
 import argparse
 import os
@@ -46,6 +48,14 @@ EXCLUDED_PATHS = frozenset({
 })
 
 
+def fail(message):
+    """Every "cannot run" refusal in this script exits 2 — never argparse's own exit 2 for a missing
+    required flag, and never Python's `sys.exit(str)` default of exit 1 — so the exit-status contract
+    in this module's own docstring is actually true, not just documented."""
+    print(f"export-public: {message}", file=sys.stderr)
+    sys.exit(2)
+
+
 def _git(repo, *args, **kwargs):
     return subprocess.run(["git", "-C", repo, *args], capture_output=True, text=True, **kwargs)
 
@@ -53,7 +63,15 @@ def _git(repo, *args, **kwargs):
 def require_git_repo(path):
     result = _git(path, "rev-parse", "--is-inside-work-tree")
     if result.returncode != 0 or result.stdout.strip() != "true":
-        sys.exit(f"export-public: {path!r} is not a git repository")
+        fail(f"{path!r} is not a git repository")
+
+
+def refuse_if_symlink(dest):
+    """--dest itself must not be a symlink: clear_destination(), below, would otherwise clear out
+    whatever real directory the symlink points at — which could hold anything, with no relation to a
+    previous export — rather than something this script created or owns."""
+    if os.path.islink(dest):
+        fail(f"--dest {dest!r} is a symlink; refusing (its target's content would be cleared)")
 
 
 def refuse_if_nested(source, dest):
@@ -62,7 +80,7 @@ def refuse_if_nested(source, dest):
     source_real = os.path.realpath(source)
     dest_real = os.path.realpath(dest)
     if dest_real == source_real or dest_real.startswith(source_real + os.sep):
-        sys.exit(f"export-public: refusing to export into {dest!r}, which is inside --source {source!r}")
+        fail(f"refusing to export into {dest!r}, which is inside --source {source!r}")
 
 
 def clear_destination(dest):
@@ -94,7 +112,7 @@ def extract_snapshot(source, dest):
     finally:
         proc.stdout.close()
         if proc.wait() != 0:
-            sys.exit("export-public: `git archive HEAD` failed against --source")
+            fail("`git archive HEAD` failed against --source")
     prune_empty_directories(dest)
 
 
@@ -111,7 +129,7 @@ def prune_empty_directories(dest):
 def commit_snapshot(dest, source_sha, author_name, author_email):
     result = _git(dest, "add", "-A")
     if result.returncode != 0:
-        sys.exit(f"export-public: `git add` failed in --dest:\n{result.stderr}")
+        fail(f"`git add` failed in --dest:\n{result.stderr}")
     env = dict(os.environ)
     env["GIT_AUTHOR_NAME"] = author_name
     env["GIT_AUTHOR_EMAIL"] = author_email
@@ -123,7 +141,7 @@ def commit_snapshot(dest, source_sha, author_name, author_email):
         env=env, capture_output=True, text=True,
     )
     if result.returncode != 0:
-        sys.exit(f"export-public: commit failed in --dest:\n{result.stderr}")
+        fail(f"commit failed in --dest:\n{result.stderr}")
 
 
 def main(argv):
@@ -136,17 +154,18 @@ def main(argv):
     args = parser.parse_args(argv)
 
     require_git_repo(args.source)
+    refuse_if_symlink(args.dest)
     refuse_if_nested(args.source, args.dest)
 
     source_sha = _git(args.source, "rev-parse", "HEAD").stdout.strip()
     if not source_sha:
-        sys.exit(f"export-public: could not resolve HEAD in --source {args.source!r}")
+        fail(f"could not resolve HEAD in --source {args.source!r}")
 
     os.makedirs(args.dest, exist_ok=True)
     if not os.path.isdir(os.path.join(args.dest, ".git")):
         result = _git(args.dest, "init", "-q", "-b", "main")
         if result.returncode != 0:
-            sys.exit(f"export-public: `git init` failed in --dest:\n{result.stderr}")
+            fail(f"`git init` failed in --dest:\n{result.stderr}")
 
     clear_destination(args.dest)
     extract_snapshot(args.source, args.dest)
