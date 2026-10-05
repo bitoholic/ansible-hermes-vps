@@ -141,6 +141,13 @@ S
   GIT_AUTHOR_NAME="Original Author" GIT_AUTHOR_EMAIL="original-author@example.invalid" \
   GIT_COMMITTER_NAME="Original Author" GIT_COMMITTER_EMAIL="original-author@example.invalid" \
     git -C "$repo" commit -q -m "commit message canary: $EXPORT_CANARY_COMMIT_MSG"
+
+  # A lightweight tag on HEAD, the same shape as this real repository's own only tag (v0.0.0-alpha1):
+  # no tag object, no tagger identity, no message of its own — just a ref pointing straight at the
+  # commit. Proves the clone step's "--single-branch" (no "--no-tags") carries real tags into the
+  # export at all; a lightweight tag has nothing for the identity/message scrub to rewrite, so this
+  # only exercises "does the ref survive and follow the commit it names", not the scrub itself.
+  git -C "$repo" tag v0.0.0-fixture
 }
 
 export_deploy() {   # export_deploy [args...] -> $OUT, $RC

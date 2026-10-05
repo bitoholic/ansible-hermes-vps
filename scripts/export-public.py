@@ -101,6 +101,15 @@ def _git(repo, *args, **kwargs):
     return subprocess.run(["git", "-C", repo, *args], capture_output=True, text=True, **kwargs)
 
 
+def _git_or_fail(repo, *args, message):
+    """Runs a `git -C repo ...` command and fail()s with `message` plus stderr on a non-zero exit —
+    every call site below that just wants "run this or stop" collapses to one line through here."""
+    result = _git(repo, *args)
+    if result.returncode != 0:
+        fail("%s:\n%s" % (message, result.stderr))
+    return result
+
+
 def require_git_repo(path):
     result = _git(path, "rev-parse", "--is-inside-work-tree")
     if result.returncode != 0 or result.stdout.strip() != "true":
@@ -143,6 +152,10 @@ def fixture_exempt_values(root, allowlist, rule_name, pattern):
     return exempt
 
 
+def _placeholder(label):
+    return ("<" + label + ">").encode()
+
+
 def build_generic_rules(root, allowlist):
     """[(compiled_pattern, placeholder_bytes, exempt_set), ...] for the tailnet range rules and the
     credential-shape rules — never the git-crypt key header, a whole file removed by path instead."""
@@ -152,8 +165,7 @@ def build_generic_rules(root, allowlist):
         exempt = set(baseline_exempt.get(rule_name, set())) | fixture_exempt_values(root, allowlist, rule_name, pattern)
         rules.append((pattern, b"<tailnet-ip>", exempt))
     for rule_name, pattern in audit_rules.CREDENTIAL_SHAPE_RULES:
-        placeholder = ("<" + rule_name.replace(":", "-") + "-redacted>").encode()
-        rules.append((pattern, placeholder, set()))
+        rules.append((pattern, _placeholder(rule_name.replace(":", "-") + "-redacted"), set()))
     return rules
 
 
@@ -180,7 +192,7 @@ def build_literal_pairs(root, environ, allowlist):
     for value, rules in rules_by_value.items():
         if any(rule in never_scrub for rule in rules):
             continue
-        placeholder = ("<" + sorted(rules)[0].lower().replace(":", "-").replace("_", "-") + ">").encode()
+        placeholder = _placeholder(sorted(rules)[0].lower().replace(":", "-").replace("_", "-"))
         for variant in hermes_redact.variants(value):
             pairs.append((variant, placeholder))
     pairs.sort(key=lambda pair: len(pair[0]), reverse=True)
@@ -226,6 +238,58 @@ def run_filter_repo(source, dest, rules_dir, author_name, author_email):
         fail("git filter-repo failed:\n%s" % result.stderr)
 
 
+def build_filtered_history(source, dest, literal_pairs, generic_rules, author_name, author_email):
+    """Clones --source read-only, runs the filter-repo pass into --dest, and leaves --dest checked out
+    at its new filtered HEAD. See the inline comments below for why each step exists; this is pulled out
+    of main() because it's the one self-contained chunk of work main() otherwise buries among argument
+    parsing and the pre/post --source integrity checks."""
+    # git-filter-repo's --source, pointed directly at a non-bare working directory, follows that
+    # directory's remote-advertised default branch (e.g. "main"), NOT its currently checked-out HEAD —
+    # on this repository those differ (epic 24's own commits, including audit-allowlist.yml, are not on
+    # main yet), so --source would silently filter a stale snapshot. A plain, single-branch `git clone`
+    # of --source, by contrast, always checks out the SAME branch --source currently has checked out,
+    # with no remote-tracking refs or "origin" remote left for filter-repo to also pick up and carry
+    # into --dest. Clone first and point filter-repo at the clone — it is read-only input either way, so
+    # this is also a second, redundant safety margin against ever touching --source itself.
+    #
+    # No --no-tags: --single-branch's own default tag heuristic (fetch only tags reachable from the
+    # cloned branch, not every tag in the repository) is exactly what's wanted here — this repository
+    # already has a real tag (v0.0.0-alpha1) that --no-tags would silently drop from every export,
+    # contradicting this script's own docstring claim that tags are preserved and rewritten too.
+    clone_dir = tempfile.mkdtemp(prefix="hermes-export-source-")
+    try:
+        clone_result = subprocess.run(
+            ["git", "clone", "-q", "--single-branch", source, clone_dir],
+            capture_output=True, text=True,
+        )
+        if clone_result.returncode != 0:
+            fail("cloning --source failed:\n%s" % clone_result.stderr)
+        _git_or_fail(clone_dir, "remote", "remove", "origin", message="removing the clone's origin remote failed")
+        source_branch = _git(clone_dir, "branch", "--show-current").stdout.strip()
+        if not source_branch:
+            fail("could not determine --source's checked-out branch (detached HEAD?)")
+
+        rules_dir = scratch_dir()
+        try:
+            write_rules_module(rules_dir, literal_pairs, generic_rules)
+            run_filter_repo(clone_dir, dest, rules_dir, author_name, author_email)
+        finally:
+            shutil.rmtree(rules_dir, ignore_errors=True)
+
+        if source_branch != "main":
+            _git_or_fail(dest, "branch", "-M", source_branch, "main",
+                         message="renaming the exported branch %r to main failed" % source_branch)
+
+        # git-filter-repo updates --target's refs and objects but, on a --target that started as an
+        # empty `git init`, does not reliably leave the working tree and index checked out to match the
+        # new HEAD (observed directly: `git ls-files` empty, every tracked path showing as "deleted" in
+        # `git status`, immediately after a run that otherwise succeeded) — force it, the same as a
+        # fresh clone's own implicit checkout would.
+        _git_or_fail(dest, "reset", "--hard", "HEAD", message="checking out --dest's filtered HEAD failed")
+    finally:
+        shutil.rmtree(clone_dir, ignore_errors=True)
+
+
 def main(argv):
     default_source = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
@@ -261,55 +325,9 @@ def main(argv):
 
     os.makedirs(args.dest, exist_ok=True)
     if not os.path.isdir(os.path.join(args.dest, ".git")):
-        result = _git(args.dest, "init", "-q", "-b", "main")
-        if result.returncode != 0:
-            fail("`git init` failed in --dest:\n%s" % result.stderr)
+        _git_or_fail(args.dest, "init", "-q", "-b", "main", message="`git init` failed in --dest")
 
-    # git-filter-repo's --source, pointed directly at a non-bare working directory, follows that
-    # directory's remote-advertised default branch (e.g. "main"), NOT its currently checked-out HEAD —
-    # on this repository those differ (epic 24's own commits, including audit-allowlist.yml, are not on
-    # main yet), so --source would silently filter a stale snapshot. A plain, single-branch `git clone`
-    # of --source, by contrast, always checks out the SAME branch --source currently has checked out,
-    # with no remote-tracking refs or "origin" remote left for filter-repo to also pick up and carry
-    # into --dest. Clone first and point filter-repo at the clone — it is read-only input either way, so
-    # this is also a second, redundant safety margin against ever touching --source itself.
-    clone_dir = tempfile.mkdtemp(prefix="hermes-export-source-")
-    try:
-        clone_result = subprocess.run(
-            ["git", "clone", "-q", "--single-branch", "--no-tags", args.source, clone_dir],
-            capture_output=True, text=True,
-        )
-        if clone_result.returncode != 0:
-            fail("cloning --source failed:\n%s" % clone_result.stderr)
-        remote_result = _git(clone_dir, "remote", "remove", "origin")
-        if remote_result.returncode != 0:
-            fail("removing the clone's origin remote failed:\n%s" % remote_result.stderr)
-        source_branch = _git(clone_dir, "branch", "--show-current").stdout.strip()
-        if not source_branch:
-            fail("could not determine --source's checked-out branch (detached HEAD?)")
-
-        rules_dir = scratch_dir()
-        try:
-            write_rules_module(rules_dir, literal_pairs, generic_rules)
-            run_filter_repo(clone_dir, args.dest, rules_dir, author_name, author_email)
-        finally:
-            shutil.rmtree(rules_dir, ignore_errors=True)
-
-        if source_branch != "main":
-            rename_result = _git(args.dest, "branch", "-M", source_branch, "main")
-            if rename_result.returncode != 0:
-                fail("renaming the exported branch %r to main failed:\n%s" % (source_branch, rename_result.stderr))
-
-        # git-filter-repo updates --target's refs and objects but, on a --target that started as an
-        # empty `git init`, does not reliably leave the working tree and index checked out to match the
-        # new HEAD (observed directly: `git ls-files` empty, every tracked path showing as "deleted" in
-        # `git status`, immediately after a run that otherwise succeeded) — force it, the same as a
-        # fresh clone's own implicit checkout would.
-        reset_result = _git(args.dest, "reset", "--hard", "HEAD")
-        if reset_result.returncode != 0:
-            fail("checking out --dest's filtered HEAD failed:\n%s" % reset_result.stderr)
-    finally:
-        shutil.rmtree(clone_dir, ignore_errors=True)
+    build_filtered_history(args.source, args.dest, literal_pairs, generic_rules, author_name, author_email)
 
     source_refs_after = _git(args.source, "show-ref").stdout
     source_head_after = _git(args.source, "rev-parse", "HEAD").stdout.strip()

@@ -72,6 +72,11 @@ git -C "$DEST" log --format=%s | grep -q "^init fixture$" || fail "the init comm
 git -C "$DEST" log --format=%s | grep -q "^add canary content$" || fail "the canary-content commit did not survive"
 echo "history preserved: 3 real commits survive (the secrets-only commit correctly collapses to empty and is pruned)"
 
+# --- the fixture's real (lightweight) tag survives the export, following its rewritten commit --------
+[[ "$(git -C "$DEST" tag)" == "v0.0.0-fixture" ]] || fail "the fixture's tag did not survive the export"
+[[ "$(git -C "$DEST" rev-parse v0.0.0-fixture)" == "$(git -C "$DEST" rev-parse HEAD)" ]] || fail "the surviving tag points at the wrong commit"
+echo "the fixture's real tag survives the export and still points at the (rewritten) commit it named"
+
 # --- every commit's identity is rewritten, unconditionally --------------------------------------------
 BAD_IDENTITY="$(git -C "$DEST" log --format='%an <%ae> / %cn <%ce>' | grep -v '^Export Bot <export-bot@example.invalid> / Export Bot <export-bot@example.invalid>$' || true)"
 [[ -z "$BAD_IDENTITY" ]] || fail "not every commit carries the supplied identity: $BAD_IDENTITY"

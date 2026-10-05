@@ -141,8 +141,9 @@ epic's tooling (tickets #01–#03) into `main` regardless of how this question r
   fixture): widening two admin-username secret entries and the GIT_USERNAME/GIT_EMAIL entries from
   `"commit:*"`/`"tree:*"` scope to `"*"`, since the full history-scan audit finds the same already-
   allowlisted content again under `history:FILE@SHA:LINE` locations, which the narrower scopes didn't
-  cover; three further entries for a `100.64.0.1` fixture/mistake-coincidence collision, one of them a
-  sha-pinned `commit:<sha>:message` entry (re-pinned twice as code changes shifted rewritten hashes).
+  cover; three further entries for the first-address-in-the-CGNAT-range fixture/mistake-coincidence
+  collision (see ticket #03's own notes for the same recurring pattern), one of them a sha-pinned
+  `commit:<sha>:message` entry (re-pinned twice as code changes shifted rewritten hashes).
 
 **Debugging notes, fixture test (resolved):**
 - "the commit-message canary survived unscrubbed" despite the export itself reporting a clean audit —
