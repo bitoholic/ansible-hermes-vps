@@ -30,6 +30,8 @@ AUDIT_CANARY_AGE_KEY='AGE-SECRET-'"KEY-1QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ
 AUDIT_CANARY_PRIVATE_KEY_HEADER='-----BEGIN PRIVATE '"KEY-----"
 AUDIT_CANARY_TAILSCALE_KEY='tskey-auth'"-kCNTRL1-abcdefghijklmnopqrstuvwxyz0123"
 AUDIT_CANARY_CGNAT='100.'"101.2.3"
+AUDIT_CANARY_ULA='fd7a:115c:a1e0:'"beef::42"
+AUDIT_CANARY_ULA_FUNCTIONAL_CIDR='fd7a:115c:a1e0:'":/48"
 
 make_audit_fixture() {   # make_audit_fixture DIR dirty|clean
   local dir="$1" mode="$2" repo="$1/repo"
@@ -82,6 +84,8 @@ $AUDIT_CANARY_TAILSCALE_KEY
 EOF
     printf '%s\n' "$AUDIT_CANARY_CGNAT" > "$repo/notes/cgnat.txt"
     printf '100.64.0.0/10\n' > "$repo/notes/cgnat-functional.txt"
+    printf '%s\n' "$AUDIT_CANARY_ULA" > "$repo/notes/ula.txt"
+    printf '%s\n' "$AUDIT_CANARY_ULA_FUNCTIONAL_CIDR" > "$repo/notes/ula-functional.txt"
   fi
 
   git -C "$repo" add -A

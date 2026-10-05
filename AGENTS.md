@@ -15,3 +15,8 @@ The five canonical triage roles (needs-triage, needs-info, ready-for-agent, read
 ### Domain docs
 
 Single-context: one `CONTEXT.md` + `docs/adr/` at the repo root. See `docs/agents/domain.md`.
+
+### Content policy
+
+Committed prose never names the operator's real domain, hostnames, tailnet addresses or personal
+details — placeholders only. See `docs/agents/content-policy.md`.

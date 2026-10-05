@@ -37,6 +37,7 @@ expect '^FINDING age-secret-key tree:notes/generic-shapes\.txt:2$'
 expect '^FINDING private-key-header tree:notes/generic-shapes\.txt:3$'
 expect '^FINDING credential-shape:tailscale-authkey tree:notes/generic-shapes\.txt:4$'
 expect '^FINDING tailnet-cgnat-address tree:notes/cgnat\.txt:1$'
+expect '^FINDING tailnet-ula-address tree:notes/ula\.txt:1$'
 expect '^FINDING extra-term:2 history:notes/history-only-secret\.txt@[0-9a-f]+:1$'          # history-only (removed from the tree)
 expect '^FINDING git-crypt-key-header history:notes/old\.key@[0-9a-f]+:1$'                  # side branch, never merged, binary blob
 expect '^FINDING extra-term:3 commit:[0-9a-f]+:message$'                                     # commit message
@@ -46,16 +47,19 @@ expect '^FINDING extra-term:6 commit:[0-9a-f]+:committer-name$'
 expect '^FINDING extra-term:7 commit:[0-9a-f]+:committer-email$'
 echo "every planted canary found: tree, history (including a side branch never merged to main), commit message, author/committer metadata, JSON/URL-encoded forms, and every generic rule"
 
-# the functional CIDR must never be flagged
+# the functional CIDRs must never be flagged
 if grep -q 'notes/cgnat-functional' <<<"$OUT"; then
   fail "the tailnet subnet's own CIDR notation (100.64.0.0/10) was flagged; it is a functional value, not a host address"
 fi
-echo "the CGNAT range's own CIDR notation is not flagged (negative case)"
+if grep -q 'notes/ula-functional' <<<"$OUT"; then
+  fail "the tailnet ULA prefix's own CIDR notation (fd7a:115c:a1e0::/48) was flagged; it is a functional value, not a host address"
+fi
+echo "the CGNAT range's and the ULA prefix's own CIDR notation are not flagged (negative case)"
 
 # the report must never contain the matched text itself
 for canary in "$AUDIT_CANARY_SECRET" "$AUDIT_CANARY_EXTRA" "$AUDIT_CANARY_HISTORY" "$AUDIT_CANARY_COMMIT_MSG" \
               "$AUDIT_CANARY_AUTHOR_NAME" "$AUDIT_CANARY_AUTHOR_EMAIL" "$AUDIT_CANARY_COMMITTER_NAME" "$AUDIT_CANARY_COMMITTER_EMAIL" \
-              "$AUDIT_CANARY_GITHUB_TOKEN" "$AUDIT_CANARY_AGE_KEY" "$AUDIT_CANARY_TAILSCALE_KEY" "127.0.0.1"; do
+              "$AUDIT_CANARY_GITHUB_TOKEN" "$AUDIT_CANARY_AGE_KEY" "$AUDIT_CANARY_TAILSCALE_KEY" "$AUDIT_CANARY_CGNAT" "$AUDIT_CANARY_ULA" "127.0.0.1"; do
   grep -qF -- "$canary" <<<"$OUT" && fail "the report leaked a matched value: $canary"
 done
 echo "the report names rules and locations only; no matched text leaked"
@@ -98,6 +102,7 @@ set -e
 [[ $GENERIC_RC -eq 1 ]] || { echo "$GENERIC_OUT" >&2; fail "generic-only --tree-only must still exit 1 on the dirty fixture's tree (got $GENERIC_RC)"; }
 grep -q 'FINDING credential-shape:github-token tree:notes/generic-shapes.txt:1' <<<"$GENERIC_OUT" || fail "generic-only mode missed a generic rule"
 grep -q 'FINDING tailnet-cgnat-address tree:notes/cgnat.txt:1' <<<"$GENERIC_OUT" || fail "generic-only mode missed the CGNAT rule"
+grep -q 'FINDING tailnet-ula-address tree:notes/ula.txt:1' <<<"$GENERIC_OUT" || fail "generic-only mode missed the ULA rule"
 grep -q 'secret:FIX_AUDIT_SECRET' <<<"$GENERIC_OUT" && fail "generic-only mode (no key) must not report secret-derived findings"
 grep -q 'history:notes/old.key' <<<"$GENERIC_OUT" && fail "tree-only mode must not scan history"
 echo "the lint-run entry point (--generic-only --tree-only, no key) finds the generic rules over the tree only"

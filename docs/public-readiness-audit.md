@@ -52,9 +52,10 @@ that function directly.
   keys (`tskey-auth-…`/`tskey-client-…`), OpenRouter keys (`sk-or-v1-…`), AWS access keys
   (`AKIA…`/`ASIA…`), Google API keys (`AIza…`), Slack tokens (`xox[baprs]-…`), Stripe live keys
   (`sk_live_…`/`rk_live_…`), PEM private-key headers, age secret keys (`AGE-SECRET-KEY-1…`);
-- a host address in the tailnet CGNAT range (`100.64.0.0/10`) — but **not** the range's own CIDR
-  notation, which is a functional value (`group_vars/all/main.yml`'s `tailscale_subnet`, and several
-  ADRs) and must never be scrubbed or flagged;
+- a host address in the tailnet CGNAT range (`100.64.0.0/10`) or Tailscale's IPv6 ULA prefix
+  (`fd7a:115c:a1e0::/48`) — but **not** either range's own CIDR notation, which is a functional value
+  (`group_vars/all/main.yml`'s `tailscale_subnet`/`tailscale_subnet_v6`, and several ADRs) and must
+  never be scrubbed or flagged;
 - the git-crypt key file's magic header (`\0GITCRYPTKEY`), found even inside a binary blob.
 
 These rules, scoped to the working tree only, are what `tests/lint.sh` runs on every CI pass (no key

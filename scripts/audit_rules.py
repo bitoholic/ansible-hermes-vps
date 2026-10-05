@@ -17,6 +17,13 @@ _CGNAT_SECOND_OCTET = r"(?:6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])"
 CGNAT_ADDRESS_RE = re.compile((r"\b100\." + _CGNAT_SECOND_OCTET + r"\." + _OCTET + r"\." + _OCTET + r"(?:/\d{1,2})?\b").encode())
 CGNAT_FUNCTIONAL_CIDR = b"100.64.0.0/10"
 
+# Tailscale's IPv6 ULA prefix (group_vars/all/main.yml: tailscale_subnet_v6 "fd7a:115c:a1e0::/48") — the
+# IPv6 counterpart of the CGNAT rule above. The bare "::/48" range notation itself never matches this
+# pattern (it has no trailing hex digit before the slash, unlike the IPv4 CIDR), so — unlike the CGNAT
+# rule — this one needs no explicit functional-value exemption.
+_TAILNET_ULA_PREFIX = b"fd7a:115c:a1e0:"
+TAILNET_ULA_ADDRESS_RE = re.compile(rb"\b" + re.escape(_TAILNET_ULA_PREFIX) + rb"[0-9a-fA-F:]*[0-9a-fA-F](?:/\d{1,3})?\b")
+
 # ---------------------------------------------------------------------------------------------
 # git-crypt key file header (the dead wiki-backup key is still in this repo's own history — see
 # docs/public-readiness-audit.md). git-crypt's key file format begins with this fixed magic.
@@ -52,6 +59,7 @@ CREDENTIAL_SHAPE_RULES = [
 # credential shapes so scan_content() knows which rule name needs the exemption check.
 RANGE_RULES = [
     ("tailnet-cgnat-address", CGNAT_ADDRESS_RE),
+    ("tailnet-ula-address", TAILNET_ULA_ADDRESS_RE),
 ]
 HEADER_RULES = [
     ("git-crypt-key-header", GIT_CRYPT_HEADER_RE),

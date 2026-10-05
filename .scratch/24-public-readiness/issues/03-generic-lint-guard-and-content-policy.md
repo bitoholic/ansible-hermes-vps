@@ -5,14 +5,40 @@
 **Blocked by:** #02
 **Blocks:** #05
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] The standard lint run fails on a tailnet-range **host** address or a credential-shaped string in a tracked file, needing no key, with a negative case that proves it fires
-- [ ] A negative case proves the guard does **not** flag the tailnet range's own CIDR notation in the shared variable or in the documents that describe it
-- [ ] A one-page content policy states that committed prose uses placeholders only, and is linked from the agent-facing repository documentation
-- [ ] An optional pre-commit hook that runs the guard is documented
-- [ ] The guard passes on the scrubbed tree
+- [x] The standard lint run fails on a tailnet-range **host** address or a credential-shaped string in a tracked file, needing no key, with a negative case that proves it fires
+- [x] A negative case proves the guard does **not** flag the tailnet range's own CIDR notation in the shared variable or in the documents that describe it
+- [x] A one-page content policy states that committed prose uses placeholders only, and is linked from the agent-facing repository documentation
+- [x] An optional pre-commit hook that runs the guard is documented
+- [x] The guard passes on the scrubbed tree
 
 ## Notes
 
 See epic 24 spec, "Implementation Decisions" (generic rules; content policy). Prior art: the placeholder guard in the standard lint run.
+
+**Most of this ticket's guard already landed with ticket #01** (`tests/lint.sh`'s `--generic-only
+--tree-only` entry + `tests/check-public-readiness-audit.sh`'s canary test, which already proved the
+CGNAT-CIDR negative case). This ticket's own new work:
+
+- **Closed a real gap ticket #02 flagged**: the generic rules had an IPv4-only CGNAT rule
+  (`tailnet-cgnat-address`) but nothing for Tailscale's IPv6 ULA prefix — the VPS's own real IPv6
+  tailnet address slipped through ticket #01's audit entirely in ticket #02 and was only caught by
+  manual inspection. Added `tailnet-ula-address` (`scripts/audit_rules.py`: matches
+  `fd7a:115c:a1e0:…`, Tailscale's fixed ULA prefix per `group_vars/all/main.yml`'s
+  `tailscale_subnet_v6`) — the bare `::/48` range notation itself never matches the pattern (no
+  trailing hex digit before the slash), so unlike the IPv4 rule it needs no explicit exemption check.
+  Extended the canary test with a matching positive case (an IPv6 ULA host address) and a negative
+  case (the bare `fd7a:115c:a1e0::/48` CIDR). Allowlisted the two IPv6 fixture-address hits the new
+  rule found in `tests/check-docker-user-firewall.sh` and `tests/test_docker_user_rules.yml` (the same
+  fixture's IPv6 tailnet address, already allowlisted under the IPv4 rule for the same reason — a
+  test/fixture address, not the operator's real one).
+- **`docs/agents/content-policy.md`**: the one-page policy (placeholder vocabulary table, what's
+  exempt — the functional CIDRs and test fixtures — and how to check it), linked from `AGENTS.md`'s
+  "Agent skills" list alongside the issue-tracker/triage-labels/domain-docs skills, the same way every
+  other agent-facing convention in this repo is discoverable.
+  * The optional pre-commit hook (a 3-line `.git/hooks/pre-commit` running
+    `--generic-only --tree-only`) is documented inside that same page, since an operator setting it up
+    will already be reading it there.
+
+Full `tests/lint.sh` passes end to end on the scrubbed tree (the AC's own completion condition).
