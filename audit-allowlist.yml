@@ -1,0 +1,10 @@
+# Allowlist for scripts/public-readiness-audit.py (epic 24 ticket #01). Minimal by design: every
+# entry needs a path (glob, matched against the finding's "scope:path:line"/"commit:sha:field"
+# location), a rule (matched EXACTLY — never a glob, so an entry can never silence a rule it does not
+# name) and a written reason. See docs/public-readiness-audit.md.
+#
+# Empty on purpose: ticket #01 ships the mechanism and proves it against a fixture. The real
+# repository's scrub (epic 24 ticket #02) is what should populate this, if anything legitimate
+# survives the scrub and still needs a reasoned exception (e.g. the encrypted store's own ciphertext
+# coincidentally containing a short denylist term).
+allowlist: []

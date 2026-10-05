@@ -249,3 +249,18 @@ echo "role skip-tags guard OK"
 # tasks with every other role's compiled task list byte-identical.
 ./tests/check-exit-nodes-wiring.sh
 
+# Public-readiness audit canary test (epic 24 ticket #01): the audit scanner (scripts/public-readiness-
+# audit.py), black-box tested against a fixture repository with planted canaries, proves it finds a
+# planted secret, extra term, resolved-host address and generic credential/CGNAT/git-crypt-header shape
+# in the tree, in history and in commit metadata, in literal and encoded forms, reports no canary text,
+# passes on a clean fixture, and that the allowlist can only silence the rule it names.
+./tests/check-public-readiness-audit.sh
+
+# Public-readiness audit, generic rules, working-tree scope only (epic 24 ticket #01): the same
+# credential-shape/CGNAT-address/git-crypt-header rules the full audit uses, run with no key over the
+# real repository's tree (full history and the secret-derived denylist are operator-run via
+# `scripts/deploy --script audit`, never CI — this repository's own history keeps the dead git-crypt
+# key on purpose until epic 24's export; see docs/public-readiness-audit.md). Any real finding here is
+# scrubbed by epic 24 ticket #02's own work, or named in audit-allowlist.yml with a written reason.
+python3 scripts/public-readiness-audit.py --generic-only --tree-only
+
