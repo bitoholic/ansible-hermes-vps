@@ -41,17 +41,19 @@ allowlist:
     reason: >-
       Same situation as secret:ADGUARD_ADMIN_USERNAME above: the configured value is the stock
       default username "admin", a common generic word, not an identifying value.
-  - path: "commit:*"
+  - path: "*"
     rule: "secret:GIT_USERNAME"
     reason: >-
-      This secret's value IS the operator's own chosen public commit identity — provisioned
+      This secret's value IS the operator's own chosen public git identity — provisioned
       (roles/common, roles/hermes/templates/env_default.j2) so the hermes-agent role can commit as
-      the operator, using the exact same name already on the large majority of this repository's own
-      commits (see ADR-0009, "Commit identity: an operator input, not decided here"). Flagging every
-      commit's author/committer name as "containing a secret" is a structural false positive: the
-      identity is deliberately, already public — on this repository's own history and on every export
-      snapshot (epic 24 #04) alike — not an additional value this audit should be hiding.
-  - path: "commit:*"
+      the operator (see ADR-0009, "Commit identity: an operator input, not decided here"). It also
+      shows up outside commit metadata, in ordinary prose and configuration throughout this
+      repository's history — the operator's own name/handle recurring in docs, inventory and
+      templates the same way any other author's name would. Scoped to "*", not just "commit:*",
+      because the value is deliberately, already public wherever it appears — on this repository's
+      own history and on every export snapshot (epic 24 #04) alike — not an additional value this
+      audit should be hiding.
+  - path: "*"
     rule: "secret:GIT_EMAIL"
     reason: "Same situation as secret:GIT_USERNAME above, for the operator's chosen public commit email."
   - path: "*:docs/reboot-resilience.md*"
