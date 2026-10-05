@@ -110,6 +110,9 @@ allowlist:
   - path: "*:.scratch/24-public-readiness/issues/03-generic-lint-guard-and-content-policy.md*"
     rule: "tailnet-cgnat-address"
     reason: "An early, since-fixed (1dbf8e2) version of this ticket's own notes described the bug above by repeating the same real-looking address a third time; same non-identifying fixture value, not the operator's real one."
+  - path: "*:.scratch/24-public-readiness/issues/04-publication-strategy-adr-and-export.md*"
+    rule: "tailnet-cgnat-address"
+    reason: "An early, since-fixed (2b9a4ce) version of this ticket's own redesign notes repeated the same mistake a fourth time, describing an audit-allowlist.yml fix by quoting the real-looking address literally instead of in words; same non-identifying fixture value, not the operator's real one."
   - path: "commit:bf693536358b8ab4d8d941430301470e97f07ea2:message"
     rule: "tailnet-cgnat-address"
     reason: >-
