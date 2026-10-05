@@ -69,3 +69,19 @@ scoped to the one file it appears in.
 **Tests:** full `tests/lint.sh` run passes end to end (exit 0), including the gateway/firewall render
 tests (proving the functional `tailscale_subnet` constant and its `/10` CIDR text were never touched)
 and the exit-node render test with its updated fixture address.
+
+**Independent review (two parallel fresh-context agents — Standards/Fowler-baseline, Spec-conformance),
+both against the real secrets store:** no defects found; both independently re-ran the real audit and
+confirmed a clean tree scan, confirmed the CIDR constant's own lines are byte-untouched by this diff,
+re-ran `tests/lint.sh` end to end, and independently reproduced the WINDSCRIBE_ADDRESS fixture coincidence
+in a scratch worktree at the parent commit (without ever viewing the secret itself). The spec reviewer's
+history-count re-run (2276/1396 vs. this ticket's recorded 2246/1391) was traced to a later, unrelated
+doc-only commit changing the count slightly between when the number was recorded and when they re-ran it
+— not a regression or a rewrite (`git merge-base --is-ancestor` confirms a plain fast-forward).
+
+One structural concern both reviewers raised, accepted as a known limit rather than fixed here: the
+`audit-allowlist.yml` entries match on `(path, rule)` only, never on value, so the two `tree:*`-scoped
+`ADGUARD_ADMIN_USERNAME`/`ADMIN_USERNAME` entries would silently keep suppressing findings if either
+secret were ever rotated away from the generic word "admin". Documented directly in
+`audit-allowlist.yml`'s own header as a re-check reminder tied to rotating either secret, since the
+allowlist file is what the operator will actually be looking at when they do.

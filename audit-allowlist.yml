@@ -10,6 +10,13 @@
 # in, so the rule still has teeth everywhere else). None of these cover a real identifying value — the
 # real ones found in the tree (the operator's domain and tailnet addresses) were scrubbed to
 # placeholders instead of allowlisted; see .scratch/24-public-readiness/issues/02-scrub-working-tree.md.
+#
+# Known structural limit (flagged by ticket #02's independent review, not yet acted on): matching here
+# is keyed on (path, rule) only, never on the VALUE — so the secret:ADGUARD_ADMIN_USERNAME/
+# secret:ADMIN_USERNAME entries below are correct only as long as those two secrets stay the generic
+# word "admin". If the operator ever rotates either one to something identifying, these entries would
+# keep silently suppressing every finding for that secret under a now-stale reason. Re-check these two
+# entries's accuracy whenever ADGUARD_ADMIN_USERNAME or ADMIN_USERNAME is rotated.
 allowlist:
   - path: "tree:*"
     rule: "secret:ADGUARD_ADMIN_USERNAME"
