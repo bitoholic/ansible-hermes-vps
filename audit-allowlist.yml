@@ -17,57 +17,79 @@
 # word "admin". If the operator ever rotates either one to something identifying, these entries would
 # keep silently suppressing every finding for that secret under a now-stale reason. Re-check these two
 # entries's accuracy whenever ADGUARD_ADMIN_USERNAME or ADMIN_USERNAME is rotated.
+#
+# Scope note (found during ticket #05's dry run, the first time the full audit's history/commit scan
+# ever ran to completion against a repository that actually matters): the file-scoped entries below use
+# "*:FILE*" rather than "tree:FILE:*" so ONE entry covers both the tree:FILE:LINE form AND the
+# history:FILE@SHA:LINE form — the full audit's history scan (every blob reachable from any ref) finds
+# the exact same content again, under a different location label, whenever that content is also present
+# at HEAD (true of every file here, and necessarily true of a single-snapshot export repository, where
+# "history" and "tree" cover the same one commit). Likewise the two admin-username entries use "*"
+# rather than "tree:*", for the same reason.
 allowlist:
-  - path: "tree:*"
+  - path: "*"
     rule: "secret:ADGUARD_ADMIN_USERNAME"
     reason: >-
       The operator left this field at its own manifest default, the stock username "admin" — a
       common, generic English/technical word that recurs throughout this codebase's ordinary
       vocabulary (variable names like ADMIN_USERNAME, section headers, prose about admin accounts)
-      wherever admin-related functionality is discussed. It does not, by itself, identify the
-      operator, and scoping this entry per file would need updating on every unrelated future commit
-      that happens to use the word "admin".
-  - path: "tree:*"
+      wherever admin-related functionality is discussed, in the tree and in history alike. It does
+      not, by itself, identify the operator, and scoping this entry per file would need updating on
+      every unrelated future commit that happens to use the word "admin".
+  - path: "*"
     rule: "secret:ADMIN_USERNAME"
     reason: >-
       Same situation as secret:ADGUARD_ADMIN_USERNAME above: the configured value is the stock
       default username "admin", a common generic word, not an identifying value.
-  - path: "tree:docs/reboot-resilience.md:*"
+  - path: "commit:*"
+    rule: "secret:GIT_USERNAME"
+    reason: >-
+      This secret's value IS the operator's own chosen public commit identity — provisioned
+      (roles/common, roles/hermes/templates/env_default.j2) so the hermes-agent role can commit as
+      the operator, using the exact same name already on the large majority of this repository's own
+      commits (see ADR-0009, "Commit identity: an operator input, not decided here"). Flagging every
+      commit's author/committer name as "containing a secret" is a structural false positive: the
+      identity is deliberately, already public — on this repository's own history and on every export
+      snapshot (epic 24 #04) alike — not an additional value this audit should be hiding.
+  - path: "commit:*"
+    rule: "secret:GIT_EMAIL"
+    reason: "Same situation as secret:GIT_USERNAME above, for the operator's chosen public commit email."
+  - path: "*:docs/reboot-resilience.md*"
     rule: "tailnet-cgnat-address"
     reason: "Tailscale's own universal DNS stub resolver address, identical on every tailnet; not the operator's address."
-  - path: "tree:roles/adguard/tasks/free_host_dns_port.yml:*"
+  - path: "*:roles/adguard/tasks/free_host_dns_port.yml*"
     rule: "tailnet-cgnat-address"
     reason: "Tailscale's own universal DNS stub resolver address, identical on every tailnet; not the operator's address."
-  - path: "tree:.scratch/21-reboot-resilience/issues/04-boot-ordering-and-host-dns-fallback.md:*"
+  - path: "*:.scratch/21-reboot-resilience/issues/04-boot-ordering-and-host-dns-fallback.md*"
     rule: "tailnet-cgnat-address"
     reason: "Tailscale's own universal DNS stub resolver address, identical on every tailnet; not the operator's address."
-  - path: "tree:tests/check-boot-ordering.sh:*"
+  - path: "*:tests/check-boot-ordering.sh*"
     rule: "tailnet-cgnat-address"
     reason: "Tailscale's own universal DNS stub resolver address, identical on every tailnet; not the operator's address."
-  - path: "tree:tests/check-live-verification.sh:*"
+  - path: "*:tests/check-live-verification.sh*"
     rule: "tailnet-cgnat-address"
     reason: "Tailscale's own universal DNS stub resolver address (the well-known quad-100 stub resolver) and a synthetic fixture tailnet address (the first address in Tailscale's CGNAT range) used in this test's faked command output; neither is the operator's real address."
-  - path: "tree:scripts/verify-exit-nodes.sh:*"
+  - path: "*:scripts/verify-exit-nodes.sh*"
     rule: "tailnet-cgnat-address"
     reason: "A synthetic fixture tailnet address (the first address in Tailscale's CGNAT range) used as a functional test input, not the operator's real address."
-  - path: "tree:scripts/verify-live.sh:*"
+  - path: "*:scripts/verify-live.sh*"
     rule: "tailnet-cgnat-address"
     reason: "A synthetic fixture tailnet address (the first address in Tailscale's CGNAT range) used as a functional test input, not the operator's real address."
-  - path: "tree:tests/check-docker-user-firewall.sh:*"
+  - path: "*:tests/check-docker-user-firewall.sh*"
     rule: "tailnet-cgnat-address"
     reason: "A synthetic fixture tailnet address (the first address in Tailscale's CGNAT range) used as a functional test input, not the operator's real address."
-  - path: "tree:tests/check-docker-user-firewall.sh:*"
+  - path: "*:tests/check-docker-user-firewall.sh*"
     rule: "tailnet-ula-address"
     reason: "A synthetic fixture IPv6 tailnet address (::1 within Tailscale's own ULA prefix) used as a functional test input, not the operator's real address."
-  - path: "tree:tests/check-exit-node-verification.sh:*"
+  - path: "*:tests/check-exit-node-verification.sh*"
     rule: "tailnet-cgnat-address"
     reason: "A synthetic fixture tailnet address (the first address in Tailscale's CGNAT range) used as a functional test input, not the operator's real address."
-  - path: "tree:tests/test_docker_user_rules.yml:*"
+  - path: "*:tests/test_docker_user_rules.yml*"
     rule: "tailnet-cgnat-address"
     reason: "A synthetic fixture tailnet address (the first address in Tailscale's CGNAT range, tailscale_ip_v4) used as a functional render-test input, not the operator's real address."
-  - path: "tree:tests/test_docker_user_rules.yml:*"
+  - path: "*:tests/test_docker_user_rules.yml*"
     rule: "tailnet-ula-address"
     reason: "A synthetic fixture IPv6 tailnet address (::1 within Tailscale's own ULA prefix, tailscale_ip_v6) used as a functional render-test input, not the operator's real address."
-  - path: "tree:tests/test_exit_nodes_render.yml:*"
+  - path: "*:tests/test_exit_nodes_render.yml*"
     rule: "tailnet-cgnat-address"
     reason: "A synthetic fixture WireGuard tunnel address (an arbitrary address in Tailscale's CGNAT range) used as a functional test input. Chosen deliberately in ticket #02 to no longer collide with the real exit_node_windscribe_address secret, which this fixture value coincidentally equalled before (see ticket #02 notes)."
