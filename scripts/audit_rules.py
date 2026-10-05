@@ -18,9 +18,13 @@ CGNAT_ADDRESS_RE = re.compile((r"\b100\." + _CGNAT_SECOND_OCTET + r"\." + _OCTET
 CGNAT_FUNCTIONAL_CIDR = b"100.64.0.0/10"
 
 # Tailscale's IPv6 ULA prefix (group_vars/all/main.yml: tailscale_subnet_v6 "fd7a:115c:a1e0::/48") — the
-# IPv6 counterpart of the CGNAT rule above. The bare "::/48" range notation itself never matches this
-# pattern (it has no trailing hex digit before the slash, unlike the IPv4 CIDR), so — unlike the CGNAT
-# rule — this one needs no explicit functional-value exemption.
+# IPv6 counterpart of the CGNAT rule above. The bare, zero-COMPRESSED "::/48" range notation this
+# repository actually writes never matches this pattern (it has no trailing hex digit before the
+# slash, unlike the IPv4 CIDR), so — unlike the CGNAT rule — this one needs no explicit functional-
+# value exemption for the form in use here. (The same range written with its leading zero group
+# spelled out in full, rather than "::"-compressed, WOULD match as a false "host" — nothing in this
+# repository writes it that way; if that ever changes, this rule needs the same explicit exemption the
+# CGNAT one already has.)
 _TAILNET_ULA_PREFIX = b"fd7a:115c:a1e0:"
 TAILNET_ULA_ADDRESS_RE = re.compile(rb"\b" + re.escape(_TAILNET_ULA_PREFIX) + rb"[0-9a-fA-F:]*[0-9a-fA-F](?:/\d{1,3})?\b")
 

@@ -20,8 +20,9 @@ Introduce a new placeholder the same way if none of these fit, rather than writi
   wherever it names the *range* rather than one address — it is a functional value (`group_vars/all/
   main.yml`'s `tailscale_subnet`, firewall rules, Caddy matchers), not an identifying one.
 - A test or render-fixture value that only needs to be *some* syntactically valid address and was never
-  the operator's real one (e.g. `tailscale_ip_v4: 100.64.0.1` in a render test) — don't placeholder-ize a
-  functional test input; if the audit ever flags one, allowlist it with a reason instead (see below).
+  the operator's real one (e.g. a fixture `tailscale_ip_v4` value in a render test) — don't
+  placeholder-ize a functional test input; if the audit ever flags one, allowlist it with a reason
+  instead (see below).
 - Live-verification notes already using a placeholder, or narrative that doesn't actually name a real
   value in the first place.
 

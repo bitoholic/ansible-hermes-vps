@@ -42,3 +42,15 @@ CGNAT-CIDR negative case). This ticket's own new work:
     will already be reading it there.
 
 Full `tests/lint.sh` passes end to end on the scrubbed tree (the AC's own completion condition).
+
+**Fixed after independent review (two parallel fresh-context agents — Standards, Spec-conformance),
+both independently caught the same self-inflicted irony**: the first commit's own new
+`docs/agents/content-policy.md` wrote a literal, real CGNAT host address (`100.64.0.1`) as a
+"leave as-is" example — which the generic rule this very ticket documents correctly flagged, failing
+`tests/lint.sh` on the committed tree despite the commit's own "guard passes" claim. Fixed by
+describing the example without the literal address. The Standards review also caught a second, more
+minor instance of the same category of mistake: the new rule's own explanatory comment in
+`scripts/audit_rules.py` wrote out the fully-zero-expanded form of the ULA range literally to explain
+why it WOULD (hypothetically) match — which, being a real matching string, flagged itself too. Fixed
+by describing it in words instead. Re-verified clean (tree scan, canary test, full `tests/lint.sh`)
+after both fixes.
