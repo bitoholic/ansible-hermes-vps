@@ -47,7 +47,7 @@ freshly-registered exit-node container doesn't need a manual per-node click in t
     // below) — this line restores direct access to the VPS's own services for normal
     // devices without reopening the actual exit-node containers to the tailnet. Replace the
     // addresses with the VPS's own current tailnet IPv4/IPv6 (`tailscale ip -4`/`-6` on it).
-    { "action": "accept", "src": ["autogroup:member"], "dst": ["<tailnet-ip>:*", "<tailnet-ip>:*"] }
+    { "action": "accept", "src": ["autogroup:member"], "dst": ["<vps-tailnet-ip>:*", "<vps-tailnet-ipv6>:*"] }
   ],
   "autoApprovers": {
     "exitNode": ["tag:exit-node"]

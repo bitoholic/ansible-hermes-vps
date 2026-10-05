@@ -191,7 +191,7 @@ adguard or monitor - owntracks works though." This was NOT a DOCKER-USER/firewal
 out exhaustively: no UFW log entries, zero DOCKER-USER rule-counter hits, zero packets arriving on
 `tailscale0` even during live, timed, confirmed retries from two different client devices) — the
 actual cause was one layer up, in Tailscale's own daemon, confirmed via
-`journalctl -u tailscaled`: `Drop: TCP{<tailnet-ip>:54172 > <tailnet-ip>:53} 60 no rules matched`.
+`journalctl -u tailscaled`: `Drop: TCP{<tailnet-ip>:54172 > <vps-tailnet-ip>:53} 60 no rules matched`.
 `tailscaled` itself enforces the tailnet's ACL policy before a packet ever reaches the kernel's
 network stack — this is a separate layer from everything `scripts/verify-live.sh`/
 `check-docker-user-firewall.sh` can see, which is why static/render-level tests could never have
@@ -220,7 +220,7 @@ tagged node back to a plain user-owned one needs re-authentication, which risks 
 change (requiring a redeploy to propagate into the DOCKER-USER rules and `haproxy.cfg`, both keyed
 to this address). Given the choice between that and a scoped ACL fix, the operator chose the
 scoped fix: a third `acls` entry, `{ "action": "accept", "src": ["autogroup:member"], "dst":
-["<tailnet-ip>:*", "<tailnet-ip>:*"] }`, restoring direct access to the VPS's own
+["<vps-tailnet-ip>:*", "<vps-tailnet-ipv6>:*"] }`, restoring direct access to the VPS's own
 services without reopening the actual exit-node containers to the tailnet (ticket #01's isolation
 is untouched — the new rule names only the VPS's own two addresses, never `tag:exit-node` as a
 class). Applied by the operator in the admin console; confirmed immediately: `scripts/verify-live.sh`

@@ -3,8 +3,58 @@
 # location), a rule (matched EXACTLY — never a glob, so an entry can never silence a rule it does not
 # name) and a written reason. See docs/public-readiness-audit.md.
 #
-# Empty on purpose: ticket #01 ships the mechanism and proves it against a fixture. The real
-# repository's scrub (epic 24 ticket #02) is what should populate this, if anything legitimate
-# survives the scrub and still needs a reasoned exception (e.g. the encrypted store's own ciphertext
-# coincidentally containing a short denylist term).
-allowlist: []
+# Populated by ticket #02's scrub of the working tree. Every entry here covers either (a) a generic
+# default credential value that happens to also be an ordinary English/technical word (scoped to the
+# whole tree, because the word recurs endlessly and narrowing it per file would be unmaintainable), or
+# (b) a specific, named, non-identifying constant or test-fixture value (scoped to the one file it's
+# in, so the rule still has teeth everywhere else). None of these cover a real identifying value — the
+# real ones found in the tree (the operator's domain and tailnet addresses) were scrubbed to
+# placeholders instead of allowlisted; see .scratch/24-public-readiness/issues/02-scrub-working-tree.md.
+allowlist:
+  - path: "tree:*"
+    rule: "secret:ADGUARD_ADMIN_USERNAME"
+    reason: >-
+      The operator left this field at its own manifest default, the stock username "admin" — a
+      common, generic English/technical word that recurs throughout this codebase's ordinary
+      vocabulary (variable names like ADMIN_USERNAME, section headers, prose about admin accounts)
+      wherever admin-related functionality is discussed. It does not, by itself, identify the
+      operator, and scoping this entry per file would need updating on every unrelated future commit
+      that happens to use the word "admin".
+  - path: "tree:*"
+    rule: "secret:ADMIN_USERNAME"
+    reason: >-
+      Same situation as secret:ADGUARD_ADMIN_USERNAME above: the configured value is the stock
+      default username "admin", a common generic word, not an identifying value.
+  - path: "tree:docs/reboot-resilience.md:*"
+    rule: "tailnet-cgnat-address"
+    reason: "Tailscale's own universal DNS stub resolver address, identical on every tailnet; not the operator's address."
+  - path: "tree:roles/adguard/tasks/free_host_dns_port.yml:*"
+    rule: "tailnet-cgnat-address"
+    reason: "Tailscale's own universal DNS stub resolver address, identical on every tailnet; not the operator's address."
+  - path: "tree:.scratch/21-reboot-resilience/issues/04-boot-ordering-and-host-dns-fallback.md:*"
+    rule: "tailnet-cgnat-address"
+    reason: "Tailscale's own universal DNS stub resolver address, identical on every tailnet; not the operator's address."
+  - path: "tree:tests/check-boot-ordering.sh:*"
+    rule: "tailnet-cgnat-address"
+    reason: "Tailscale's own universal DNS stub resolver address, identical on every tailnet; not the operator's address."
+  - path: "tree:tests/check-live-verification.sh:*"
+    rule: "tailnet-cgnat-address"
+    reason: "Tailscale's own universal DNS stub resolver address (the well-known quad-100 stub resolver) and a synthetic fixture tailnet address (the first address in Tailscale's CGNAT range) used in this test's faked command output; neither is the operator's real address."
+  - path: "tree:scripts/verify-exit-nodes.sh:*"
+    rule: "tailnet-cgnat-address"
+    reason: "A synthetic fixture tailnet address (the first address in Tailscale's CGNAT range) used as a functional test input, not the operator's real address."
+  - path: "tree:scripts/verify-live.sh:*"
+    rule: "tailnet-cgnat-address"
+    reason: "A synthetic fixture tailnet address (the first address in Tailscale's CGNAT range) used as a functional test input, not the operator's real address."
+  - path: "tree:tests/check-docker-user-firewall.sh:*"
+    rule: "tailnet-cgnat-address"
+    reason: "A synthetic fixture tailnet address (the first address in Tailscale's CGNAT range) used as a functional test input, not the operator's real address."
+  - path: "tree:tests/check-exit-node-verification.sh:*"
+    rule: "tailnet-cgnat-address"
+    reason: "A synthetic fixture tailnet address (the first address in Tailscale's CGNAT range) used as a functional test input, not the operator's real address."
+  - path: "tree:tests/test_docker_user_rules.yml:*"
+    rule: "tailnet-cgnat-address"
+    reason: "A synthetic fixture tailnet address (the first address in Tailscale's CGNAT range, tailscale_ip_v4) used as a functional render-test input, not the operator's real address."
+  - path: "tree:tests/test_exit_nodes_render.yml:*"
+    rule: "tailnet-cgnat-address"
+    reason: "A synthetic fixture WireGuard tunnel address (an arbitrary address in Tailscale's CGNAT range) used as a functional test input. Chosen deliberately in ticket #02 to no longer collide with the real exit_node_windscribe_address secret, which this fixture value coincidentally equalled before (see ticket #02 notes)."

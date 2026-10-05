@@ -18,7 +18,7 @@ See epic 22 spec, "Implementation Decisions" (domain de-hardcoding). The variabl
 
 ## Implementation
 
-`roles/gateway/templates/Caddyfile.j2`'s `mfa_auth` snippet had `authelia_url=https://auth.<secret-silverbullet-domain>` hardcoded
+`roles/gateway/templates/Caddyfile.j2`'s `mfa_auth` snippet had `authelia_url=https://auth.<domain>` hardcoded
 in its forward-auth query string; changed to `authelia_url=https://auth.{{ secrets.silverbullet_domain }}`, matching
 the exact `auth.{{ secrets.silverbullet_domain }}` convention Authelia's own rendered configuration already uses
 for this same hostname (`roles/authelia/templates/authelia-configuration.yml.j2`).

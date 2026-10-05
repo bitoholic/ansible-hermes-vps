@@ -15,7 +15,7 @@
 
 See epic 20 spec, "Further Notes" and "Out of Scope". Two side-findings from this epic's investigation are explicitly *not* this ticket's scope, but should be noted in the ADR so they aren't lost:
 
-- `owntracks-ui.<secret-silverbullet-domain>` currently has a public/Cloudflare-proxied DNS record despite being a `tailnet_only` route, which independently makes it unreachable by anyone via that hostname (Cloudflare's edge IP never matches the tailnet subnet either) — an operator/DNS-console question, not something this epic's code touches. **Update, at ticket #02 time**: this is no longer the current state — see Implementation notes below; kept here verbatim as the historical record of what this epic's original investigation found, not silently corrected.
+- `owntracks-ui.<domain>` currently has a public/Cloudflare-proxied DNS record despite being a `tailnet_only` route, which independently makes it unreachable by anyone via that hostname (Cloudflare's edge IP never matches the tailnet subnet either) — an operator/DNS-console question, not something this epic's code touches. **Update, at ticket #02 time**: this is no longer the current state — see Implementation notes below; kept here verbatim as the historical record of what this epic's original investigation found, not silently corrected.
 - Whether that DNS record should exist at all, and whether other `tailnet_only` routes should or shouldn't have public DNS records, is out of scope for this epic entirely.
 
 ## Implementation notes

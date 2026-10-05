@@ -238,7 +238,7 @@ Conduit becomes a standard route entry with `host: matrix`, `port: 8448`, and th
 
 - **Syncplay IP management**: `syncplay_allowed_ips` is a list of CIDR ranges or individual IPs. Starting with one example entry. Friends with dynamic IPs update their home router IP.
 
-- **OwnTracks domain**: uses `secrets.silverbullet_domain` (e.g., `<secret-silverbullet-domain>`) → `owntracks.<secret-silverbullet-domain>`. No new domain secret.
+- **OwnTracks domain**: uses `secrets.silverbullet_domain` (e.g., `<domain>`) → `owntracks.<domain>`. No new domain secret.
 
 - **Caddy ACME**: for `tls_mode: "auto"`, Caddy will attempt ACME for `owntracks.<domain>`. The `acme_email` secret is needed. Domain must be publicly resolvable and port 443 accessible (already UFW rate-limited).
 

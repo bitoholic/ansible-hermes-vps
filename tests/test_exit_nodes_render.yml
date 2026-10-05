@@ -331,7 +331,7 @@
         exit_nodes_credentials_test_file: "{{ (lookup('ansible.builtin.env', 'TMPDIR') | default('/tmp', true)) }}/exit_nodes_credentials_test.env"
         secrets:
           exit_node_windscribe_private_key: fake-private-key
-          exit_node_windscribe_address: <secret-windscribe-address>
+          exit_node_windscribe_address: 100.65.0.99/32
           exit_node_windscribe_preshared_key: fake-preshared-key
           exit_node_tailscale_authkey: tskey-auth-fake
 
@@ -340,7 +340,7 @@
         that:
           - rendered_lines | length == 4
           - "'WIREGUARD_PRIVATE_KEY=fake-private-key' in rendered_lines"
-          - "'WIREGUARD_ADDRESSES=<secret-windscribe-address>' in rendered_lines"
+          - "'WIREGUARD_ADDRESSES=100.65.0.99/32' in rendered_lines"
           - "'WIREGUARD_PRESHARED_KEY=fake-preshared-key' in rendered_lines"
           - "'TS_AUTHKEY=tskey-auth-fake' in rendered_lines"
         fail_msg: "credentials.env.j2 did not render the expected shape: {{ rendered_lines }}"

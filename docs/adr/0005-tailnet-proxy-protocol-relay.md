@@ -22,7 +22,7 @@ is not a bug in either ADR's own logic; it's a network-layer fact both were buil
 
 Two side-findings surfaced during this investigation, explicitly out of this epic's scope but
 recorded here so they aren't lost:
-- At the time of the original investigation, `owntracks-ui.<secret-silverbullet-domain>` had a public/Cloudflare-
+- At the time of the original investigation, `owntracks-ui.<domain>` had a public/Cloudflare-
   proxied DNS record despite being a `tailnet_only` route — independently of this bug, that made it
   unreachable via that hostname by anyone at all, since Cloudflare's edge IP never matches the
   tailnet subnet either. Whether that DNS record should exist at all, and whether other
