@@ -162,8 +162,40 @@ epic's tooling (tickets #01–#03) into `main` regardless of how this question r
 Re-verified clean: the fixture test end to end, and the full `tests/lint.sh` (ansible-lint, every check
 script, the rebuilt export-public guard) against the real repository.
 
-**Not yet done, carried into #05:** re-running the real-repository dry-run export one more time with
-this rebuilt mechanism (the real dry-run proofs above predate the `AUDIT_EXTRA_TERMS`/nested-placeholder
-fixes, though neither fix changes the real export's own behavior — both were fixture-test-only issues);
-independent review of this rework; redoing the push to `bitoholic/ansible-hermes-vps` (which currently
-still holds the OLD single-snapshot push) with the history-preserving result.
+**Fixed after independent review of the rework (two parallel fresh-context agents — Standards,
+Spec-conformance), against `1dbf8e2..HEAD` at the time:**
+- Spec review caught a real bug, confirmed against the real repository: the clone step's `--no-tags`
+  silently dropped this repository's one actual tag (`v0.0.0-alpha1`) from every export, contradicting
+  the script's own docstring claim that tags are preserved and rewritten too. Fixed by dropping
+  `--no-tags` (`--single-branch`'s own default tag heuristic — only tags reachable from the cloned
+  branch — is exactly what's wanted); added a lightweight-tag canary to the fixture and a survival
+  assertion to the test.
+- Standards review flagged duplicated `if result.returncode != 0: fail(...)` boilerplate and a long
+  `main()`. Added a `_git_or_fail()` helper and extracted the clone/filter-repo/branch-rename/reset
+  sequence into `build_filtered_history()`.
+- Standards review also flagged placeholder-string construction being built twice, slightly
+  differently. Added one shared `_placeholder()` helper.
+- Spec review additionally noted (non-blocking, disclosed as-is): tags have zero coverage for the
+  identity-rewrite path itself, since the fixture's only tag is lightweight (no tagger field to
+  rewrite) — the real repository's own tag is also lightweight, so this isn't tested anywhere yet;
+  acceptable for now since there's no annotated tag in this repository's actual history to get wrong.
+
+Re-running the real-repository dry run after the tag fix surfaced one more self-matching leftover: this
+ticket's own "Redesign" notes (added this session) described an allowlist fix by quoting the real-
+looking CGNAT address literally — the same recurring mistake ticket #03 hit twice already. Fixed by
+describing it in words instead; allowlisted the one already-superseded historical commit that still has
+the literal form, same pattern as ticket #03's own two entries.
+
+**Final re-verification, all fixes applied:** the fixture test end to end (including the new tag
+check); full `tests/lint.sh` in this repository; a real-repository dry run into a scratch destination —
+clean audit, 273 of 348 commits survive (the rest correctly pruned as empty once secrets-tooling state
+is removed), the real tag `v0.0.0-alpha1` survives pointing at its rewritten commit, every commit's
+identity is the single supplied one, the store/`.sops.yaml` are absent; and the full `tests/lint.sh`
+passing end to end in a fresh clone of that real dry-run export (the literal AC #7 wording, not just the
+narrower `check_secrets_store.py`-only proxy).
+
+**Still carried into #05, operator-only:** redoing the push to `bitoholic/ansible-hermes-vps` (which
+currently still holds the OLD single-snapshot push) with this history-preserving result — a history-
+replacing push, to be flagged explicitly before it happens; GitHub secret-scanning/push-protection
+settings (a `gh api` call to enable them was denied by the permission classifier earlier — needs the
+operator directly); the licence-file sign-off; the actual visibility flip.
