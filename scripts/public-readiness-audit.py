@@ -4,13 +4,16 @@
     scripts/deploy --script audit                              full audit: denylist + generic rules
     python3 scripts/public-readiness-audit.py --generic-only --tree-only   the lint-run scope, no key needed
 
-Exit status: 0 = clean, 1 = finding(s) printed, 2 = cannot run (bad allowlist, not a git repository).
+Exit status: 0 = clean, 1 = finding(s) printed, 2 = cannot run (bad allowlist, not a git repository, or
+— for the full audit — run directly instead of through the deploy wrapper).
 
 The full audit must run through `scripts/deploy --script audit`: script-mode children receive the
 decrypted secret set in their OWN environment but never the key source or store location (see
 scripts/deploy's base_environment and docstring) — by design, this script has no way to decrypt the
 store itself, only to read what the wrapper already resolved. deploy's own preflight already proves
-every required name is present before this script ever starts.
+every required name is present before this script ever starts; this script also checks for itself and
+refuses (exit 2) rather than silently running with an empty, useless denylist if it is ever invoked
+directly in full-audit mode.
 
 The denylist is derived at RUN TIME and never written down anywhere in this repository:
   * every name the name-set rule (scripts/hermes_secrets.py) allows the store to hold, for whichever
@@ -67,10 +70,6 @@ _boot_spec.loader.exec_module(hermes_bootstrap)
 hs = hermes_bootstrap.load_sibling("hermes_secrets")
 hermes_redact = hermes_bootstrap.load_sibling("hermes_redact")
 audit_rules = hermes_bootstrap.load_sibling("audit_rules")
-
-RECORD_SEP = b"\x02HERMES-AUDIT-REC\x02"
-FIELD_SEP = b"\x02HERMES-AUDIT-FLD\x02"
-
 
 class AuditError(Exception):
     """A problem the operator must fix before the audit can run."""
@@ -162,7 +161,7 @@ def history_blob_shas(root):
     return blobs
 
 
-def read_blobs(root, shas):
+def read_objects(root, shas):
     """Yield (sha, content bytes) for each sha via one `git cat-file --batch` process (binary-safe,
     responses arrive in request order). Writing stdin on a separate thread avoids a pipe deadlock on
     a repository with enough history that the sha list itself exceeds the pipe buffer."""
@@ -174,6 +173,8 @@ def read_blobs(root, shas):
     def feed():
         try:
             proc.stdin.write(("\n".join(shas) + "\n").encode())
+        except (BrokenPipeError, OSError):
+            pass   # cat-file exited early (e.g. a malformed sha list); the read loop below reports what it got
         finally:
             proc.stdin.close()
 
@@ -209,30 +210,46 @@ def scan_tree(root, needle_rule):
 def scan_history(root, needle_rule):
     findings = []
     blobs = history_blob_shas(root)
-    for sha, content in read_blobs(root, list(blobs)):
+    for sha, content in read_objects(root, list(blobs)):
         hint = blobs.get(sha) or "(no path hint)"
         for rule, lineno in audit_rules.scan_content(content, needle_rule):
             findings.append((rule, "history:%s@%s:%d" % (hint, sha[:12], lineno)))
     return findings
 
 
+def commit_shas_all(root):
+    return [line.decode("ascii", "replace") for line in _git(root, "rev-list", "--all").splitlines() if line]
+
+
+_COMMIT_HEADER_LINE_RE = re.compile(rb"^(author|committer) (.*) <(.*)> \d+ [+-]\d{4}$")
+
+
+def parse_commit_object(content):
+    """(author_name, author_email, committer_name, committer_email, message) from the RAW bytes of a
+    commit object, read directly via git cat-file --batch rather than a text format string: a `git log
+    --format` delimiter, however distinctive, could in principle collide with attacker-controlled commit
+    message bytes and silently truncate a record. A commit object's own format has no such ambiguity —
+    header lines (tree/parent/author/committer/gpgsig, the last multi-line but never starting with
+    "author "/"committer ") end at the first blank line, after which everything is the message."""
+    header, _, message = content.partition(b"\n\n")
+    fields = {b"author": (b"", b""), b"committer": (b"", b"")}
+    for line in header.split(b"\n"):
+        m = _COMMIT_HEADER_LINE_RE.match(line)
+        if m:
+            fields[m.group(1)] = (m.group(2), m.group(3))
+    an, ae = fields[b"author"]
+    cn, ce = fields[b"committer"]
+    return an, ae, cn, ce, message
+
+
 def scan_commit_metadata(root, needle_rule):
-    fmt = FIELD_SEP.decode("latin1").join(["%H", "%an", "%ae", "%cn", "%ce", "%B"]) + RECORD_SEP.decode("latin1")
-    raw = _git(root, "log", "--all", "--format=" + fmt)
     findings = []
-    for record in raw.split(RECORD_SEP):
-        record = record.strip(b"\n")
-        if not record:
-            continue
-        parts = record.split(FIELD_SEP)
-        if len(parts) < 6:
-            continue
-        sha = parts[0].decode("ascii", "replace")
-        fields = [("author-name", parts[1]), ("author-email", parts[2]),
-                  ("committer-name", parts[3]), ("committer-email", parts[4]),
-                  ("message", FIELD_SEP.join(parts[5:]))]
-        for field_name, content in fields:
-            for rule, _lineno in audit_rules.scan_content(content, needle_rule):
+    for sha, content in read_objects(root, commit_shas_all(root)):
+        an, ae, cn, ce, message = parse_commit_object(content)
+        for field_name, field_content in (("author-name", an), ("author-email", ae),
+                                            ("committer-name", cn), ("committer-email", ce),
+                                            ("message", message)):
+            for rule, _lineno in audit_rules.scan_content(field_content, needle_rule):
                 findings.append((rule, "commit:%s:%s" % (sha, field_name)))
     return findings
 
@@ -276,7 +293,22 @@ def main(argv):
     root = os.path.abspath(args.root)
     allowlist_path = args.allowlist or os.path.join(root, "audit-allowlist.yml")
 
-    needle_rule = {} if args.generic_only else build_needle_rules(build_denylist_terms(root, os.environ))
+    if args.generic_only:
+        needle_rule = {}
+    else:
+        # The full audit's whole design rests on running through `scripts/deploy --script audit`, whose
+        # own preflight already guarantees every required name is in this process's environment before it
+        # ever starts (see scripts/deploy's EX_CONFIG path). Nothing else enforces that here: run this
+        # script directly, with none of that in the environment, and it would otherwise proceed silently
+        # with an EMPTY denylist — scanning history and metadata for nothing and reporting "clean" while
+        # finding none of the operator's actual secrets. Refuse instead of silently degrading.
+        missing = [n for n in hs.required_names(root) if not os.environ.get(n)]
+        if missing:
+            print("audit: the full audit must run through `scripts/deploy --script audit`, which decrypts "
+                  "the store into this process's environment first (missing, by name): %s"
+                  % ", ".join(missing), file=sys.stderr)
+            return 2
+        needle_rule = build_needle_rules(build_denylist_terms(root, os.environ))
 
     try:
         allowlist = load_allowlist(allowlist_path)

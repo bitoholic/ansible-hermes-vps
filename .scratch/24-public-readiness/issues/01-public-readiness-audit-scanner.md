@@ -30,9 +30,38 @@ every scanned surface) + a new `tests/lint.sh` entry (`--generic-only --tree-onl
 
 **Known, deliberate, and left for ticket #02:** running the lint-wired generic check
 (`python3 scripts/public-readiness-audit.py --generic-only --tree-only`) against *this* repository's
-own tree right now reports ~20 real `tailnet-cgnat-address` findings (test fixtures using CGNAT-shaped
-addresses, and real addresses in runbooks/scratch tickets). None are allowlisted here: the fixture
-addresses are cosmetic noise ticket #02 can allowlist with a reason if it chooses to, but the runbook
-and scratch-ticket hits are exactly the identifying values ticket #02's scrub exists to remove, not to
-allowlist. Until #02 lands, `tests/lint.sh`'s new entry — and therefore the full lint run — fails on
-this branch; this is the expected, intentional handoff between the two tickets, not a regression.
+own tree right now reports 20 real `tailnet-cgnat-address` findings (real addresses in runbooks and
+scratch tickets). None are allowlisted here: these are exactly the identifying values ticket #02's scrub
+exists to remove, not to allowlist. Until #02 lands, `tests/lint.sh`'s new entry — and therefore the
+full lint run — fails on this branch; this is the expected, intentional handoff between the two
+tickets, not a regression.
+
+**Fixed after independent review (round 1, two parallel fresh-context agents — one Standards/Fowler-
+baseline, one Spec-conformance):**
+- Both reviewers independently caught the same regression: `tests/support/audit-fixture.sh`'s own
+  canary literals (a GitHub-token shape, a Tailscale-authkey shape, a CGNAT address) sat unobfuscated
+  in this tracked file and tripped the very rules they test, adding 3 self-inflicted hits to the
+  lint-run entry. Fixed by assembling them from pieces, the same idiom `check_secrets_store.py`'s own
+  `PRIVATE_KEY_RES` already uses — not by allowlisting a file that shouldn't need one.
+- Standards review found two real correctness bugs with concrete repros, both fixed:
+  (1) `scan_content` split content into lines *before* matching, so a denylist term containing a
+  literal newline (a multi-line secret pasted verbatim) could never be found in its literal form.
+  Fixed by matching against the whole buffer and recovering the line number from the match offset
+  afterward (`scripts/audit_rules.py`).
+  (2) Commit metadata was parsed by splitting `git log --format` output on a custom delimiter
+  (`RECORD_SEP`/`FIELD_SEP`); a commit message containing those exact bytes would silently truncate
+  that record. Fixed by reading each commit object's raw bytes directly via `git cat-file --batch`
+  (the same binary-safe batch mechanism already used for history blobs) and parsing the commit
+  object's own fixed header format instead of inventing a delimiter at all
+  (`scripts/public-readiness-audit.py`: `commit_shas_all`/`parse_commit_object`).
+- Spec review found a real intent/enforcement gap: nothing stopped the full audit from being invoked
+  directly (bypassing `scripts/deploy --script audit`) and silently proceeding with an EMPTY
+  denylist — scanning everything, finding none of the operator's actual secrets, and reporting
+  "clean". Fixed: the full-audit path now checks that every required secret name is present in the
+  environment first and refuses (exit 2, naming the missing names) rather than degrading silently.
+- Not changed, after consideration: the spec reviewer also noted the lint-run entry is a bare script
+  invocation rather than an inline `git grep` + custom FAIL message "in the style of" the placeholder
+  guard. Disposed of as a style preference rather than a defect — the bare-invocation style already
+  matches the *dominant* convention in `tests/lint.sh` (every `./tests/check-*.sh` entry is exactly
+  this), and the script's own "FINDING ..." + "N finding(s)" output already names the failure as
+  clearly as the inline guard does.

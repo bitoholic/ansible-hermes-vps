@@ -20,13 +20,16 @@ AUDIT_CANARY_AUTHOR_NAME='Canary Author'
 AUDIT_CANARY_AUTHOR_EMAIL='canary-author@example-canary.test'
 AUDIT_CANARY_COMMITTER_NAME='Canary Committer'
 AUDIT_CANARY_COMMITTER_EMAIL='canary-committer@example-canary.test'
-AUDIT_CANARY_GITHUB_TOKEN='<credential-shape-github-token-redacted>'   # exactly 36 chars after ghp_
-# Assembled from pieces (like scripts/check_secrets_store.py's own PRIVATE_KEY_RES) so this file's own
-# text does not itself trip the repo-wide "contains private key material" guard.
+# Every canary shaped like something a generic rule in scripts/audit_rules.py matches is assembled
+# from pieces (like scripts/check_secrets_store.py's own PRIVATE_KEY_RES) so this tracked file's own
+# text does not itself trip that rule — `tests/lint.sh` scans this repository's real tree with exactly
+# those rules (--generic-only --tree-only), and a literal match here would be indistinguishable from a
+# real finding.
+AUDIT_CANARY_GITHUB_TOKEN='ghp'"_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"   # exactly 36 chars after ghp_
 AUDIT_CANARY_AGE_KEY='AGE-SECRET-'"KEY-1QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ"
 AUDIT_CANARY_PRIVATE_KEY_HEADER='-----BEGIN PRIVATE '"KEY-----"
-AUDIT_CANARY_TAILSCALE_KEY='<credential-shape-tailscale-authkey-redacted>'
-AUDIT_CANARY_CGNAT='<tailnet-ip>'
+AUDIT_CANARY_TAILSCALE_KEY='tskey-auth'"-kCNTRL1-abcdefghijklmnopqrstuvwxyz0123"
+AUDIT_CANARY_CGNAT='100.'"101.2.3"
 
 make_audit_fixture() {   # make_audit_fixture DIR dirty|clean
   local dir="$1" mode="$2" repo="$1/repo"

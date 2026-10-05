@@ -64,15 +64,26 @@ def scan_content(content, needle_rule, generic_rules=GENERIC_RULES):
     """Every (rule_name, line_number) hit in one blob of bytes. `needle_rule` maps a literal byte
     needle to the rule name that owns it (built from the run-time denylist; empty when no key is
     available). Operates on raw bytes throughout: no text decoding, so a NUL byte or any other
-    non-UTF-8 byte (the git-crypt key header) never causes a silent skip or a decode error."""
+    non-UTF-8 byte (the git-crypt key header) never causes a silent skip or a decode error.
+
+    Matches against the WHOLE buffer, never a line at a time: a needle (or a credential-shaped match)
+    that itself contains a literal newline — a multi-line secret pasted verbatim — would otherwise be
+    split across two lines before matching ever runs and could never be found in its literal form.
+    The line number is recovered from the match's byte offset after the fact."""
     findings = []
-    for lineno, line in enumerate(content.split(b"\n"), 1):
-        for needle, rule in needle_rule.items():
-            if needle and needle in line:
-                findings.append((rule, lineno))
-        for rule_name, pattern in generic_rules:
-            for m in pattern.finditer(line):
-                if rule_name == "tailnet-cgnat-address" and m.group(0) == CGNAT_FUNCTIONAL_CIDR:
-                    continue
-                findings.append((rule_name, lineno))
+    for needle, rule in needle_rule.items():
+        if not needle:
+            continue
+        start = 0
+        while True:
+            pos = content.find(needle, start)
+            if pos == -1:
+                break
+            findings.append((rule, content.count(b"\n", 0, pos) + 1))
+            start = pos + 1   # overlapping occurrences of the same needle both count
+    for rule_name, pattern in generic_rules:
+        for m in pattern.finditer(content):
+            if rule_name == "tailnet-cgnat-address" and m.group(0) == CGNAT_FUNCTIONAL_CIDR:
+                continue
+            findings.append((rule_name, content.count(b"\n", 0, m.start()) + 1))
     return findings
